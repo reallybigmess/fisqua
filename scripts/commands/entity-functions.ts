@@ -1,3 +1,22 @@
+/**
+ * Scripts — entity_functions importer
+ *
+ * This module deals with the row builder for the production import of
+ * `entity_functions` from the Django catalogue dump.
+ *
+ * No column drift against the v0.4 schema; entity_functions inherits
+ * tenant scoping via the entity_id FK with ON DELETE CASCADE, so it
+ * does not carry tenant_id directly. The 12-col COLUMNS array matches
+ * `app/db/schema.ts:entityFunctions` exactly.
+ *
+ * Soft-skip path: rows whose entity_id does not resolve in the entity
+ * IdMap, or whose timestamps are missing, are recorded as errors and
+ * skipped. Junction-style cascade attribution is not added here —
+ * entity_functions is single-FK and there is no second FK that could
+ * cascade.
+ *
+ * @version v0.4.0
+ */
 import * as fs from "node:fs/promises";
 import * as crypto from "node:crypto";
 import type { IdMap, ImportResult } from "../lib/types";
@@ -87,3 +106,5 @@ export async function importEntityFunctions(
     sqlFiles,
   };
 }
+
+// Version: v0.4.0

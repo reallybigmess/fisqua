@@ -1,3 +1,31 @@
+/**
+ * Scripts — vocabulary terms importer
+ *
+ * This module deals with the one-time import of the controlled-vocabulary
+ * authority backing the `entities.primary_function` field. It reads
+ * `canonical_functions_v2.json` — the JSON dump that the enrichment
+ * pipeline produces after collapsing ~27,695 raw Django function strings
+ * down to ~16,185 distinct canonical terms — and emits the SQL that lands
+ * those terms into `vocabulary_terms`.
+ *
+ * Two artefacts come out of `importVocabularyTerms`:
+ *   1. A batched `INSERT INTO vocabulary_terms` SQL file under `.import/`
+ *      that the bulk import CLI applies via wrangler. The COLUMNS array
+ *      tracks `app/db/schema.ts:vocabularyTerms` so a column drift here
+ *      surfaces as a SQL apply failure rather than a silent NULL.
+ *   2. A lookup map JSON (`.import/vocabulary-term-lookup.json`) keyed by
+ *      the lowercased raw input string and valued by the generated term
+ *      UUID. The companion `vocabulary-migration.ts` script reads that
+ *      lookup to rewrite `entities.primary_function_id` on the previously
+ *      imported entity rows.
+ *
+ * Entries with a null canonical (the enrichment couldn't decide) skip the
+ * `vocabulary_terms` insert but still appear in the lookup map as `null`,
+ * so the downstream migration can route those entities to the explicit
+ * "unresolved" branch rather than silently dropping the value.
+ *
+ * @version v0.3.0
+ */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as crypto from "node:crypto";

@@ -2,9 +2,9 @@
 /**
  * Dual-Write Transition — R2 to B2
  *
- * A bridge script for the transition period between the legacy Django
- * backend (which writes its export to Backblaze B2) and Fisqua (which
- * writes its export to Cloudflare R2). While both systems co-exist,
+ * This script is a bridge for the transition period between the legacy
+ * Django backend (which writes its export to Backblaze B2) and Fisqua
+ * (which writes its export to Cloudflare R2). While both systems co-exist,
  * the public frontend continues to build from B2, so every Fisqua
  * export has to be mirrored to B2 until the frontend is cut over.
  *
@@ -18,7 +18,7 @@
  * Environment variables `B2_KEY_ID`, `B2_APP_KEY`, and `B2_ENDPOINT`
  * authenticate against the B2 S3 endpoint.
  *
- * Version: v0.3.1
+ * @version v0.3.1
  *
  * Original docblock kept below for CLI usage examples:
  *

@@ -1,45 +1,104 @@
+/**
+ * Scripts — places importer
+ *
+ * This module deals with the row builder for the production import of
+ * `places` from the Django catalogue dump. The COLUMNS array tracks
+ * the v0.4 union schema:
+ *
+ *   - tenant_id is mandatory at column position 2
+ *     (NEOGRANADINA_TENANT_ID)
+ *   - 7 columns are dropped (0% populated in audit; gone in
+ *     drizzle/0036): historical_gobernacion, historical_partido,
+ *     historical_region, country_code, admin_level_1, admin_level_2,
+ *     wikidata_id. Earlier colonial_*-renaming logic is also removed
+ *     since the historical_* targets no longer exist.
+ *   - fclass is added — 5-value GeoNames feature class (P/H/A/T/S),
+ *     CHECK-enforced. 100% populated in Django.
+ *   - legacy_ids JSON is built via buildLegacyIdsForPlace (one
+ *     `django-zasqua` entry from the Django pk plus one `ca-place`
+ *     entry per element of `ca_place_ids`); `ca_place_ids` is a JSON
+ *     array because multiple CA places can collapse to one Fisqua
+ *     place via merge.
+ *   - nl-xxxxxx codes are deterministic across rounds, with collision
+ *     fallback to `generateUniqueCodes` (~0.4% rate at production row
+ *     counts).
+ *   - parent_id and merged_into FK resolution kept verbatim.
+ *
+ * @version v0.4.0
+ */
 import * as fs from "node:fs/promises";
 import * as crypto from "node:crypto";
 import type { IdMap, ImportResult } from "../lib/types";
 import { escapeSql, generateInserts, writeSqlFiles } from "../lib/sql";
-import { generateUniqueCodes } from "../lib/codes";
-import { toEpochSeconds, stringifyJsonArray } from "../lib/transform";
+import { generateUniqueCodes, deterministicCode } from "../lib/codes";
+import { toEpochSeconds, stringifyJsonArray, buildLegacyIdsForPlace } from "../lib/transform";
+import { NEOGRANADINA_TENANT_ID } from "../../app/lib/tenant";
 
 const COLUMNS = [
-  "id", "place_code", "label", "display_name", "place_type", "name_variants",
+  "id", "tenant_id",
+  "place_code", "label", "display_name", "place_type", "name_variants",
   "parent_id", "latitude", "longitude", "coordinate_precision",
-  "historical_gobernacion", "historical_partido", "historical_region",
-  "country_code", "admin_level_1", "admin_level_2", "needs_geocoding",
-  "merged_into", "tgn_id", "hgis_id", "whg_id", "wikidata_id",
+  "needs_geocoding", "merged_into",
+  "tgn_id", "hgis_id", "whg_id",
+  "fclass", "legacy_ids",
   "created_at", "updated_at",
 ];
 
 /**
  * Import places from a JSON export file.
- * Two-pass approach: first generate all UUIDs, then resolve parent_id and merged_into FKs.
- * Renames colonial_* fields to historical_* for D1 schema.
+ * Two-pass approach: first generate all UUIDs, then resolve parent_id
+ * and merged_into FKs. nl-xxxxxx codes are deterministic per Django pk
+ * with collision fallback to fresh-uniqueness.
  */
 export async function importPlaces(
   inputPath: string
-): Promise<{ result: ImportResult; idMap: IdMap }> {
+): Promise<{ result: ImportResult; idMap: IdMap; skippedPks: Set<number> }> {
   const raw = await fs.readFile(inputPath, "utf8");
   const records = JSON.parse(raw) as Record<string, unknown>[];
 
   const idMap: IdMap = new Map();
   const errors: ImportResult["errors"] = [];
+  const skippedPks = new Set<number>();
 
-  // Pass 1: Generate UUIDs and codes for all records
-  const codes = generateUniqueCodes("nl", records.length);
+  // Pass 1: deterministic codes with collision fallback.
+  const codeSet = new Set<string>();
+  const codeFallbackNeeded: number[] = [];
+  const codes: string[] = new Array(records.length);
+  for (let i = 0; i < records.length; i++) {
+    const rec = records[i];
+    const c = deterministicCode("nl", rec.id as number);
+    if (codeSet.has(c)) {
+      codeFallbackNeeded.push(i);
+      codes[i] = "";
+    } else {
+      codeSet.add(c);
+      codes[i] = c;
+    }
+  }
+  if (codeFallbackNeeded.length > 0) {
+    let fallbackCodes = generateUniqueCodes("nl", codeFallbackNeeded.length * 2)
+      .filter((c) => !codeSet.has(c));
+    while (fallbackCodes.length < codeFallbackNeeded.length) {
+      const more = generateUniqueCodes("nl", codeFallbackNeeded.length * 2)
+        .filter((c) => !codeSet.has(c) && !fallbackCodes.includes(c));
+      fallbackCodes = fallbackCodes.concat(more);
+    }
+    for (const idx of codeFallbackNeeded) {
+      const c = fallbackCodes.shift()!;
+      codes[idx] = c;
+      codeSet.add(c);
+    }
+  }
 
+  // Pass 2: build idMap so parent/merged FK resolution can find every row.
   for (let i = 0; i < records.length; i++) {
     const oldId = records[i].id as number;
     const newId = crypto.randomUUID();
     idMap.set(oldId, newId);
   }
 
-  // Pass 2: Resolve FKs and build SQL rows
+  // Pass 3: Resolve FKs and build SQL rows
   const rows: string[][] = [];
-  const uuids = [...idMap.values()];
 
   for (let i = 0; i < records.length; i++) {
     const record = records[i];
@@ -56,6 +115,8 @@ export async function importPlaces(
         oldId,
         errors: ["Missing created_at or updated_at timestamp"],
       });
+      idMap.delete(oldId);
+      skippedPks.add(oldId);
       continue;
     }
 
@@ -87,8 +148,27 @@ export async function importPlaces(
       }
     }
 
+    // legacy_ids: validated through LegacyIdsSchema.parse inside the
+    // helper; a malformed seed throws and the row soft-skips here.
+    let legacyIdsJson: string;
+    try {
+      legacyIdsJson = buildLegacyIdsForPlace(record);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      errors.push({
+        table: "places",
+        row: i,
+        oldId,
+        errors: [`legacy_ids: ${message}`],
+      });
+      idMap.delete(oldId);
+      skippedPks.add(oldId);
+      continue;
+    }
+
     rows.push([
       escapeSql(newId),
+      escapeSql(NEOGRANADINA_TENANT_ID),
       escapeSql(codes[i]),
       escapeSql(record.label),
       escapeSql(record.display_name),
@@ -98,19 +178,15 @@ export async function importPlaces(
       escapeSql(record.latitude ?? null),
       escapeSql(record.longitude ?? null),
       escapeSql(record.coordinate_precision ?? null),
-      // Rename colonial_* -> historical_*
-      escapeSql(record.colonial_gobernacion ?? null),
-      escapeSql(record.colonial_partido ?? null),
-      escapeSql(record.colonial_region ?? null),
-      escapeSql(record.country_code ?? null),
-      escapeSql(record.admin_level_1 ?? null),
-      escapeSql(record.admin_level_2 ?? null),
+      // 7 dropped columns absent from row body (drizzle/0036):
+      // historical_*, country_code, admin_level_*, wikidata_id.
       escapeSql(record.needs_geocoding ?? true),
       escapeSql(mergedInto),
       escapeSql(record.tgn_id ?? null),
       escapeSql(record.hgis_id ?? null),
       escapeSql(record.whg_id ?? null),
-      escapeSql(record.wikidata_id ?? null),
+      escapeSql((record.fclass as string | null) ?? null),
+      escapeSql(legacyIdsJson),
       escapeSql(createdAt),
       escapeSql(updatedAt),
     ]);
@@ -129,5 +205,8 @@ export async function importPlaces(
       sqlFiles,
     },
     idMap,
+    skippedPks,
   };
 }
+
+// Version: v0.4.0

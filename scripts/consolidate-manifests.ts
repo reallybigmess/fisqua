@@ -2,8 +2,8 @@
 /**
  * IIIF Manifest Consolidation
  *
- * One-time script that copies every volume's IIIF manifest from the
- * legacy `zasqua-iiif-tiles` R2 bucket into the new dedicated
+ * This script is a one-time job that copies every volume's IIIF manifest
+ * from the legacy `zasqua-iiif-tiles` R2 bucket into the new dedicated
  * `zasqua-manifests` bucket with a flat key structure --
  * `{reference-code}.json` -- so the viewer can resolve a manifest URL
  * in a single lookup rather than traversing the tiles bucket's
@@ -17,7 +17,7 @@
  * Prerequisites: `wrangler` authenticated and the target bucket
  * already created in the Cloudflare dashboard.
  *
- * Version: v0.3.1
+ * @version v0.3.1
  */
 import { execSync } from "child_process";
 

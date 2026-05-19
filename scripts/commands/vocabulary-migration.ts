@@ -1,3 +1,28 @@
+/**
+ * Scripts — vocabulary migration
+ *
+ * This module deals with the second half of the controlled-vocabulary
+ * landing — rewriting every existing entity's free-text `primary_function`
+ * into a foreign key reference into `vocabulary_terms`. The companion
+ * `vocabulary-terms.ts` lands the vocabulary first and emits a lookup
+ * map; `migrateEntityFunctions` here consumes that lookup and an entity
+ * data export, then emits the SQL that switches `entities.primary_function`
+ * over to `entities.primary_function_id`.
+ *
+ * For every entity row with a non-null `primary_function`, the migration
+ * tries a case-insensitive lookup against the term map. A hit produces an
+ * UPDATE statement pointing the entity at the matched term UUID. A miss
+ * mints a new vocabulary term with `status = 'proposed'` so the value is
+ * preserved as a candidate for editor review rather than dropped — the
+ * proposed-term set is deduplicated within the run so two entities sharing
+ * an unmatched string produce one INSERT and two UPDATEs.
+ *
+ * Output is two batched SQL files under `.import/`: one with the
+ * proposed-term INSERTs and one with the entity UPDATEs, applied in that
+ * order so the FK targets exist before the entity rows reference them.
+ *
+ * @version v0.3.0
+ */
 import * as fs from "node:fs/promises";
 import * as crypto from "node:crypto";
 import type { ImportResult } from "../lib/types";
