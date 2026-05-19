@@ -1,3 +1,29 @@
+/**
+ * Entries Save API
+ *
+ * This API endpoint is the persistence path for the segmentation
+ * viewer's outline. Action-only — no loader, no component. The
+ * cataloguing workspace POSTs here both on debounced autosave and on
+ * an explicit "accept corrections" click, multiplexed through the
+ * `_action` form field.
+ *
+ * The normal save flow looks up the target volume, runs the
+ * project-role guard (`requireProjectRole`) and the volume-access
+ * guard (`requireVolumeAccess`) so neither a non-member of the
+ * project nor a member without an assignment to this volume can mutate
+ * the entries, then delegates to `saveEntries` which writes the
+ * outline atomically and bumps the volume's workflow timestamps.
+ * `accept-corrections` clears the `reviewer_comment` field on every
+ * sent-back entry in the volume, signalling that the cataloguer has
+ * acknowledged the reviewer's notes and is taking another pass.
+ *
+ * Activity is logged through `logActivity` so the dashboards and the
+ * per-user activity timeline reflect the change without a separate
+ * write path.
+ *
+ * @version v0.3.0
+ */
+
 import { userContext } from "../context";
 import type { Route } from "./+types/api.entries.save";
 

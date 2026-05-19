@@ -1,8 +1,24 @@
 /**
- * Description save API endpoint.
- * Action-only route -- no loader, no component.
+ * Description Save API
  *
- * Handles autosave, submit-for-review, approve, and send-back actions.
+ * This API endpoint is the workflow spine for the entry description
+ * editor. Action-only — no loader, no component. The editor POSTs
+ * here with a `_action` discriminator that selects between four
+ * workflow operations: autosave (forgiving snapshot), submit for
+ * review (cataloguer hands off to reviewer), approve (reviewer
+ * promotes to approved), and send back (reviewer returns to the
+ * cataloguer with feedback).
+ *
+ * Each operation routes through a dedicated helper in
+ * `description.server` so the workflow state machine — and the audit
+ * row that accompanies every transition — stays in one place rather
+ * than smeared across the route. The single shared guard is
+ * `requireDescriptionAccess`, which checks both project-role and the
+ * caller's specific role-vs-status fit (a reviewer cannot autosave
+ * over a cataloguer's draft, a cataloguer cannot approve their own
+ * entry, etc.).
+ *
+ * @version v0.3.0
  */
 
 import { userContext } from "../context";

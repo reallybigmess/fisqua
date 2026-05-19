@@ -1,66 +1,64 @@
 /**
- * Description Form
+ * Description Form (admin)
  *
- * The ISAD(G) form component used by the admin description editor.
- * Renders every ISAD section as a collapsible panel so cataloguers
- * can focus on whichever block they are filling in at the moment,
- * with field-level validation messages surfaced inline. Lifting state
- * to the parent route keeps autosave and conflict detection in one
- * place; this component is a pure controlled form.
+ * This form is the config-driven admin renderer for archival descriptions.
+ * One renderer; sections + fields come from the active standard's config.
+ * The parent route loader hands `standard` (typed `Standard`) down
+ * via prop; this component reads `getStandardConfig(standard).sections`
+ * and renders each section's fields by switching on `field.primitive`.
+ * There is no `if (standard === 'isadg')` branching — the contract
+ * is "the config drives everything that varies across standards"; the
+ * literal triple `'isadg' / 'dacs' / 'rad'` does NOT appear in this
+ * file (a grep test enforces this invariant).
  *
- * @version v0.3.0
+ * Namespace contract: the alias is `descriptions_admin` (see
+ * `app/locales/en.ts:24`), NOT `descriptions`.
+ * `useTranslation("descriptions_admin")` is the call-site contract
+ * that `tStd` rides on top of.
+ *
+ * Field labels resolve via `tStd(t, "fields.<col>", standard)`;
+ * section titles via `tStd(t, "sections.<id>", standard)`. Per-
+ * standard label divergences (e.g. RAD's "Title proper", DACS's
+ * "Biographical/Historical Note") live as sibling literal-key
+ * overrides in the locale files (`app/locales/{en,es}/descriptions.ts`)
+ * and are picked up automatically.
+ *
+ * @version v0.4.0
  */
 
 import { useTranslation } from "react-i18next";
 import { CollapsibleSection } from "~/components/admin/collapsible-section";
-import { DESCRIPTION_LEVELS, RESOURCE_TYPES } from "~/lib/validation/enums";
+import { RESOURCE_TYPES } from "~/lib/validation/enums";
+import { getStandardConfig } from "~/lib/standards/registry";
+import { tStd } from "~/lib/i18n/standard-aware";
+import type {
+  DescriptionLevel,
+  FieldConfig,
+  Standard,
+} from "~/lib/standards/types";
 import { EntityLinker } from "./entity-linker";
 import { PlaceLinker } from "./place-linker";
 import type { DescriptionEntityLink } from "./entity-linker";
 import type { DescriptionPlaceLink } from "./place-linker";
 
-interface DescriptionData {
+/**
+ * The form is config-driven, so it tolerates any column name from any
+ * standard config. We type the surface as a `Record<string, unknown>`
+ * keyed by column name, plus the structural fields the helper logic
+ * relies on (`id`, `descriptionLevel`, `repositoryId`, `childCount`).
+ * Every column referenced by `app/lib/standards/{isadg,dacs,rad}.ts`
+ * MUST exist on `descriptions` in `app/db/schema.ts` (FieldConfig
+ * contract); the loader returns a row from that table directly.
+ */
+type DescriptionData = {
   id: string;
-  referenceCode: string;
-  localIdentifier: string;
-  title: string;
-  translatedTitle: string | null;
-  uniformTitle: string | null;
   descriptionLevel: string;
-  resourceType: string | null;
-  genre: string | null;
-  dateExpression: string | null;
-  dateStart: string | null;
-  dateEnd: string | null;
-  dateCertainty: string | null;
-  extent: string | null;
-  dimensions: string | null;
-  medium: string | null;
-  provenance: string | null;
-  scopeContent: string | null;
-  ocrText: string | null;
-  arrangement: string | null;
-  accessConditions: string | null;
-  reproductionConditions: string | null;
-  language: string | null;
-  locationOfOriginals: string | null;
-  locationOfCopies: string | null;
-  relatedMaterials: string | null;
-  findingAids: string | null;
-  notes: string | null;
-  internalNotes: string | null;
-  imprint: string | null;
-  editionStatement: string | null;
-  seriesStatement: string | null;
-  volumeNumber: string | null;
-  issueNumber: string | null;
-  pages: string | null;
-  sectionTitle: string | null;
-  iiifManifestUrl: string | null;
-  hasDigital: boolean | null;
   repositoryId: string;
   childCount: number;
-}
+  // index signature lets the renderer dereference any column the
+  // active standard's config names without per-column typing here.
+  [column: string]: unknown;
+};
 
 interface Repository {
   id: string;
@@ -75,6 +73,12 @@ interface DescriptionFormProps {
   errors?: Record<string, string[]>;
   entityLinks?: DescriptionEntityLink[];
   placeLinks?: DescriptionPlaceLink[];
+  /**
+   * Active descriptive standard, sourced from
+   * `tenant.descriptiveStandard` in the parent route loader. Drives
+   * which `StandardConfig` the renderer iterates.
+   */
+  standard: Standard;
 }
 
 export function DescriptionForm({
@@ -85,420 +89,56 @@ export function DescriptionForm({
   errors,
   entityLinks = [],
   placeLinks = [],
+  standard,
 }: DescriptionFormProps) {
   const { t } = useTranslation("descriptions_admin");
+  const config = getStandardConfig(standard);
+  const level = description.descriptionLevel as DescriptionLevel;
+  const requiredCols = config.requiredFieldsForLevel(level);
 
   return (
     <div className="rounded-lg border border-stone-200 bg-white p-6">
-      {/* 1. Identity (ISAD 3.1) */}
-      <CollapsibleSection title={t("section_identity")}>
-        <div className="space-y-4">
-          <ReadOnlyOrInput
-            name="referenceCode"
-            label={t("field_referenceCode")}
-            value={description.referenceCode}
-            isEditing={false}
-            required
-          />
-          <ReadOnlyOrInput
-            name="localIdentifier"
-            label={t("field_localIdentifier")}
-            value={description.localIdentifier}
-            isEditing={isEditing}
-            required
-            error={errors?.localIdentifier?.[0]}
-          />
-          <ReadOnlyOrInput
-            name="title"
-            label={t("field_title")}
-            value={description.title}
-            isEditing={isEditing}
-            required
-            error={errors?.title?.[0]}
-          />
-          <ReadOnlyOrInput
-            name="translatedTitle"
-            label={t("field_translatedTitle")}
-            value={description.translatedTitle}
-            isEditing={isEditing}
-          />
-          <ReadOnlyOrInput
-            name="uniformTitle"
-            label={t("field_uniformTitle")}
-            value={description.uniformTitle}
-            isEditing={isEditing}
-          />
-
-          {/* Description Level */}
-          {isEditing ? (
-            <div>
-              <label
-                htmlFor="descriptionLevel"
-                className="mb-1 block text-xs font-medium text-indigo"
-              >
-                {t("field_descriptionLevel")}
-                <span className="text-madder"> *</span>
-              </label>
-              <select
-                id="descriptionLevel"
-                name="descriptionLevel"
-                defaultValue={description.descriptionLevel}
-                aria-required="true"
-                className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
-              >
-                {allowedLevels.map((level) => (
-                  <option key={level} value={level}>
-                    {t(`level_${level}`)}
-                  </option>
-                ))}
-              </select>
-              {errors?.descriptionLevel?.[0] && (
-                <p className="mt-1 text-xs text-madder">
-                  {t("error_invalid_level")}
-                </p>
-              )}
-            </div>
-          ) : (
-            <ReadOnlyField
-              label={t("field_descriptionLevel")}
-              value={t(`level_${description.descriptionLevel}`)}
-            />
-          )}
-
-          {/* Resource Type */}
-          {isEditing ? (
-            <div>
-              <label
-                htmlFor="resourceType"
-                className="mb-1 block text-xs font-medium text-indigo"
-              >
-                {t("field_resourceType")}
-              </label>
-              <select
-                id="resourceType"
-                name="resourceType"
-                defaultValue={description.resourceType ?? ""}
-                className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
-              >
-                <option value="">{""}</option>
-                {RESOURCE_TYPES.map((rt) => (
-                  <option key={rt} value={rt}>
-                    {rt}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <ReadOnlyField
-              label={t("field_resourceType")}
-              value={description.resourceType}
-            />
-          )}
-
-          <ReadOnlyOrInput
-            name="genre"
-            label={t("field_genre")}
-            value={description.genre === "[]" ? null : description.genre}
-            isEditing={isEditing}
-          />
-          <ReadOnlyOrInput
-            name="dateExpression"
-            label={t("field_dateExpression")}
-            value={description.dateExpression}
-            isEditing={isEditing}
-          />
-          <div className="grid grid-cols-2 gap-4">
-            <ReadOnlyOrInput
-              name="dateStart"
-              label={t("field_dateStart")}
-              value={description.dateStart}
-              isEditing={isEditing}
-            />
-            <ReadOnlyOrInput
-              name="dateEnd"
-              label={t("field_dateEnd")}
-              value={description.dateEnd}
-              isEditing={isEditing}
-            />
-          </div>
-          <ReadOnlyOrInput
-            name="dateCertainty"
-            label={t("field_dateCertainty")}
-            value={description.dateCertainty}
-            isEditing={isEditing}
-          />
-          <ReadOnlyOrInput
-            name="extent"
-            label={t("field_extent")}
-            value={description.extent}
-            isEditing={isEditing}
-          />
-          <ReadOnlyOrInput
-            name="dimensions"
-            label={t("field_dimensions")}
-            value={description.dimensions}
-            isEditing={isEditing}
-          />
-          <ReadOnlyOrInput
-            name="medium"
-            label={t("field_medium")}
-            value={description.medium}
-            isEditing={isEditing}
-          />
-
-          {/* Repository */}
-          {isEditing ? (
-            <div>
-              <label
-                htmlFor="repositoryId"
-                className="mb-1 block text-xs font-medium text-indigo"
-              >
-                {t("field_repositoryId")}
-                <span className="text-madder"> *</span>
-              </label>
-              <select
-                id="repositoryId"
-                name="repositoryId"
-                defaultValue={description.repositoryId}
-                aria-required="true"
-                className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
-              >
-                {repositories.map((repo) => (
-                  <option key={repo.id} value={repo.id}>
-                    {repo.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <ReadOnlyField
-              label={t("field_repositoryId")}
-              value={
-                repositories.find((r) => r.id === description.repositoryId)
-                  ?.name ?? description.repositoryId
+      {config.sections.map((section) => (
+        <CollapsibleSection
+          key={section.id}
+          title={tStd(t, `sections.${section.id}`, standard)}
+        >
+          <div className="space-y-4">
+            {section.fields.map((field) => {
+              // CR-04: validator-emitted errors arrive as stable
+              // i18n tokens (`field_required`, `invalid_level`).
+              // Resolve to localised strings here so leaf renderers
+              // never display raw tokens to the user. Anything that
+              // is not a known token is passed through (covers
+              // future Zod base-schema messages until they migrate
+              // to the same convention).
+              const rawError = errors?.[field.column]?.[0];
+              let resolvedError: string | undefined = rawError;
+              if (rawError === "field_required") {
+                resolvedError = t("error_required");
+              } else if (rawError === "invalid_level") {
+                resolvedError = t("error_invalid_level");
               }
-            />
-          )}
-        </div>
-      </CollapsibleSection>
-
-      {/* 2. Context (ISAD 3.2) */}
-      <CollapsibleSection title={t("section_context")}>
-        <div className="space-y-4">
-          <ReadOnlyOrTextarea
-            name="provenance"
-            label={t("field_provenance")}
-            value={description.provenance}
-            isEditing={isEditing}
-            rows={4}
-          />
-        </div>
-      </CollapsibleSection>
-
-      {/* 3. Content (ISAD 3.3) */}
-      <CollapsibleSection title={t("section_content")}>
-        <div className="space-y-4">
-          <ReadOnlyOrTextarea
-            name="scopeContent"
-            label={t("field_scopeContent")}
-            value={description.scopeContent}
-            isEditing={isEditing}
-            rows={6}
-          />
-          <ReadOnlyOrTextarea
-            name="arrangement"
-            label={t("field_arrangement")}
-            value={description.arrangement}
-            isEditing={isEditing}
-            rows={4}
-          />
-          <ReadOnlyOrTextarea
-            name="ocrText"
-            label={t("field_ocrText")}
-            value={description.ocrText}
-            isEditing={isEditing}
-            rows={4}
-            className="font-mono"
-          />
-        </div>
-      </CollapsibleSection>
-
-      {/* 4. Access (ISAD 3.4) */}
-      <CollapsibleSection title={t("section_access")}>
-        <div className="space-y-4">
-          <ReadOnlyOrTextarea
-            name="accessConditions"
-            label={t("field_accessConditions")}
-            value={description.accessConditions}
-            isEditing={isEditing}
-            rows={3}
-          />
-          <ReadOnlyOrTextarea
-            name="reproductionConditions"
-            label={t("field_reproductionConditions")}
-            value={description.reproductionConditions}
-            isEditing={isEditing}
-            rows={3}
-          />
-          <ReadOnlyOrInput
-            name="language"
-            label={t("field_language")}
-            value={description.language}
-            isEditing={isEditing}
-          />
-        </div>
-      </CollapsibleSection>
-
-      {/* 5. Allied Materials (ISAD 3.5) */}
-      <CollapsibleSection title={t("section_allied")}>
-        <div className="space-y-4">
-          <ReadOnlyOrInput
-            name="locationOfOriginals"
-            label={t("field_locationOfOriginals")}
-            value={description.locationOfOriginals}
-            isEditing={isEditing}
-          />
-          <ReadOnlyOrInput
-            name="locationOfCopies"
-            label={t("field_locationOfCopies")}
-            value={description.locationOfCopies}
-            isEditing={isEditing}
-          />
-          <ReadOnlyOrTextarea
-            name="relatedMaterials"
-            label={t("field_relatedMaterials")}
-            value={description.relatedMaterials}
-            isEditing={isEditing}
-            rows={3}
-          />
-          <ReadOnlyOrInput
-            name="findingAids"
-            label={t("field_findingAids")}
-            value={description.findingAids}
-            isEditing={isEditing}
-          />
-        </div>
-      </CollapsibleSection>
-
-      {/* 6. Notes (ISAD 3.6) */}
-      <CollapsibleSection title={t("section_notes")}>
-        <div className="space-y-4">
-          <ReadOnlyOrTextarea
-            name="notes"
-            label={t("field_notes")}
-            value={description.notes}
-            isEditing={isEditing}
-            rows={4}
-          />
-          <ReadOnlyOrTextarea
-            name="internalNotes"
-            label={t("field_internalNotes")}
-            value={description.internalNotes}
-            isEditing={isEditing}
-            rows={4}
-            className="bg-stone-50"
-          />
-        </div>
-      </CollapsibleSection>
-
-      {/* 7. Bibliographic */}
-      <CollapsibleSection title={t("section_bibliographic")}>
-        <div className="space-y-4">
-          <ReadOnlyOrInput
-            name="imprint"
-            label={t("field_imprint")}
-            value={description.imprint}
-            isEditing={isEditing}
-          />
-          <ReadOnlyOrInput
-            name="editionStatement"
-            label={t("field_editionStatement")}
-            value={description.editionStatement}
-            isEditing={isEditing}
-          />
-          <ReadOnlyOrInput
-            name="seriesStatement"
-            label={t("field_seriesStatement")}
-            value={description.seriesStatement}
-            isEditing={isEditing}
-          />
-          <div className="grid grid-cols-3 gap-4">
-            <ReadOnlyOrInput
-              name="volumeNumber"
-              label={t("field_volumeNumber")}
-              value={description.volumeNumber}
-              isEditing={isEditing}
-            />
-            <ReadOnlyOrInput
-              name="issueNumber"
-              label={t("field_issueNumber")}
-              value={description.issueNumber}
-              isEditing={isEditing}
-            />
-            <ReadOnlyOrInput
-              name="pages"
-              label={t("field_pages")}
-              value={description.pages}
-              isEditing={isEditing}
-            />
+              return (
+                <FieldRenderer
+                  key={field.column}
+                  field={field}
+                  description={description}
+                  label={tStd(t, `fields.${field.column}`, standard)}
+                  isEditing={isEditing}
+                  required={requiredCols.includes(field.column)}
+                  error={resolvedError}
+                  allowedLevels={allowedLevels}
+                  repositories={repositories}
+                  entityLinks={entityLinks}
+                  placeLinks={placeLinks}
+                  t={t}
+                />
+              );
+            })}
           </div>
-          <ReadOnlyOrInput
-            name="sectionTitle"
-            label={t("field_sectionTitle")}
-            value={description.sectionTitle}
-            isEditing={isEditing}
-          />
-        </div>
-      </CollapsibleSection>
-
-      {/* 8. Digital */}
-      <CollapsibleSection title={t("section_digital")}>
-        <div className="space-y-4">
-          <ReadOnlyOrInput
-            name="iiifManifestUrl"
-            label={t("field_iiifManifestUrl")}
-            value={description.iiifManifestUrl}
-            isEditing={isEditing}
-          />
-          {isEditing ? (
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="hasDigital"
-                name="hasDigital"
-                defaultChecked={description.hasDigital ?? false}
-                className="h-4 w-4 rounded border-stone-200 text-indigo focus:ring-indigo"
-              />
-              <label htmlFor="hasDigital" className="text-sm font-medium text-indigo">
-                {t("field_hasDigital")}
-              </label>
-            </div>
-          ) : (
-            <ReadOnlyField
-              label={t("field_hasDigital")}
-              value={description.hasDigital ? "Yes" : "No"}
-            />
-          )}
-        </div>
-      </CollapsibleSection>
-
-      {/* 9. Entities */}
-      <CollapsibleSection title={t("section_entities")}>
-        <EntityLinker
-          descriptionId={description.id}
-          links={entityLinks}
-          isEditing={isEditing}
-        />
-      </CollapsibleSection>
-
-      {/* 10. Places */}
-      <CollapsibleSection title={t("section_places")}>
-        <PlaceLinker
-          descriptionId={description.id}
-          links={placeLinks}
-          isEditing={isEditing}
-        />
-      </CollapsibleSection>
+        </CollapsibleSection>
+      ))}
 
       {/* Save actions (edit mode only) */}
       {isEditing && (
@@ -533,6 +173,271 @@ export function DescriptionForm({
 }
 
 // ---------------------------------------------------------------------------
+// FieldRenderer — switch on field.primitive
+// ---------------------------------------------------------------------------
+
+type TFn = ReturnType<typeof useTranslation>["t"];
+
+interface FieldRendererProps {
+  field: FieldConfig;
+  description: DescriptionData;
+  label: string;
+  isEditing: boolean;
+  required: boolean;
+  error?: string;
+  allowedLevels: string[];
+  repositories: Repository[];
+  entityLinks: DescriptionEntityLink[];
+  placeLinks: DescriptionPlaceLink[];
+  t: TFn;
+}
+
+function FieldRenderer({
+  field,
+  description,
+  label,
+  isEditing,
+  required,
+  error,
+  allowedLevels,
+  repositories,
+  entityLinks,
+  placeLinks,
+  t,
+}: FieldRendererProps) {
+  const value = description[field.column];
+
+  switch (field.primitive) {
+    case "text":
+    case "date": {
+      // referenceCode is system-managed: read-only even when isEditing.
+      const isReferenceCode = field.column === "referenceCode";
+      return (
+        <ReadOnlyOrInput
+          name={field.column}
+          label={label}
+          value={typeof value === "string" ? value : null}
+          isEditing={isEditing && !isReferenceCode}
+          required={required}
+          error={error}
+        />
+      );
+    }
+
+    case "textarea": {
+      return (
+        <ReadOnlyOrTextarea
+          name={field.column}
+          label={label}
+          value={typeof value === "string" ? value : null}
+          isEditing={isEditing}
+          rows={field.hints?.rows ?? 3}
+          className={field.column === "ocrText" ? "font-mono" : ""}
+        />
+      );
+    }
+
+    case "date-range": {
+      // Render dateExpression as a single-line input plus a 2-col grid
+      // for dateStart / dateEnd is handled by the standalone date
+      // primitives that follow it in the config.
+      return (
+        <ReadOnlyOrInput
+          name={field.column}
+          label={label}
+          value={typeof value === "string" ? value : null}
+          isEditing={isEditing}
+          required={required}
+          error={error}
+        />
+      );
+    }
+
+    case "level-select": {
+      if (!isEditing) {
+        return (
+          <ReadOnlyField
+            label={label}
+            value={
+              typeof value === "string" ? t(`level_${value}`) : null
+            }
+          />
+        );
+      }
+      const errorId = error ? `${field.column}-error` : undefined;
+      return (
+        <div>
+          <label
+            htmlFor={field.column}
+            className="mb-1 block text-xs font-medium text-indigo"
+          >
+            {label}
+            {required && <span className="text-madder"> *</span>}
+          </label>
+          <select
+            id={field.column}
+            name={field.column}
+            defaultValue={typeof value === "string" ? value : ""}
+            aria-required={required ? "true" : undefined}
+            aria-describedby={errorId}
+            className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
+          >
+            {allowedLevels.map((lvl) => (
+              <option key={lvl} value={lvl}>
+                {t(`level_${lvl}`)}
+              </option>
+            ))}
+          </select>
+          {error && (
+            <p id={errorId} className="mt-1 text-xs text-madder">
+              {error}
+            </p>
+          )}
+        </div>
+      );
+    }
+
+    case "resource-type-select": {
+      if (!isEditing) {
+        return (
+          <ReadOnlyField
+            label={label}
+            value={typeof value === "string" ? value : null}
+          />
+        );
+      }
+      return (
+        <div>
+          <label
+            htmlFor={field.column}
+            className="mb-1 block text-xs font-medium text-indigo"
+          >
+            {label}
+            {required && <span className="text-madder"> *</span>}
+          </label>
+          <select
+            id={field.column}
+            name={field.column}
+            defaultValue={typeof value === "string" ? value : ""}
+            className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
+          >
+            <option value="">{""}</option>
+            {RESOURCE_TYPES.map((rt) => (
+              <option key={rt} value={rt}>
+                {rt}
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+    }
+
+    case "repository-select": {
+      const repoValue = typeof value === "string" ? value : "";
+      if (!isEditing) {
+        return (
+          <ReadOnlyField
+            label={label}
+            value={
+              repositories.find((r) => r.id === repoValue)?.name ?? repoValue
+            }
+          />
+        );
+      }
+      return (
+        <div>
+          <label
+            htmlFor={field.column}
+            className="mb-1 block text-xs font-medium text-indigo"
+          >
+            {label}
+            {required && <span className="text-madder"> *</span>}
+          </label>
+          <select
+            id={field.column}
+            name={field.column}
+            defaultValue={repoValue}
+            aria-required={required ? "true" : undefined}
+            className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
+          >
+            {repositories.map((repo) => (
+              <option key={repo.id} value={repo.id}>
+                {repo.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+    }
+
+    case "checkbox": {
+      const checked = Boolean(value);
+      if (!isEditing) {
+        return <ReadOnlyField label={label} value={checked ? "Yes" : "No"} />;
+      }
+      return (
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id={field.column}
+            name={field.column}
+            defaultChecked={checked}
+            className="h-4 w-4 rounded border-stone-200 text-indigo focus:ring-indigo"
+          />
+          <label
+            htmlFor={field.column}
+            className="text-sm font-medium text-indigo"
+          >
+            {label}
+          </label>
+        </div>
+      );
+    }
+
+    case "iiif-url": {
+      return (
+        <ReadOnlyOrInput
+          name={field.column}
+          label={label}
+          value={typeof value === "string" ? value : null}
+          isEditing={isEditing}
+          required={required}
+          error={error}
+        />
+      );
+    }
+
+    case "entity-linker": {
+      return (
+        <EntityLinker
+          descriptionId={description.id}
+          links={entityLinks}
+          isEditing={isEditing}
+        />
+      );
+    }
+
+    case "place-linker": {
+      return (
+        <PlaceLinker
+          descriptionId={description.id}
+          links={placeLinks}
+          isEditing={isEditing}
+        />
+      );
+    }
+
+    default: {
+      // Exhaustive check: TypeScript surfaces a missing primitive
+      // case at compile time. The `Primitive` union is the closed set;
+      // new primitives land here in lockstep.
+      const _exhaustive: never = field.primitive;
+      return null;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Helper components
 // ---------------------------------------------------------------------------
 
@@ -546,7 +451,7 @@ function ReadOnlyField({
   return (
     <div>
       <span className="mb-1 block text-xs text-stone-500">{label}</span>
-      <p className="text-sm text-stone-700">{value || "\u2014"}</p>
+      <p className="text-sm text-stone-700">{value || "—"}</p>
     </div>
   );
 }
@@ -629,3 +534,5 @@ function ReadOnlyOrTextarea({
     </div>
   );
 }
+
+/* @version v0.4.0 */

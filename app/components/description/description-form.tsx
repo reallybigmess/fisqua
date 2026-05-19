@@ -1,7 +1,69 @@
-import { useState, useCallback } from "react";
+/**
+ * Description Form (cataloguing / segmentation)
+ *
+ * This form is the per-entry cataloguing surface rendered inside the
+ * segmentation viewer for tenants with `crowdsourcing_enabled`. Each
+ * entry is one segmented documentary unit a cataloguer carved out of a
+ * volume; this form lets the cataloguer fill in the basic descriptive
+ * fields the crowdsourcing workflow captures (title, dates, extent, scope,
+ * language, notes). The form is standard-aware:
+ * `tenant.descriptiveStandard` flows from the route loader as the
+ * `standard` prop, and required-field marks plus label resolution route
+ * through `getStandardConfig(standard)` and `tStd(t, key, standard)`.
+ *
+ * Section IDs and field keys are the English column-name keys
+ * (`identity`, `physical_description`, `content`, `conditions_access`,
+ * `notes`, `entities_places`; field keys match column names on
+ * `entries` — `title`, `translatedTitle`, `resourceType`, `extent`,
+ * `scopeContent`, `language`, `descriptionNotes`, `internalNotes`).
+ * The Spanish keys this file used through v0.3 (`identificacion`,
+ * `titulo`, etc.) are gone; the locale and the entry route consumer
+ * (`app/routes/_auth.description.$projectId.$entryId.tsx`) were
+ * updated together.
+ *
+ * Domain note: the cataloguing form operates on `entries` (segmented
+ * documentary units), NOT on `descriptions`. Most columns the
+ * standard configs declare (`referenceCode`, `repositoryId`,
+ * `creatorDisplay`, `accessConditions`, etc.) live on `descriptions`
+ * and are populated post-promotion. The cataloguing form
+ * intentionally renders a narrow crowdsourcing-friendly subset; it
+ * does NOT iterate `config.sections` directly because doing so would
+ * render mostly-empty admin-style sections (the entry shape can't
+ * populate them). The form IS still config-aware: required-field
+ * marks come from `config.requiredFieldsForLevel(level)`, and labels
+ * resolve via `tStd` so per-standard label overrides apply.
+ *
+ * Namespace contract: the cataloguing namespace alias is `description`
+ * (singular), not `descriptions_admin`.
+ * `useTranslation("description")` is the call-site contract.
+ *
+ * Cataloguing form + impersonation: when an operator impersonates a
+ * tenant via the login-as flow, the impersonated tenant's
+ * `descriptive_standard` applies. `tenantContext` resolves to the
+ * impersonated tenant; this form reads `descriptiveStandard` from the
+ * loader transparently — impersonation requires no change here.
+ *
+ * Standard literals: NO `'isadg'` / `'dacs'` / `'rad'` literal appears
+ * in this file (a grep test enforces this invariant). Resolution
+ * flows through the typed `Standard` prop into `getStandardConfig`
+ * and `tStd`.
+ *
+ * @version v0.4.0
+ */
+
+import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { DescriptionSection } from "./description-section";
-import type { DescriptionEntry, SectionCompletion } from "../../lib/description-types";
+import { getStandardConfig } from "../../lib/standards/registry";
+import { tStd } from "../../lib/i18n/standard-aware";
+import type {
+  DescriptionLevel,
+  Standard,
+} from "../../lib/standards/types";
+import type {
+  DescriptionEntry,
+  SectionCompletion,
+} from "../../lib/description-types";
 
 type DescriptionFormProps = {
   entry: DescriptionEntry;
@@ -11,14 +73,29 @@ type DescriptionFormProps = {
   isPaused?: boolean;
   onSubmitForReview?: () => void;
   validationErrors?: Record<string, string>;
+  /**
+   * Active descriptive standard — sourced from
+   * `tenant.descriptiveStandard` in the parent route loader. Drives
+   * required-field marks (via `getStandardConfig`) and per-standard
+   * label overrides (via `tStd`).
+   */
+  standard: Standard;
 };
 
+/**
+ * Cataloguing-form section IDs (English column-name keys). These are
+ * CATALOGUING-domain section IDs — they happen to overlap by name
+ * with some admin section IDs (`identity`, `content`, `notes`) and
+ * with some DACS section IDs (`physical_description`,
+ * `conditions_access`) but they live in the `description` namespace
+ * and are independent of the standard configs' section list.
+ */
 const SECTION_IDS = [
-  "identificacion",
-  "descripcion_fisica",
-  "contenido",
-  "notas",
-  "personas_lugares",
+  "identity",
+  "physical_description",
+  "content",
+  "notes",
+  "entities_places",
 ] as const;
 
 type SectionId = (typeof SECTION_IDS)[number];
@@ -35,6 +112,7 @@ function FieldLabel({
   return (
     <label className="mb-1 block font-sans text-[0.875rem] font-medium text-indigo">
       {label}
+      {required && <span className="ml-1 text-madder">*</span>}
       {optional && (
         <span className="ml-1.5 text-[0.75rem] font-normal text-stone-400">
           Opcional
@@ -59,10 +137,48 @@ export function DescriptionForm({
   isPaused = false,
   onSubmitForReview,
   validationErrors = {},
+  standard,
 }: DescriptionFormProps) {
   const { t } = useTranslation("description");
+
+  // Config-aware required-field marks. The cataloguing form's section
+  // structure is hardcoded (domain difference from admin form — see
+  // file header) but required marks per field route through the active
+  // standard's config so a DACS or RAD tenant sees the correct
+  // mandatoriness for the level the entry was assigned.
+  const config = getStandardConfig(standard);
+  const level = (entry.descriptionLevel ?? "item") as DescriptionLevel;
+  const requiredCols = useMemo(
+    () => new Set(config.requiredFieldsForLevel(level)),
+    [config, level],
+  );
+  const isRequired = useCallback(
+    (col: string) => requiredCols.has(col),
+    [requiredCols],
+  );
+
+  // CR-04: validator-emitted errors arrive as stable i18n tokens
+  // (`field_required`, etc.). Resolve to localised strings at the
+  // component boundary so the leaf `<FieldError>` renders never
+  // surface raw tokens in the user UI. Anything not a known token
+  // is passed through (covers future Zod base-schema messages until
+  // they migrate to the same convention).
+  const resolvedErrors = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const [col, raw] of Object.entries(validationErrors)) {
+      if (raw === "field_required") {
+        out[col] = t("error_required");
+      } else if (raw === "invalid_level") {
+        out[col] = t("error_invalid_level");
+      } else if (raw != null) {
+        out[col] = raw;
+      }
+    }
+    return out;
+  }, [validationErrors, t]);
+
   const [expandedSections, setExpandedSections] = useState<Set<SectionId>>(
-    () => new Set(["identificacion"])
+    () => new Set(["identity"]),
   );
 
   const toggleSection = useCallback((sectionId: SectionId) => {
@@ -82,13 +198,13 @@ export function DescriptionForm({
       (
         e: React.ChangeEvent<
           HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-        >
+        >,
       ) => {
         if (!isReadOnly) {
           onFieldChange(fieldName, e.target.value);
         }
       },
-    [onFieldChange, isReadOnly]
+    [onFieldChange, isReadOnly],
   );
 
   const inputClass =
@@ -115,17 +231,20 @@ export function DescriptionForm({
         </div>
       )}
 
-      {/* 1. Identificacion */}
+      {/* 1. Identity */}
       <DescriptionSection
-        title={t("sections.identificacion")}
-        isExpanded={expandedSections.has("identificacion")}
-        isComplete={sectionCompletion.identificacion}
-        onToggle={() => toggleSection("identificacion")}
+        title={tStd(t, "sections.identity", standard)}
+        isExpanded={expandedSections.has("identity")}
+        isComplete={sectionCompletion.identity}
+        onToggle={() => toggleSection("identity")}
       >
-        <div className="space-y-4" id="section-identificacion">
-          {/* Titulo */}
+        <div className="space-y-4" id="section-identity">
+          {/* Title */}
           <div>
-            <FieldLabel label={t("fields.titulo")} />
+            <FieldLabel
+              label={tStd(t, "fields.title", standard)}
+              required={isRequired("title")}
+            />
             <input
               type="text"
               className={`${inputClass} font-serif font-semibold`}
@@ -133,25 +252,31 @@ export function DescriptionForm({
               onChange={handleChange("title")}
               disabled={isReadOnly}
             />
-            <FieldError error={validationErrors.title} />
+            <FieldError error={resolvedErrors.title} />
           </div>
 
-          {/* Titulo traducido */}
+          {/* Translated title */}
           <div>
-            <FieldLabel label={t("fields.titulo_traducido")} optional />
+            <FieldLabel
+              label={tStd(t, "fields.translatedTitle", standard)}
+              optional
+            />
             <input
               type="text"
               className={inputClass}
               value={entry.translatedTitle ?? ""}
               onChange={handleChange("translatedTitle")}
               disabled={isReadOnly}
-              placeholder={t("fields.titulo_traducido_hint")}
+              placeholder={t("fields.translatedTitle_hint")}
             />
           </div>
 
-          {/* Tipo de recurso */}
+          {/* Resource type */}
           <div>
-            <FieldLabel label={t("fields.tipo_recurso")} />
+            <FieldLabel
+              label={tStd(t, "fields.resourceType", standard)}
+              required={isRequired("resourceType")}
+            />
             <select
               className={selectClass}
               value={entry.resourceType ?? ""}
@@ -166,27 +291,33 @@ export function DescriptionForm({
               </option>
               <option value="mixto">{t("resource_types.mixto")}</option>
             </select>
-            <FieldError error={validationErrors.resourceType} />
+            <FieldError error={resolvedErrors.resourceType} />
           </div>
 
-          {/* Fecha */}
+          {/* Date */}
           <div>
-            <FieldLabel label={t("fields.fecha")} />
+            <FieldLabel
+              label={tStd(t, "fields.dateExpression", standard)}
+              required={isRequired("dateExpression")}
+            />
             <input
               type="text"
               className={inputClass}
               value={entry.dateExpression ?? ""}
               onChange={handleChange("dateExpression")}
               disabled={isReadOnly}
-              placeholder={t("fields.fecha_placeholder")}
+              placeholder={t("fields.dateExpression_placeholder")}
             />
-            <FieldError error={validationErrors.dateExpression} />
+            <FieldError error={resolvedErrors.dateExpression} />
           </div>
 
-          {/* Fecha inicial / Fecha final */}
+          {/* Date start / end */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <FieldLabel label={t("fields.fecha_inicial")} optional />
+              <FieldLabel
+                label={tStd(t, "fields.dateStart", standard)}
+                optional
+              />
               <input
                 type="date"
                 className={inputClass}
@@ -196,7 +327,10 @@ export function DescriptionForm({
               />
             </div>
             <div>
-              <FieldLabel label={t("fields.fecha_final")} optional />
+              <FieldLabel
+                label={tStd(t, "fields.dateEnd", standard)}
+                optional
+              />
               <input
                 type="date"
                 className={inputClass}
@@ -209,69 +343,83 @@ export function DescriptionForm({
         </div>
       </DescriptionSection>
 
-      {/* 2. Descripcion fisica */}
+      {/* 2. Physical description */}
       <DescriptionSection
-        title={t("sections.descripcion_fisica")}
-        isExpanded={expandedSections.has("descripcion_fisica")}
-        isComplete={sectionCompletion.fisica}
-        onToggle={() => toggleSection("descripcion_fisica")}
+        title={tStd(t, "sections.physical_description", standard)}
+        isExpanded={expandedSections.has("physical_description")}
+        isComplete={sectionCompletion.physical_description}
+        onToggle={() => toggleSection("physical_description")}
       >
-        <div className="space-y-4" id="section-descripcion_fisica">
+        <div className="space-y-4" id="section-physical_description">
           <div>
-            <FieldLabel label={t("fields.extension")} />
+            <FieldLabel
+              label={tStd(t, "fields.extent", standard)}
+              required={isRequired("extent")}
+            />
             <input
               type="text"
               className={inputClass}
               value={entry.extent ?? ""}
               onChange={handleChange("extent")}
               disabled={isReadOnly}
-              placeholder={t("fields.extension_placeholder")}
+              placeholder={t("fields.extent_placeholder")}
             />
-            <FieldError error={validationErrors.extent} />
+            <FieldError error={resolvedErrors.extent} />
           </div>
         </div>
       </DescriptionSection>
 
-      {/* 3. Contenido */}
+      {/* 3. Content */}
       <DescriptionSection
-        title={t("sections.contenido")}
-        isExpanded={expandedSections.has("contenido")}
-        isComplete={sectionCompletion.contenido}
-        onToggle={() => toggleSection("contenido")}
+        title={tStd(t, "sections.content", standard)}
+        isExpanded={expandedSections.has("content")}
+        isComplete={sectionCompletion.content}
+        onToggle={() => toggleSection("content")}
       >
-        <div className="space-y-4" id="section-contenido">
-          {/* Alcance y contenido */}
+        <div className="space-y-4" id="section-content">
+          {/* Scope and content */}
           <div>
-            <FieldLabel label={t("fields.alcance_contenido")} />
+            <FieldLabel
+              label={tStd(t, "fields.scopeContent", standard)}
+              required={isRequired("scopeContent")}
+            />
             <textarea
               className={`${textareaClass} min-h-[100px]`}
               value={entry.scopeContent ?? ""}
               onChange={handleChange("scopeContent")}
               disabled={isReadOnly}
             />
-            <FieldError error={validationErrors.scopeContent} />
+            <FieldError error={resolvedErrors.scopeContent} />
           </div>
 
-          {/* Idioma */}
+          {/* Language */}
           <div>
-            <FieldLabel label={t("fields.idioma")} />
+            <FieldLabel
+              label={tStd(t, "fields.language", standard)}
+              required={isRequired("language")}
+            />
             <input
               type="text"
               className={inputClass}
               value={entry.language ?? ""}
               onChange={handleChange("language")}
               disabled={isReadOnly}
-              placeholder={t("fields.idioma_placeholder")}
+              placeholder={t("fields.language_placeholder")}
             />
-            <FieldError error={validationErrors.language} />
+            <FieldError error={resolvedErrors.language} />
           </div>
 
-          {/* Signatura original */}
+          {/* Original reference (entries-table extension; not on standard
+              config — kept as cataloguing-side hint via the existing
+              `(entry as any).originalReference` access pattern). */}
           <div>
-            <FieldLabel label={t("fields.signatura_original")} optional />
+            <FieldLabel
+              label={tStd(t, "fields.originalReference", standard)}
+              optional
+            />
             <textarea
               className={`${textareaClass} min-h-[60px]`}
-              value={(entry as any).originalReference ?? ""}
+              value={(entry as { originalReference?: string }).originalReference ?? ""}
               onChange={handleChange("originalReference")}
               disabled={isReadOnly}
             />
@@ -279,17 +427,17 @@ export function DescriptionForm({
         </div>
       </DescriptionSection>
 
-      {/* 4. Notas */}
+      {/* 4. Notes */}
       <DescriptionSection
-        title={t("sections.notas")}
-        isExpanded={expandedSections.has("notas")}
-        isComplete={sectionCompletion.notas}
-        onToggle={() => toggleSection("notas")}
+        title={tStd(t, "sections.notes", standard)}
+        isExpanded={expandedSections.has("notes")}
+        isComplete={sectionCompletion.notes}
+        onToggle={() => toggleSection("notes")}
       >
-        <div className="space-y-4" id="section-notas">
-          {/* Notas generales */}
+        <div className="space-y-4" id="section-notes">
+          {/* General notes (entries.description_notes) */}
           <div>
-            <FieldLabel label={t("fields.notas_generales")} optional />
+            <FieldLabel label={tStd(t, "fields.notes", standard)} optional />
             <textarea
               className={`${textareaClass} min-h-[80px]`}
               value={entry.descriptionNotes ?? ""}
@@ -298,9 +446,12 @@ export function DescriptionForm({
             />
           </div>
 
-          {/* Notas del archivero */}
+          {/* Archivist notes */}
           <div>
-            <FieldLabel label={t("fields.notas_archivero")} optional />
+            <FieldLabel
+              label={tStd(t, "fields.internalNotes", standard)}
+              optional
+            />
             <textarea
               className={`${textareaClass} min-h-[80px]`}
               value={entry.internalNotes ?? ""}
@@ -311,16 +462,16 @@ export function DescriptionForm({
         </div>
       </DescriptionSection>
 
-      {/* 5. Personas y lugares (locked) */}
+      {/* 5. Entities and places (locked) */}
       <DescriptionSection
-        title={t("sections.personas_lugares")}
+        title={tStd(t, "sections.entities_places", standard)}
         isExpanded={false}
         isComplete={false}
         isDisabled
         onToggle={() => {}}
       >
         <p className="font-sans text-[0.875rem] text-stone-500">
-          {t("locked.personas_lugares")}
+          {t("locked.entities_places")}
         </p>
       </DescriptionSection>
 
@@ -339,3 +490,5 @@ export function DescriptionForm({
     </div>
   );
 }
+
+/* @version v0.4.0 */
