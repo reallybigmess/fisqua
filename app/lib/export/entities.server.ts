@@ -1,12 +1,12 @@
 /**
  * Entity Formatter
  *
- * Maps one Drizzle row off `entities` into the shape the published
- * JSON expects. Filters each entity to the descriptions that reference
- * it and are themselves publishable, so unpublished work never leaks
- * through the entity index.
+ * This module deals with mapping one Drizzle row off `entities` into
+ * the shape the published JSON expects. It filters each entity to the
+ * descriptions that reference it and are themselves publishable, so
+ * unpublished work never leaks through the entity index.
  *
- * @version v0.3.0
+ * @version v0.4.0
  */
 
 import type { ExportEntity } from "./types";
@@ -18,6 +18,10 @@ import type { ExportEntity } from "./types";
  * - dateStart -> date_start AND date_earliest (legacy frontend alias)
  * - dateEnd -> date_end AND date_latest (legacy frontend alias)
  * - particle is always null (no D1 column — research assumption A4)
+ *
+ * `legal_status` was dropped from the entities table (0% populated in
+ * production). Preserved as `null` in the export shape for snapshot
+ * continuity.
  */
 export function formatEntity(row: {
   entityCode: string | null;
@@ -34,7 +38,6 @@ export function formatEntity(row: {
   dateStart: string | null;
   dateEnd: string | null;
   history: string | null;
-  legalStatus: string | null;
   functions: string | null;
   sources: string | null;
   wikidataId: string | null;
@@ -57,7 +60,8 @@ export function formatEntity(row: {
     date_start: row.dateStart,
     date_end: row.dateEnd,
     history: row.history,
-    legal_status: row.legalStatus,
+    // Dropped in 0036 (0% populated); preserved as null in export shape.
+    legal_status: null,
     functions: row.functions,
     sources: row.sources,
     wikidata_id: row.wikidataId,

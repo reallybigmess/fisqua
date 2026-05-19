@@ -1,8 +1,9 @@
 /**
  * Publish Run Detail
  *
- * Per-run detail page reached from the publish dashboard history
- * table. Shows the row as it currently stands in `export_runs` — the
+ * This page is the per-run detail surface reached from the publish
+ * dashboard history table. It shows the row as it currently stands in
+ * `export_runs` — the
  * selected fonds and types, the step counter, the record counts, and
  * any error message — plus a link into the workflow dashboard keyed
  * by `workflowInstanceId`. Used to diagnose runs that stalled or

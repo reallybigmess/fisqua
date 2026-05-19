@@ -1,12 +1,12 @@
 /**
  * Publish Pipeline Steps
  *
- * Every step the publish workflow runs lives in this module, one
- * exported function per Cloudflare Workflow step. The contract each
- * function respects is narrow: read a well-defined slice of D1, format
- * it with the per-entity helpers next to this file, upload a bounded
- * set of R2 objects, and return the record counts the workflow needs
- * to record in its heartbeat row.
+ * This module deals with the individual steps the publish workflow
+ * runs, one exported function per Cloudflare Workflow step. The
+ * contract each function respects is narrow: read a well-defined
+ * slice of D1, format it with the per-entity helpers next to this
+ * file, upload a bounded set of R2 objects, and return the record
+ * counts the workflow needs to record in its heartbeat row.
  *
  * Memory stays bounded to at most one fonds at a time and R2 PUTs are
  * capped at a few hundred per step, so a single Worker invocation
@@ -15,11 +15,21 @@
  * heartbeats, final tombstone writes — lives in
  * `app/workflows/publish-export.ts`.
  *
- * @version v0.3.0
+ * Every step takes an explicit `tenant: ExportTenant` argument so
+ * every D1 read filters by `tenant.id` and every R2 key is prefixed
+ * with `${tenant.slug}/`. An earlier iteration of these functions had
+ * zero `tenant` references and wrote flat keys
+ * (`descriptions-<ref>.json`, `entities.json`, etc.) — a Tenant A
+ * superadmin could have triggered an export that read Tenant B rows
+ * and overwrote Tenant B's R2 objects. The current shape closes that
+ * exposure.
+ *
+ * @version v0.4.0
  */
 
 import { eq, and, inArray, isNull, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { z } from "zod";
 import {
   descriptions,
   repositories,
@@ -31,12 +41,21 @@ import {
   vocabularyTerms,
 } from "../../db/schema";
 import type { ExportStorage } from "./r2-client.server";
-import type { ExportDescription } from "./types";
+import type {
+  EadInput,
+  EadRepository,
+  ExportDescription,
+  ExportTenant,
+} from "./types";
 import { formatDescription } from "./descriptions.server";
 import { formatRepositories } from "./repositories.server";
 import { formatEntity } from "./entities.server";
 import { formatPlace } from "./places.server";
 import { generateChildrenMap } from "./children.server";
+import { buildEad3 } from "./ead/builder";
+import { getEadProfile } from "./ead/profiles/registry";
+import { buildDcBulk } from "./dc/builder";
+import { sanitiseRefForKey } from "./xml/escape";
 
 const CHILDREN_PUT_BATCH = 50;
 
@@ -49,16 +68,22 @@ const CHILDREN_PUT_BATCH = 50;
 export async function exportFondsDescriptions(
   db: DrizzleD1Database<any>,
   storage: ExportStorage,
-  fondsCode: string
+  fondsCode: string,
+  tenant: ExportTenant
 ): Promise<{ recordCount: number; byteSize: number }> {
   const root = await db
     .select({ id: descriptions.id })
     .from(descriptions)
-    .where(eq(descriptions.referenceCode, fondsCode))
+    .where(
+      and(
+        eq(descriptions.referenceCode, fondsCode),
+        eq(descriptions.tenantId, tenant.id)
+      )
+    )
     .get();
 
   if (!root) {
-    await storage.putObject(`descriptions-${fondsCode}.json`, "[]");
+    await storage.putObject(`${tenant.slug}/descriptions-${fondsCode}.json`, "[]");
     return { recordCount: 0, byteSize: 2 };
   }
 
@@ -67,6 +92,7 @@ export async function exportFondsDescriptions(
     .from(descriptions)
     .where(
       and(
+        eq(descriptions.tenantId, tenant.id),
         eq(descriptions.rootDescriptionId, root.id),
         eq(descriptions.isPublished, true)
       )
@@ -98,7 +124,12 @@ export async function exportFondsDescriptions(
           country: repositories.country,
         })
         .from(repositories)
-        .where(eq(repositories.id, row.repositoryId))
+        .where(
+          and(
+            eq(repositories.id, row.repositoryId),
+            eq(repositories.tenantId, tenant.id)
+          )
+        )
         .get();
       repo = repoRow ?? { code: "", country: null };
       repoCache.set(row.repositoryId, repo);
@@ -115,7 +146,7 @@ export async function exportFondsDescriptions(
   }
 
   const body = JSON.stringify(fondsFormatted);
-  await storage.putObject(`descriptions-${fondsCode}.json`, body);
+  await storage.putObject(`${tenant.slug}/descriptions-${fondsCode}.json`, body);
 
   return { recordCount: fondsFormatted.length, byteSize: body.length };
 }
@@ -134,12 +165,18 @@ export async function exportFondsDescriptions(
 export async function exportFondsChildren(
   db: DrizzleD1Database<any>,
   storage: ExportStorage,
-  fondsCode: string
+  fondsCode: string,
+  tenant: ExportTenant
 ): Promise<{ parentCount: number; putCount: number }> {
   const root = await db
     .select({ id: descriptions.id })
     .from(descriptions)
-    .where(eq(descriptions.referenceCode, fondsCode))
+    .where(
+      and(
+        eq(descriptions.referenceCode, fondsCode),
+        eq(descriptions.tenantId, tenant.id)
+      )
+    )
     .get();
 
   if (!root) return { parentCount: 0, putCount: 0 };
@@ -159,6 +196,7 @@ export async function exportFondsChildren(
     .from(descriptions)
     .where(
       and(
+        eq(descriptions.tenantId, tenant.id),
         eq(descriptions.rootDescriptionId, root.id),
         eq(descriptions.isPublished, true)
       )
@@ -174,7 +212,7 @@ export async function exportFondsChildren(
     await Promise.all(
       slice.map(([refCode, children]) =>
         storage.putObject(
-          `children/${refCode}.json`,
+          `${tenant.slug}/children/${refCode}.json`,
           JSON.stringify(children)
         )
       )
@@ -186,18 +224,258 @@ export async function exportFondsChildren(
 }
 
 /**
+ * Build the per-fonds row + repository slice that the EAD3 / DC builders
+ * consume. Both builders walk the same data shape (`EadInput` suffices
+ * for DC), so factoring the fetch keeps the two pipeline functions
+ * narrow.
+ *
+ * Returns `null` when the fonds root cannot be resolved against
+ * `(referenceCode, tenantId)`. The caller writes an empty document to R2
+ * and reports `recordCount: 0` (matches the JSON pipeline's "no root → empty
+ * artefact" semantics for already-empty fonds slices).
+ *
+ * `descriptions.legacy_ids` is stored as TEXT (JSON-encoded array) per
+ * `app/db/schema.ts:733`; this helper parses each row's `legacyIds` to
+ * the structured array shape `EadInput.legacyIds` expects so neither
+ * builder has to repeat the parse.
+ */
+async function loadFondsForXml(
+  db: DrizzleD1Database<any>,
+  fondsCode: string,
+  tenant: ExportTenant
+): Promise<{
+  rows: EadInput[];
+  repos: Map<string, EadRepository>;
+} | null> {
+  const root = await db
+    .select({ id: descriptions.id })
+    .from(descriptions)
+    .where(
+      and(
+        eq(descriptions.referenceCode, fondsCode),
+        eq(descriptions.tenantId, tenant.id)
+      )
+    )
+    .get();
+
+  if (!root) return null;
+
+  const dbRows = await db
+    .select()
+    .from(descriptions)
+    .where(
+      and(
+        eq(descriptions.tenantId, tenant.id),
+        eq(descriptions.rootDescriptionId, root.id),
+        eq(descriptions.isPublished, true)
+      )
+    )
+    .all();
+
+  const rows: EadInput[] = dbRows.map((r: any) => ({
+    id: r.id,
+    referenceCode: r.referenceCode,
+    title: r.title,
+    descriptionLevel: r.descriptionLevel,
+    dateExpression: r.dateExpression ?? null,
+    extent: r.extent ?? null,
+    creatorDisplay: r.creatorDisplay ?? null,
+    scopeContent: r.scopeContent ?? null,
+    accessConditions: r.accessConditions ?? null,
+    language: r.language ?? null,
+    placeDisplay: r.placeDisplay ?? null,
+    imprint: r.imprint ?? null,
+    parentReferenceCode: null, // not used by either builder at the row level
+    repositoryId: r.repositoryId,
+    isPublished: !!r.isPublished,
+    legacyIds: parseLegacyIds(r.legacyIds),
+    adminBiogHistory: r.adminBiogHistory ?? null,
+    preferredCitation: r.preferredCitation ?? null,
+    acquisitionInfo: r.acquisitionInfo ?? null,
+    systemOfArrangement: r.systemOfArrangement ?? null,
+    physicalCharacteristics: r.physicalCharacteristics ?? null,
+  }));
+
+  // Repository lookup for every unique repositoryId in the slice. The EAD3
+  // builder uses the fonds row's repository for `<repository>` and the DC
+  // builder uses each row's repository for `<dc:source>` + `<dc:rights>`.
+  const repoIds = [...new Set(rows.map((r) => r.repositoryId))];
+  const repos = new Map<string, EadRepository>();
+  for (const repoId of repoIds) {
+    const repo = await db
+      .select({
+        name: repositories.name,
+        city: repositories.city,
+        code: repositories.code,
+        rightsText: repositories.rightsText,
+      })
+      .from(repositories)
+      .where(
+        and(
+          eq(repositories.id, repoId),
+          eq(repositories.tenantId, tenant.id)
+        )
+      )
+      .get();
+    if (repo) {
+      repos.set(repoId, {
+        name: repo.name,
+        city: repo.city ?? "",
+        code: repo.code,
+        rightsText: repo.rightsText ?? null,
+      });
+    }
+  }
+
+  return { rows, repos };
+}
+
+/**
+ * Per-element shape for `descriptions.legacy_ids`. The column is TEXT
+ * with no CHECK constraint and the legacy-import tooling has
+ * historically been the only writer, but a defensive shape validation
+ * here costs ~5 lines and prevents
+ * `<unitid localtype="undefined">undefined</unitid>` from ever
+ * reaching the EAD3 emitter. Any element that fails the schema is
+ * silently dropped from the result; if the result is empty,
+ * `parseLegacyIds` returns null to match the builder's "absent -> no
+ * legacy unitids" semantics.
+ */
+const LegacyIdEntrySchema = z.object({
+  provider: z.string().min(1),
+  id: z.union([z.string(), z.number()]),
+});
+
+const LegacyIdsArraySchema = z.array(z.unknown());
+
+/**
+ * Parse the JSON-encoded `legacy_ids` column into the structured array
+ * shape `EadInput.legacyIds` declares. Returns `null` (not `[]`) on parse
+ * failure or empty array to match the EAD3 builder's "absent → no legacy
+ * unitids" semantics — the builder branches on the array being non-null
+ * before iterating.
+ *
+ * Each element is Zod-validated before it reaches the EAD3 builder.
+ * Malformed entries (missing provider,
+ * non-scalar id, null entries, non-objects) are dropped rather than
+ * type-cast through unchecked, which previously surfaced as the
+ * literal string "undefined" inside `localtype` attributes and unitid
+ * bodies.
+ */
+function parseLegacyIds(
+  raw: unknown
+): Array<{ provider: string; id: string | number }> | null {
+  if (raw == null || raw === "") return null;
+
+  let candidate: unknown;
+  if (Array.isArray(raw)) {
+    candidate = raw;
+  } else if (typeof raw === "string") {
+    try {
+      candidate = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  } else {
+    return null;
+  }
+
+  const arr = LegacyIdsArraySchema.safeParse(candidate);
+  if (!arr.success || arr.data.length === 0) return null;
+
+  const out: Array<{ provider: string; id: string | number }> = [];
+  for (const entry of arr.data) {
+    const parsed = LegacyIdEntrySchema.safeParse(entry);
+    if (parsed.success) {
+      out.push({ provider: parsed.data.provider, id: parsed.data.id });
+    }
+  }
+  return out.length > 0 ? out : null;
+}
+
+/**
+ * Export one fonds as an EAD3 finding-aid document under the tenant's
+ * R2 prefix. Composes the pure-function `buildEad3()` emitter, the
+ * per-standard profile registry, and the tenant-scoping
+ * prerequisites already in this module.
+ *
+ * Profile selected from `tenant.descriptiveStandard`. R2 key:
+ * `${tenant.slug}/ead/${sanitiseRefForKey(fondsCode)}.xml`.
+ *
+ * Memory bound: one fonds at a time (matches `exportFondsDescriptions`).
+ */
+export async function exportFondsEad(
+  db: DrizzleD1Database<any>,
+  storage: ExportStorage,
+  fondsCode: string,
+  tenant: ExportTenant
+): Promise<{ recordCount: number; byteSize: number }> {
+  const key = `${tenant.slug}/ead/${sanitiseRefForKey(fondsCode)}.xml`;
+
+  const slice = await loadFondsForXml(db, fondsCode, tenant);
+  if (!slice) {
+    await storage.putObjectXml(key, "");
+    return { recordCount: 0, byteSize: 0 };
+  }
+
+  const profile = getEadProfile(tenant.descriptiveStandard);
+  const xml = buildEad3(slice.rows, slice.repos, profile, new Date().toISOString());
+
+  await storage.putObjectXml(key, xml);
+  return { recordCount: slice.rows.length, byteSize: xml.length };
+}
+
+/**
+ * Export one fonds as a Dublin Core bulk file under the tenant's R2
+ * prefix. Composes the pure-function `buildDcBulk()` emitter into the
+ * publish pipeline.
+ *
+ * Wrapper: OAI-PMH 2.0 `<ListRecords>`. R2 key:
+ * `${tenant.slug}/dc/${sanitiseRefForKey(fondsCode)}.xml`.
+ *
+ * Memory bound: one fonds at a time.
+ */
+export async function exportFondsDc(
+  db: DrizzleD1Database<any>,
+  storage: ExportStorage,
+  fondsCode: string,
+  tenant: ExportTenant
+): Promise<{ recordCount: number; byteSize: number }> {
+  const key = `${tenant.slug}/dc/${sanitiseRefForKey(fondsCode)}.xml`;
+
+  const slice = await loadFondsForXml(db, fondsCode, tenant);
+  if (!slice) {
+    await storage.putObjectXml(key, "");
+    return { recordCount: 0, byteSize: 0 };
+  }
+
+  // YYYY-MM-DD per OAI-PMH `<datestamp>` convention.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const xml = buildDcBulk(slice.rows, slice.repos, fondsCode, todayIso);
+
+  await storage.putObjectXml(key, xml);
+  return { recordCount: slice.rows.length, byteSize: xml.length };
+}
+
+/**
  * Export repositories.json. Builds repository_count via a lightweight
  * GROUP BY query — does NOT depend on allFormattedDescriptions being in
  * memory. Only the (small) set of root descriptions is fetched in full.
  */
 export async function exportRepositories(
   db: DrizzleD1Database<any>,
-  storage: ExportStorage
+  storage: ExportStorage,
+  tenant: ExportTenant
 ): Promise<{ count: number }> {
   const allRepos = await db
     .select()
     .from(repositories)
-    .where(eq(repositories.enabled, true))
+    .where(
+      and(
+        eq(repositories.tenantId, tenant.id),
+        eq(repositories.enabled, true)
+      )
+    )
     .all();
 
   // Lightweight count: id + repositoryId + isPublished only.
@@ -207,7 +485,12 @@ export async function exportRepositories(
       n: sql<number>`COUNT(*)`,
     })
     .from(descriptions)
-    .where(eq(descriptions.isPublished, true))
+    .where(
+      and(
+        eq(descriptions.tenantId, tenant.id),
+        eq(descriptions.isPublished, true)
+      )
+    )
     .groupBy(descriptions.repositoryId)
     .all();
 
@@ -225,6 +508,7 @@ export async function exportRepositories(
     .from(descriptions)
     .where(
       and(
+        eq(descriptions.tenantId, tenant.id),
         eq(descriptions.isPublished, true),
         isNull(descriptions.parentId)
       )
@@ -249,7 +533,10 @@ export async function exportRepositories(
     descriptionCountByRepoCode,
     formattedRoots
   );
-  await storage.putObject("repositories.json", JSON.stringify(formatted));
+  await storage.putObject(
+    `${tenant.slug}/repositories.json`,
+    JSON.stringify(formatted)
+  );
 
   return { count: formatted.length };
 }
@@ -265,7 +552,8 @@ export async function exportRepositories(
  */
 export async function exportEntities(
   db: DrizzleD1Database<any>,
-  storage: ExportStorage
+  storage: ExportStorage,
+  tenant: ExportTenant
 ): Promise<{ count: number }> {
   const entityRows = await db
     .selectDistinct({
@@ -284,7 +572,7 @@ export async function exportEntities(
       dateStart: entities.dateStart,
       dateEnd: entities.dateEnd,
       history: entities.history,
-      legalStatus: entities.legalStatus,
+      // legal_status dropped in 0036 (0% populated); formatter emits null.
       functions: entities.functions,
       sources: entities.sources,
       wikidataId: entities.wikidataId,
@@ -301,7 +589,12 @@ export async function exportEntities(
       eq(descriptionEntities.descriptionId, descriptions.id)
     )
     .where(
-      and(eq(descriptions.isPublished, true), isNull(entities.mergedInto))
+      and(
+        eq(entities.tenantId, tenant.id),
+        eq(descriptions.tenantId, tenant.id),
+        eq(descriptions.isPublished, true),
+        isNull(entities.mergedInto)
+      )
     )
     .all();
 
@@ -319,7 +612,7 @@ export async function exportEntities(
   }
 
   if (entityRows.length === 0) {
-    await storage.putObject("entities.json", "[]");
+    await storage.putObject(`${tenant.slug}/entities.json`, "[]");
     return { count: 0 };
   }
 
@@ -331,7 +624,10 @@ export async function exportEntities(
         : null,
     })
   );
-  await storage.putObject("entities.json", JSON.stringify(formatted));
+  await storage.putObject(
+    `${tenant.slug}/entities.json`,
+    JSON.stringify(formatted)
+  );
   return { count: formatted.length };
 }
 
@@ -344,7 +640,8 @@ export async function exportEntities(
  */
 export async function exportPlaces(
   db: DrizzleD1Database<any>,
-  storage: ExportStorage
+  storage: ExportStorage,
+  tenant: ExportTenant
 ): Promise<{ count: number }> {
   const placeRows = await db
     .selectDistinct({
@@ -353,20 +650,18 @@ export async function exportPlaces(
       label: places.label,
       displayName: places.displayName,
       placeType: places.placeType,
+      // fclass: 5-value GeoNames feature class (added in 0036).
+      fclass: places.fclass,
       nameVariants: places.nameVariants,
       latitude: places.latitude,
       longitude: places.longitude,
       coordinatePrecision: places.coordinatePrecision,
-      historicalGobernacion: places.historicalGobernacion,
-      historicalPartido: places.historicalPartido,
-      historicalRegion: places.historicalRegion,
-      countryCode: places.countryCode,
-      adminLevel1: places.adminLevel1,
-      adminLevel2: places.adminLevel2,
+      // historical_*, country_code, admin_level_*, wikidata_id all
+      // dropped in 0036 (0% populated); the formatter emits literal
+      // null for these fields to keep the export shape stable.
       tgnId: places.tgnId,
       hgisId: places.hgisId,
       whgId: places.whgId,
-      wikidataId: places.wikidataId,
       mergedInto: places.mergedInto,
     })
     .from(places)
@@ -379,17 +674,25 @@ export async function exportPlaces(
       eq(descriptionPlaces.descriptionId, descriptions.id)
     )
     .where(
-      and(eq(descriptions.isPublished, true), isNull(places.mergedInto))
+      and(
+        eq(places.tenantId, tenant.id),
+        eq(descriptions.tenantId, tenant.id),
+        eq(descriptions.isPublished, true),
+        isNull(places.mergedInto)
+      )
     )
     .all();
 
   if (placeRows.length === 0) {
-    await storage.putObject("places.json", "[]");
+    await storage.putObject(`${tenant.slug}/places.json`, "[]");
     return { count: 0 };
   }
 
   const formatted = placeRows.map(formatPlace);
-  await storage.putObject("places.json", JSON.stringify(formatted));
+  await storage.putObject(
+    `${tenant.slug}/places.json`,
+    JSON.stringify(formatted)
+  );
   return { count: formatted.length };
 }
 

@@ -1,13 +1,20 @@
 /**
  * R2 Storage Client for the Publish Pipeline
  *
- * Thin wrapper around the Cloudflare R2 binding that exposes only the
- * operations the export pipeline needs: JSON puts, streaming puts,
- * streaming gets, head-for-size, and deletes. Isolates the rest of the
- * pipeline from the R2 binding's API surface and gives the test suite
- * a single surface to stub.
+ * This module deals with a thin wrapper around the Cloudflare R2
+ * binding that exposes only the operations the export pipeline needs:
+ * JSON puts, XML puts, streaming puts, streaming gets, head-for-size,
+ * and deletes. It isolates the rest of the pipeline from the R2
+ * binding's API surface and gives the test suite a single surface to
+ * stub.
  *
- * @version v0.3.0
+ * `putObjectXml` lets downstream EAD3 + DC builders land their XML
+ * artefacts under each tenant's R2 prefix with the correct
+ * content-type, without forking another R2 client abstraction. JSON
+ * and XML put paths share the same backing bucket; only the
+ * `Content-Type` header differs.
+ *
+ * @version v0.4.0
  */
 export class ExportStorage {
   constructor(private bucket: R2Bucket) {}
@@ -18,6 +25,19 @@ export class ExportStorage {
   async putObject(key: string, body: string): Promise<void> {
     await this.bucket.put(key, body, {
       httpMetadata: { contentType: "application/json; charset=utf-8" },
+    });
+  }
+
+  /**
+   * Upload an XML string to R2 at the given key path. Used by the
+   * EAD3 and Dublin Core builders so their per-fonds files
+   * arrive with `application/xml; charset=utf-8` rather than the
+   * JSON content-type. Caller is responsible for prefixing the key
+   * with `${tenant.slug}/` — this method does no key rewriting.
+   */
+  async putObjectXml(key: string, body: string): Promise<void> {
+    await this.bucket.put(key, body, {
+      httpMetadata: { contentType: "application/xml; charset=utf-8" },
     });
   }
 

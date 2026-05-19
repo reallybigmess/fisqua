@@ -1,10 +1,11 @@
 /**
  * Children Map Builder
  *
- * Walks a flat list of exported descriptions and builds the nested
- * `children` maps that the static frontend uses to render the archival
- * hierarchy without issuing follow-up fetches. Keyed by reference code
- * rather than UUID so that the published JSON stays human-readable.
+ * This module deals with walking a flat list of exported
+ * descriptions and building the nested `children` maps that the
+ * static frontend uses to render the archival hierarchy without
+ * issuing follow-up fetches. Keyed by reference code rather than UUID
+ * so that the published JSON stays human-readable.
  *
  * @version v0.3.0
  */

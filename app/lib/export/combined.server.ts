@@ -1,16 +1,24 @@
 /**
  * Descriptions Index Writer
  *
- * Writes the per-fonds descriptions JSON that the static frontend loads.
- * Each fonds gets its own object under `fonds/{code}/descriptions.json`;
+ * This module deals with writing the per-fonds descriptions JSON
+ * that the static frontend loads. Each fonds gets its own object
+ * under `fonds/{code}/descriptions.json`;
  * if the serialized payload would overflow the safe R2 body limit, the
  * writer throws `FondsBodyTooLargeError` so the orchestrator can bail
  * out early rather than corrupt the published site.
  *
- * @version v0.3.0
+ * The index writer takes an `ExportTenant` so the index key
+ * (`descriptions-index.json`) and the per-fonds entry keys it
+ * enumerates both carry the active tenant's slug prefix. The index
+ * file describes only the per-fonds JSON artefacts the pipeline
+ * writes; it does not itself query D1.
+ *
+ * @version v0.4.0
  */
 
 import type { ExportStorage } from "./r2-client.server";
+import type { ExportTenant } from "./types";
 
 /**
  * Descriptions index writer for the publish pipeline.
@@ -85,11 +93,16 @@ export interface WriteIndexResult {
 export async function writeDescriptionsIndex(
   storage: ExportStorage,
   fondsCodes: string[],
-  recordCountsByFondsCode: Record<string, number>
+  recordCountsByFondsCode: Record<string, number>,
+  tenant: ExportTenant
 ): Promise<WriteIndexResult> {
+  // Per-fonds entry keys are slug-prefixed to match the actual R2
+  // layout that `exportFondsDescriptions` writes.
+  // Consumers (the frontend static site build) join the prefix when
+  // streaming each per-fonds file.
   const entries: DescriptionsIndexFondsEntry[] = fondsCodes.map((code) => ({
     fonds_code: code,
-    key: `descriptions-${code}.json`,
+    key: `${tenant.slug}/descriptions-${code}.json`,
     record_count: recordCountsByFondsCode[code] ?? 0,
   }));
 
@@ -103,7 +116,7 @@ export async function writeDescriptionsIndex(
   };
 
   await storage.putObject(
-    "descriptions-index.json",
+    `${tenant.slug}/descriptions-index.json`,
     JSON.stringify(index, null, 2)
   );
 

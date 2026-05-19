@@ -1,8 +1,9 @@
 /**
  * Publish Export Workflow
  *
- * The durable Cloudflare Workflow that drives the full publish run
- * end-to-end: load the requested fonds, write a heartbeat row into
+ * This workflow deals with driving the full publish run end-to-end as
+ * a durable Cloudflare Workflow: load the requested fonds, write a
+ * heartbeat row into
  * `export_runs`, invoke every pipeline step in its own Worker
  * invocation so each one gets a fresh runtime budget, and close the
  * row out with a success or failure tombstone. The workflow instance
@@ -14,7 +15,15 @@
  * the recovery story for a transient failure is "retry the whole
  * workflow run", not "resume mid-step".
  *
- * @version v0.3.0
+ * The workflow loads the tenant once at start in `load-config` and
+ * threads it as the last argument to every per-fonds and per-type
+ * pipeline step. Because `exportRuns.tenantId` does NOT yet exist on
+ * the schema, the tenant is resolved via a join from
+ * `exportRuns.triggeredBy → users.tenantId → tenants`. The
+ * descriptive_standard is loaded too so the downstream EAD3 profile
+ * pick can use it without a second sweep.
+ *
+ * @version v0.4.0
  */
 
 import {
@@ -24,11 +33,13 @@ import {
 } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
-import { exportRuns } from "../db/schema";
+import { exportRuns, users, tenants } from "../db/schema";
 import { ExportStorage } from "../lib/export/r2-client.server";
 import {
   exportFondsDescriptions,
   exportFondsChildren,
+  exportFondsEad,
+  exportFondsDc,
   exportRepositories,
   exportEntities,
   exportPlaces,
@@ -40,6 +51,7 @@ import {
   FondsBodyTooLargeError,
 } from "../lib/export/combined.server";
 import { exportFondsMets } from "../lib/export/mets-export.server";
+import type { ExportTenant } from "../lib/export/types";
 
 /**
  * Cloudflare Workflow that runs the publish-export pipeline.
@@ -82,6 +94,37 @@ export class PublishExportWorkflow extends WorkflowEntrypoint<
           .get();
         if (!run) throw new Error(`exportRun ${exportId} not found`);
 
+        // Resolve the tenant once at workflow start. Every per-fonds
+        // and per-type step downstream takes this as its last argument
+        // so every D1 read filters by tenant.id and every R2 key is
+        // prefixed with tenant.slug.
+        //
+        // exportRuns.tenantId does NOT exist on the schema in v0.4;
+        // resolve via the triggering user's tenant. The route already
+        // gates publish on superadmin + requireCapability(tenant,
+        // 'publish_pipeline'), so the user's tenant is the same tenant
+        // the route's authMiddleware resolved against the request host.
+        const tenantRow = await db
+          .select({
+            id: tenants.id,
+            slug: tenants.slug,
+            descriptiveStandard: tenants.descriptiveStandard,
+          })
+          .from(users)
+          .innerJoin(tenants, eq(users.tenantId, tenants.id))
+          .where(eq(users.id, run.triggeredBy))
+          .get();
+        if (!tenantRow) {
+          throw new Error(
+            `Tenant not resolvable for exportRun ${exportId} via triggeredBy ${run.triggeredBy}`
+          );
+        }
+        if (!tenantRow.descriptiveStandard) {
+          throw new Error(
+            `Tenant ${tenantRow.slug} has no descriptive_standard (kind=platform tenants cannot publish)`
+          );
+        }
+
         await db
           .update(exportRuns)
           .set({
@@ -94,6 +137,11 @@ export class PublishExportWorkflow extends WorkflowEntrypoint<
         return {
           selectedFonds: JSON.parse(run.selectedFonds) as string[],
           selectedTypes: JSON.parse(run.selectedTypes) as string[],
+          tenant: {
+            id: tenantRow.id,
+            slug: tenantRow.slug,
+            descriptiveStandard: tenantRow.descriptiveStandard,
+          } as ExportTenant,
         };
       });
 
@@ -104,7 +152,7 @@ export class PublishExportWorkflow extends WorkflowEntrypoint<
         for (const fonds of config.selectedFonds) {
           const result = await step.do(`descriptions:${fonds}`, async () => {
             await recordStepStart(db, exportId, `descriptions:${fonds}`);
-            const r = await exportFondsDescriptions(db, storage, fonds);
+            const r = await exportFondsDescriptions(db, storage, fonds, config.tenant);
             counts[`descriptions:${fonds}`] = r.recordCount;
             await recordStepEnd(db, exportId, `descriptions:${fonds}`, counts);
             return r;
@@ -129,7 +177,8 @@ export class PublishExportWorkflow extends WorkflowEntrypoint<
           const r = await writeDescriptionsIndex(
             storage,
             config.selectedFonds,
-            perFondsCounts
+            perFondsCounts,
+            config.tenant
           );
           counts["descriptions:index"] = r.totalRecordCount;
           await recordStepEnd(db, exportId, "descriptions:index", counts);
@@ -140,7 +189,7 @@ export class PublishExportWorkflow extends WorkflowEntrypoint<
         for (const fonds of config.selectedFonds) {
           await step.do(`children:${fonds}`, async () => {
             await recordStepStart(db, exportId, `children:${fonds}`);
-            const r = await exportFondsChildren(db, storage, fonds);
+            const r = await exportFondsChildren(db, storage, fonds, config.tenant);
             counts[`children:${fonds}`] = r.putCount;
             await recordStepEnd(db, exportId, `children:${fonds}`, counts);
           });
@@ -151,9 +200,33 @@ export class PublishExportWorkflow extends WorkflowEntrypoint<
         for (const fonds of config.selectedFonds) {
           await step.do(`mets:${fonds}`, async () => {
             await recordStepStart(db, exportId, `mets:${fonds}`);
-            const r = await exportFondsMets(db, this.env.METS_BUCKET, fonds);
+            const r = await exportFondsMets(db, this.env.METS_BUCKET, fonds, config.tenant);
             counts[`mets:${fonds}`] = r.generatedCount;
             await recordStepEnd(db, exportId, `mets:${fonds}`, counts);
+          });
+        }
+
+        // EAD3 finding aid per fonds. Profile picked from
+        // tenant.descriptiveStandard inside exportFondsEad. R2 key:
+        // ${tenant.slug}/ead/<sanitisedRef>.xml.
+        for (const fonds of config.selectedFonds) {
+          await step.do(`ead:${fonds}`, async () => {
+            await recordStepStart(db, exportId, `ead:${fonds}`);
+            const r = await exportFondsEad(db, storage, fonds, config.tenant);
+            counts[`ead:${fonds}`] = r.recordCount;
+            await recordStepEnd(db, exportId, `ead:${fonds}`, counts);
+          });
+        }
+
+        // Dublin Core bulk file per fonds. OAI-PMH 2.0 ListRecords
+        // envelope; one <record> per published description. R2 key:
+        // ${tenant.slug}/dc/<sanitisedRef>.xml.
+        for (const fonds of config.selectedFonds) {
+          await step.do(`dc:${fonds}`, async () => {
+            await recordStepStart(db, exportId, `dc:${fonds}`);
+            const r = await exportFondsDc(db, storage, fonds, config.tenant);
+            counts[`dc:${fonds}`] = r.recordCount;
+            await recordStepEnd(db, exportId, `dc:${fonds}`, counts);
           });
         }
       }
@@ -161,7 +234,7 @@ export class PublishExportWorkflow extends WorkflowEntrypoint<
       if (config.selectedTypes.includes("repositories")) {
         await step.do("repositories", async () => {
           await recordStepStart(db, exportId, "repositories");
-          const r = await exportRepositories(db, storage);
+          const r = await exportRepositories(db, storage, config.tenant);
           counts.repositories = r.count;
           await recordStepEnd(db, exportId, "repositories", counts);
         });
@@ -170,7 +243,7 @@ export class PublishExportWorkflow extends WorkflowEntrypoint<
       if (config.selectedTypes.includes("entities")) {
         await step.do("entities", async () => {
           await recordStepStart(db, exportId, "entities");
-          const r = await exportEntities(db, storage);
+          const r = await exportEntities(db, storage, config.tenant);
           counts.entities = r.count;
           await recordStepEnd(db, exportId, "entities", counts);
         });
@@ -179,7 +252,7 @@ export class PublishExportWorkflow extends WorkflowEntrypoint<
       if (config.selectedTypes.includes("places")) {
         await step.do("places", async () => {
           await recordStepStart(db, exportId, "places");
-          const r = await exportPlaces(db, storage);
+          const r = await exportPlaces(db, storage, config.tenant);
           counts.places = r.count;
           await recordStepEnd(db, exportId, "places", counts);
         });

@@ -1,11 +1,12 @@
 /**
  * Description Workflow Pipeline
  *
- * Server-side engine for the description workflow: promoting a volume
- * into description, tracking per-entry describer and reviewer state,
- * and moving each entry through draft / submitted / approved / sent-
- * back transitions. Callers pass the guarded user in; every mutation
- * writes an audit row so the trail is recoverable.
+ * This module deals with the server-side engine for the description
+ * workflow: promoting a volume into description, tracking per-entry
+ * describer and reviewer state, and moving each entry through draft
+ * / submitted / approved / sent-back transitions. Callers pass the
+ * guarded user in; every mutation writes an audit row so the trail
+ * is recoverable.
  *
  * @version v0.3.0
  */

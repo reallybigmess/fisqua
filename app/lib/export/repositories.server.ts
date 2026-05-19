@@ -1,10 +1,11 @@
 /**
  * Repository Formatter
  *
- * Formats the repositories index for the published frontend: every
- * enabled repository, its display metadata, the list of root
- * descriptions it holds, and computed counts derived from the set of
- * descriptions that are being published in the same run.
+ * This module deals with formatting the repositories index for the
+ * published frontend: every enabled repository, its display metadata,
+ * the list of root descriptions it holds, and computed counts derived
+ * from the set of descriptions that are being published in the same
+ * run.
  *
  * @version v0.3.0
  */

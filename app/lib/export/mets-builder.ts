@@ -1,15 +1,23 @@
 /**
  * METS XML Builder
  *
- * Pure-function emitter that produces METS 1.12.1 XML with Dublin Core
- * descriptive metadata. METS (Metadata Encoding and Transmission
- * Standard) is the preservation-friendly wrapper format that IIIF
- * viewers and digital-preservation tools consume. Ported from Django's
- * `generate_mets.py`; uses template literals with strict XML escaping
- * rather than a library to keep the Worker bundle small.
+ * This builder deals with pure-function emission of METS 1.12.1 XML
+ * with Dublin Core descriptive metadata. METS (Metadata Encoding and
+ * Transmission Standard) is the preservation-friendly wrapper format
+ * that IIIF viewers and digital-preservation tools consume. Ported
+ * from Django's `generate_mets.py`; uses template literals with
+ * strict XML escaping rather than a library to keep the Worker bundle
+ * small.
  *
- * @version v0.3.0
+ * The local `escapeXml` and `dc()` helpers were factored out into
+ * `./xml/escape.ts` so the EAD3 and Dublin Core builders share one
+ * source of truth for XML escaping and single-element emission. The
+ * existing `tests/export/mets-builder.test.ts` is the regression net.
+ *
+ * @version v0.4.0
  */
+
+import { escapeXml, el } from "./xml/escape";
 
 // ---------------------------------------------------------------------------
 // Namespaces
@@ -74,23 +82,14 @@ export interface MetsRepository {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Re-exports (back-compat)
 // ---------------------------------------------------------------------------
 
-/** Escape XML special characters to prevent injection (T-26-04). */
-export function escapeXml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-/** Emit a Dublin Core element if text is non-empty, with XML escaping. */
-function dc(tag: string, text: string | null | undefined): string {
-  if (!text) return "";
-  return `    <${tag}>${escapeXml(text.trim())}</${tag}>\n`;
-}
+// Pre-Phase-37-02 callers imported `escapeXml` from this module. The helper
+// now lives in `./xml/escape.ts` (T-37-02 single source of truth across the
+// METS, EAD3, and Dublin Core builders); re-export keeps existing imports
+// working without a wider sweep.
+export { escapeXml };
 
 // ---------------------------------------------------------------------------
 // Builder
@@ -158,19 +157,19 @@ export function buildMetsXml(
   xml += `  <dmdSec ID="dmd-001">\n`;
   xml += `    <mdWrap MDTYPE="DC">\n`;
   xml += `      <xmlData xmlns:dc="${NS_DC}" xmlns:dcterms="${NS_DCTERMS}">\n`;
-  xml += dc("dc:title", title);
-  xml += dc("dc:identifier", ref);
-  xml += dc("dc:date", desc.dateExpression);
-  xml += dc("dc:description", desc.scopeContent);
-  xml += dc("dc:creator", desc.creatorDisplay);
-  xml += dc("dc:language", mappedLang || null);
-  xml += dc("dc:format", desc.extent);
-  xml += dc("dc:type", dcType || null);
-  xml += dc("dc:source", source || null);
-  xml += dc("dc:rights", rights);
-  xml += dc("dc:subject", desc.placeDisplay);
-  xml += dc("dcterms:isPartOf", desc.parentReferenceCode);
-  xml += dc("dc:publisher", desc.imprint);
+  xml += el("dc:title", title);
+  xml += el("dc:identifier", ref);
+  xml += el("dc:date", desc.dateExpression);
+  xml += el("dc:description", desc.scopeContent);
+  xml += el("dc:creator", desc.creatorDisplay);
+  xml += el("dc:language", mappedLang || null);
+  xml += el("dc:format", desc.extent);
+  xml += el("dc:type", dcType || null);
+  xml += el("dc:source", source || null);
+  xml += el("dc:rights", rights);
+  xml += el("dc:subject", desc.placeDisplay);
+  xml += el("dcterms:isPartOf", desc.parentReferenceCode);
+  xml += el("dc:publisher", desc.imprint);
   xml += `      </xmlData>\n`;
   xml += `    </mdWrap>\n`;
   xml += `  </dmdSec>\n`;

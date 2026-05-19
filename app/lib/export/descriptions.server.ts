@@ -1,13 +1,14 @@
 /**
  * Description Formatter
  *
- * Maps one Drizzle row off `descriptions` into the shape the published
- * JSON expects. Handles language-code lookup, hierarchy level
- * resolution, repository short-code denormalisation, and the allowlist
- * of fields that are safe to publish — internal bookkeeping columns
- * (createdBy, updatedBy, internal notes) are deliberately excluded.
+ * This module deals with mapping one Drizzle row off `descriptions`
+ * into the shape the published JSON expects. It handles language-code
+ * lookup, hierarchy level resolution, repository short-code
+ * denormalisation, and the allowlist of fields that are safe to
+ * publish — internal bookkeeping columns (createdBy, updatedBy,
+ * internal notes) are deliberately excluded.
  *
- * @version v0.3.0
+ * @version v0.4.0
  */
 
 import type { ExportDescription } from "./types";
@@ -81,7 +82,7 @@ export function formatDescription(
     childCount: number;
     descriptionLevel: string;
     referenceCode: string;
-    localIdentifier: string;
+    localIdentifier: string | null;
     title: string;
     dateExpression: string | null;
     dateStart: string | null;
@@ -96,7 +97,6 @@ export function formatDescription(
     language: string | null;
     locationOfOriginals: string | null;
     locationOfCopies: string | null;
-    relatedMaterials: string | null;
     findingAids: string | null;
     notes: string | null;
     imprint: string | null;
@@ -117,7 +117,10 @@ export function formatDescription(
     repository_code: repo.code,
     country: repo.country ?? "",
     reference_code: row.referenceCode,
-    local_identifier: row.localIdentifier,
+    // local_identifier RELAXED to nullable in 0036 (DACS/RAD do not
+    // mandate it). The export shape stays string for snapshot
+    // continuity; coerce null to empty string.
+    local_identifier: row.localIdentifier ?? "",
     title: row.title,
     description_level: row.descriptionLevel,
     date_expression: row.dateExpression,
@@ -143,7 +146,9 @@ export function formatDescription(
     language: LANGUAGE_MAP[row.language ?? ""] ?? row.language ?? null,
     location_of_originals: row.locationOfOriginals,
     location_of_copies: row.locationOfCopies,
-    related_materials: row.relatedMaterials,
+    // Dropped in 0036 (0% populated); preserved as null in export
+    // shape for downstream-snapshot continuity.
+    related_materials: null,
     finding_aids: row.findingAids,
     notes: row.notes,
     publication_title: publicationTitle(row.referenceCode, repo.code),

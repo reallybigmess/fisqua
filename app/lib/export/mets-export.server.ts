@@ -1,20 +1,28 @@
 /**
  * METS Export Step
  *
- * One fonds' worth of METS XML generation: queries the digitised
- * descriptions that are either unexported or have been edited since
- * their last export, runs each row through `buildMetsXml`, and uploads
- * the resulting XML files to the METS R2 bucket that the IIIF viewer
- * reads from. The dirty-flag pattern keeps each run bounded to a small
- * fraction of the fonds even when the catalogue itself is large.
+ * This module deals with one fonds' worth of METS XML generation:
+ * it queries the digitised descriptions that are either unexported or
+ * have been edited since their last export, runs each row through
+ * `buildMetsXml`, and uploads the resulting XML files to the METS R2
+ * bucket that the IIIF viewer reads from. The dirty-flag pattern
+ * keeps each run bounded to a small fraction of the fonds even when
+ * the catalogue itself is large.
  *
- * @version v0.3.0
+ * The `tenant` argument ensures every D1 read filters by `tenant.id`
+ * and every METS-bucket key is prefixed with `${tenant.slug}/`. The
+ * METS bucket is a separate R2
+ * binding from EXPORT_BUCKET; the prefix scheme is identical so an
+ * operator listing either bucket sees the same human-readable layout.
+ *
+ * @version v0.4.0
  */
 
 import { eq, and, isNull, gt, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { descriptions, repositories } from "../../db/schema";
 import { buildMetsXml, type MetsInput, type MetsRepository } from "./mets-builder";
+import type { ExportTenant } from "./types";
 
 /**
  * Generate and upload METS XML for dirty digitised descriptions in a fonds.
@@ -24,13 +32,19 @@ import { buildMetsXml, type MetsInput, type MetsRepository } from "./mets-builde
 export async function exportFondsMets(
   db: DrizzleD1Database<any>,
   metsBucket: R2Bucket,
-  fonds: string
+  fonds: string,
+  tenant: ExportTenant
 ): Promise<{ generatedCount: number; skippedCount: number }> {
   // Find the root description for this fonds
   const root = await db
     .select({ id: descriptions.id })
     .from(descriptions)
-    .where(eq(descriptions.referenceCode, fonds))
+    .where(
+      and(
+        eq(descriptions.referenceCode, fonds),
+        eq(descriptions.tenantId, tenant.id)
+      )
+    )
     .get();
 
   if (!root) return { generatedCount: 0, skippedCount: 0 };
@@ -45,6 +59,7 @@ export async function exportFondsMets(
     .from(descriptions)
     .where(
       and(
+        eq(descriptions.tenantId, tenant.id),
         eq(descriptions.rootDescriptionId, root.id),
         eq(descriptions.hasDigital, true),
         sql`${descriptions.iiifManifestUrl} IS NOT NULL`
@@ -73,6 +88,7 @@ export async function exportFondsMets(
     .from(descriptions)
     .where(
       and(
+        eq(descriptions.tenantId, tenant.id),
         eq(descriptions.rootDescriptionId, root.id),
         eq(descriptions.hasDigital, true),
         sql`${descriptions.iiifManifestUrl} IS NOT NULL`,
@@ -100,7 +116,12 @@ export async function exportFondsMets(
           rightsText: repositories.rightsText,
         })
         .from(repositories)
-        .where(eq(repositories.id, row.repositoryId))
+        .where(
+          and(
+            eq(repositories.id, row.repositoryId),
+            eq(repositories.tenantId, tenant.id)
+          )
+        )
         .get();
       repo = repoRow ?? null;
       repoCache.set(row.repositoryId, repo);
@@ -115,7 +136,12 @@ export async function exportFondsMets(
         const parent = await db
           .select({ referenceCode: descriptions.referenceCode })
           .from(descriptions)
-          .where(eq(descriptions.id, row.parentId))
+          .where(
+            and(
+              eq(descriptions.id, row.parentId),
+              eq(descriptions.tenantId, tenant.id)
+            )
+          )
           .get();
         parentRefCode = parent?.referenceCode ?? null;
         parentRefCache.set(row.parentId, parentRefCode);
@@ -140,8 +166,10 @@ export async function exportFondsMets(
 
     const xml = buildMetsXml(input, repo, createDate);
 
-    // Sanitise reference code for R2 key (T-26-06)
-    const key = `${row.referenceCode.replace(/[?#]/g, "")}.xml`;
+    // Sanitise reference code for R2 key and prefix with the tenant
+    // slug so the METS bucket layout matches EXPORT_BUCKET's
+    // per-tenant prefix scheme (slug, not UUID).
+    const key = `${tenant.slug}/${row.referenceCode.replace(/[?#]/g, "")}.xml`;
     await metsBucket.put(key, xml, {
       httpMetadata: { contentType: "application/xml; charset=utf-8" },
     });
@@ -150,7 +178,12 @@ export async function exportFondsMets(
     await db
       .update(descriptions)
       .set({ lastExportedAt: Date.now() })
-      .where(eq(descriptions.id, row.id));
+      .where(
+        and(
+          eq(descriptions.id, row.id),
+          eq(descriptions.tenantId, tenant.id)
+        )
+      );
 
     generatedCount++;
   }

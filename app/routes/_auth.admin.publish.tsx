@@ -1,20 +1,36 @@
 /**
  * Publish Admin Dashboard
  *
- * The superadmin-only page for triggering a new publish run and
- * watching it progress. Loader derives the pre-flight changelog —
+ * This page is the superadmin-only surface for triggering a new
+ * publish run and watching it progress. The loader derives the
+ * pre-flight changelog —
  * what would be added, modified, or unpublished for every fonds and
  * every other data type — and an in-flight runs is passed to the
  * progress panel so the page can poll until completion. Recent runs
  * appear in the history table below, each linking into the per-run
  * detail page.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`. The pre-flight count queries against
+ * `repositories`, `entities`, and `places` are scoped to
+ * `tenant.id`, and the per-fonds CTE on `descriptions` is filtered
+ * to the calling tenant.
+ *
+ * Capability gate runs before everything else. The loader calls
+ * `requireCapability(tenant, "publish_pipeline")` as the first
+ * data-access action, throwing a bare `Response(null, {status: 404})`
+ * when the tenant has the `publish_pipeline` flag off. The gate
+ * precedes the superadmin-only check so a tenant on a publish-off
+ * configuration 404s for everyone, never falling through to the
+ * "superadmin required" page.
+ *
+ * @version v0.4.0
  */
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
+import { requireCapability } from "../lib/tenant";
 import { ChangelogSection } from "../components/publish/changelog-section";
 import { ExportControls } from "../components/publish/export-controls";
 import { ExportProgress } from "../components/publish/export-progress";
@@ -45,6 +61,8 @@ export async function loader({ context }: Route.LoaderArgs) {
     await import("../db/schema");
 
   const user = context.get(userContext);
+  const tenant = context.get(tenantContext);
+  requireCapability(tenant, "publish_pipeline");
 
   if (!user.isSuperAdmin) {
     return {
@@ -61,13 +79,45 @@ export async function loader({ context }: Route.LoaderArgs) {
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
 
-  const fondsList = await getFondsList(db);
+  // `getFondsList` is tenant-scoped so cataloguers on Tenant A never
+  // see Tenant B's fonds in the dropdown. The route is already gated
+  // to `kind = 'tenant'` via `requireCapability` above, so
+  // `descriptiveStandard` is non-null in practice.
+  //
+  // A nullable `descriptiveStandard` is a schema-invariant violation
+  // (the CHECK in drizzle/0034_tenants_table.sql forbids it when
+  // `kind = 'tenant'`); the workflow's load-config correctly throws
+  // in that case, and we do the same here rather than silently
+  // coercing a corrupted tenant row to ISAD(G) shape.
+  if (!tenant.descriptiveStandard) {
+    throw new Error(
+      `Tenant ${tenant.slug} has no descriptive_standard (kind=platform tenants cannot publish)`
+    );
+  }
+  const fondsList = await getFondsList(db, {
+    id: tenant.id,
+    slug: tenant.slug,
+    descriptiveStandard: tenant.descriptiveStandard,
+  });
 
-  // Find the last completed export timestamp
+  // Find the last completed export timestamp scoped to this tenant.
+  // Reading `lastExport` from the global `exportRuns` pool would let
+  // a Tenant B run completing five minutes ago set the "since last
+  // export" reference for Tenant A's changelog deltas —
+  // under-counting legitimate Tenant A "modified since" rows.
+  // `exportRuns` has no `tenantId` column (the schema add was
+  // deferred to a future release), so tenant scoping joins
+  // `exportRuns.triggeredBy → users.tenantId`.
   const lastExport = await db
     .select({ completedAt: exportRuns.completedAt })
     .from(exportRuns)
-    .where(eq(exportRuns.status, "complete"))
+    .innerJoin(users, eq(exportRuns.triggeredBy, users.id))
+    .where(
+      and(
+        eq(exportRuns.status, "complete"),
+        eq(users.tenantId, tenant.id)
+      )
+    )
     .orderBy(desc(exportRuns.completedAt))
     .limit(1)
     .get();
@@ -96,6 +146,8 @@ export async function loader({ context }: Route.LoaderArgs) {
     FROM ${descriptions} d
     JOIN ${descriptions} root ON d.root_description_id = root.id
     WHERE root.parent_id IS NULL
+      AND d.tenant_id = ${tenant.id}
+      AND root.tenant_id = ${tenant.id}
     GROUP BY root.reference_code, root.title
     ORDER BY root.reference_code
   `);
@@ -119,33 +171,51 @@ export async function loader({ context }: Route.LoaderArgs) {
     ? await db
         .select({ count: sql<number>`count(*)` })
         .from(repositories)
-        .where(gt(repositories.updatedAt, lastExportedAt))
+        .where(
+          and(
+            eq(repositories.tenantId, tenant.id),
+            gt(repositories.updatedAt, lastExportedAt)
+          )
+        )
         .get()
     : await db
         .select({ count: sql<number>`count(*)` })
         .from(repositories)
+        .where(eq(repositories.tenantId, tenant.id))
         .get();
 
   const entityCount = lastExportedAt
     ? await db
         .select({ count: sql<number>`count(*)` })
         .from(entities)
-        .where(gt(entities.updatedAt, lastExportedAt))
+        .where(
+          and(
+            eq(entities.tenantId, tenant.id),
+            gt(entities.updatedAt, lastExportedAt)
+          )
+        )
         .get()
     : await db
         .select({ count: sql<number>`count(*)` })
         .from(entities)
+        .where(eq(entities.tenantId, tenant.id))
         .get();
 
   const placeCount = lastExportedAt
     ? await db
         .select({ count: sql<number>`count(*)` })
         .from(places)
-        .where(gt(places.updatedAt, lastExportedAt))
+        .where(
+          and(
+            eq(places.tenantId, tenant.id),
+            gt(places.updatedAt, lastExportedAt)
+          )
+        )
         .get()
     : await db
         .select({ count: sql<number>`count(*)` })
         .from(places)
+        .where(eq(places.tenantId, tenant.id))
         .get();
 
   const changelog: ChangelogData = {
@@ -155,18 +225,34 @@ export async function loader({ context }: Route.LoaderArgs) {
     places: { modified: Number(placeCount?.count ?? 0) },
   };
 
-  // Active export (running or pending)
+  // Active export (running or pending) — scoped to this tenant.
+  // A global query would let a Tenant A superadmin landing on
+  // /admin/publish while a Tenant B run was in flight see the Tenant
+  // B run's id and let the polling ExportProgress panel chain into
+  // the (also-leaked) GET /api/publish body. Same join pattern as
+  // `lastExport` above.
   const activeExport = await db
-    .select()
+    .select({
+      id: exportRuns.id,
+      status: exportRuns.status,
+    })
     .from(exportRuns)
+    .innerJoin(users, eq(exportRuns.triggeredBy, users.id))
     .where(
-      sql`${exportRuns.status} IN ('running', 'pending')`
+      and(
+        sql`${exportRuns.status} IN ('running', 'pending')`,
+        eq(users.tenantId, tenant.id)
+      )
     )
     .orderBy(desc(exportRuns.createdAt))
     .limit(1)
     .get();
 
-  // Export history: 20 most recent
+  // Export history: 20 most recent — scoped to this tenant.
+  // A leftJoin on `users` would return platform-wide rows including
+  // each run's triggering user email and selected fonds (cross-tenant
+  // operator visibility); the join must be an innerJoin so it both
+  // filters and exposes `users.tenantId` as the scoping column.
   const historyRows = await db
     .select({
       id: exportRuns.id,
@@ -184,7 +270,8 @@ export async function loader({ context }: Route.LoaderArgs) {
       createdAt: exportRuns.createdAt,
     })
     .from(exportRuns)
-    .leftJoin(users, eq(exportRuns.triggeredBy, users.id))
+    .innerJoin(users, eq(exportRuns.triggeredBy, users.id))
+    .where(eq(users.tenantId, tenant.id))
     .orderBy(desc(exportRuns.createdAt))
     .limit(20)
     .all();
