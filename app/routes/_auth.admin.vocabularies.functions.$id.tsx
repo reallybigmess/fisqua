@@ -1,20 +1,25 @@
 /**
  * Vocabularies — Function Detail
  *
- * Detail view for one function-style vocabulary term: label in every
+ * This page is the detail view for one function-style vocabulary term: label in every
  * active locale, linked descriptions, current status, and the full
  * audit trail. Mutations route through the shared admin dialogs
  * (merge, split, link-description) so each workflow stays consistent
  * with the rest of the vocabularies hub.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`. Every read/update/delete of `entities`
+ * (linked-entity reads, primaryFunction reassignment, count
+ * subqueries) is filtered by `tenant.id`.
+ *
+ * @version v0.4.0
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Form, Link, redirect, useFetcher } from "react-router";
 import { useTranslation } from "react-i18next";
 import { Search } from "lucide-react";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import { FUNCTION_CATEGORIES } from "~/lib/validation/enums";
 import { CollapsibleSection } from "~/components/admin/collapsible-section";
 import { VocabularyStatusBadge } from "~/components/admin/vocabulary-status-badge";
@@ -49,11 +54,12 @@ interface LinkedEntity {
 export async function loader({ params, context }: Route.LoaderArgs) {
   const { requireAdmin } = await import("~/lib/permissions.server");
   const { drizzle } = await import("drizzle-orm/d1");
-  const { eq, sql } = await import("drizzle-orm");
+  const { and, eq, sql } = await import("drizzle-orm");
   const { vocabularyTerms, entities } = await import("~/db/schema");
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -84,7 +90,12 @@ export async function loader({ params, context }: Route.LoaderArgs) {
       entityCode: entities.entityCode,
     })
     .from(entities)
-    .where(eq(entities.primaryFunctionId, id))
+    .where(
+      and(
+        eq(entities.tenantId, tenant.id),
+        eq(entities.primaryFunctionId, id)
+      )
+    )
     .limit(pageSize)
     .all()) as LinkedEntity[];
 
@@ -92,7 +103,12 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   const [{ count: totalLinked }] = await db
     .select({ count: sql<number>`count(*)` })
     .from(entities)
-    .where(eq(entities.primaryFunctionId, id))
+    .where(
+      and(
+        eq(entities.tenantId, tenant.id),
+        eq(entities.primaryFunctionId, id)
+      )
+    )
     .all();
 
   return { term: term as VocabTerm, linkedEntities, totalLinked };
@@ -105,12 +121,13 @@ export async function loader({ params, context }: Route.LoaderArgs) {
 export async function action({ params, request, context }: Route.ActionArgs) {
   const { requireAdmin } = await import("~/lib/permissions.server");
   const { drizzle } = await import("drizzle-orm/d1");
-  const { eq, inArray, sql } = await import("drizzle-orm");
+  const { and, eq, inArray, sql } = await import("drizzle-orm");
   const { vocabularyTerms, entities, changelog } = await import("~/db/schema");
   const { vocabularyTermSchema } = await import("~/lib/validation/vocabulary");
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -217,12 +234,19 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       entityIds = [];
     }
 
-    // Reassign selected entities to target
+    // Reassign selected entities to target. Tenant-scoped so a
+    // cross-tenant id-guess in the linkIds payload cannot move
+    // entities between tenants.
     if (entityIds.length > 0) {
       await db
         .update(entities)
         .set({ primaryFunctionId: targetId, updatedAt: now })
-        .where(inArray(entities.id, entityIds));
+        .where(
+          and(
+            eq(entities.tenantId, tenant.id),
+            inArray(entities.id, entityIds)
+          )
+        );
     }
 
     // Deprecate source and set mergedInto
@@ -235,11 +259,18 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       })
       .where(eq(vocabularyTerms.id, id));
 
-    // Update entity counts on both
+    // Update entity counts on both. The counts are tenant-scoped so
+    // they reflect the calling tenant only; vocabulary_terms itself
+    // does not carry a tenantId in the current schema.
     const [{ count: targetCount }] = await db
       .select({ count: sql<number>`count(*)` })
       .from(entities)
-      .where(eq(entities.primaryFunctionId, targetId))
+      .where(
+        and(
+          eq(entities.tenantId, tenant.id),
+          eq(entities.primaryFunctionId, targetId)
+        )
+      )
       .all();
     await db
       .update(vocabularyTerms)
@@ -249,7 +280,12 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     const [{ count: sourceCount }] = await db
       .select({ count: sql<number>`count(*)` })
       .from(entities)
-      .where(eq(entities.primaryFunctionId, id))
+      .where(
+        and(
+          eq(entities.tenantId, tenant.id),
+          eq(entities.primaryFunctionId, id)
+        )
+      )
       .all();
     await db
       .update(vocabularyTerms)
@@ -311,19 +347,30 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       updatedAt: now,
     });
 
-    // Move selected entities to new term
+    // Move selected entities to new term (tenant-scoped to prevent
+    // cross-tenant reassignment via crafted linkIds payload).
     if (entityIds.length > 0) {
       await db
         .update(entities)
         .set({ primaryFunctionId: newId, updatedAt: now })
-        .where(inArray(entities.id, entityIds));
+        .where(
+          and(
+            eq(entities.tenantId, tenant.id),
+            inArray(entities.id, entityIds)
+          )
+        );
     }
 
     // Update entity counts on both
     const [{ count: sourceCount }] = await db
       .select({ count: sql<number>`count(*)` })
       .from(entities)
-      .where(eq(entities.primaryFunctionId, id))
+      .where(
+        and(
+          eq(entities.tenantId, tenant.id),
+          eq(entities.primaryFunctionId, id)
+        )
+      )
       .all();
     await db
       .update(vocabularyTerms)
@@ -333,7 +380,12 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     const [{ count: newCount }] = await db
       .select({ count: sql<number>`count(*)` })
       .from(entities)
-      .where(eq(entities.primaryFunctionId, newId))
+      .where(
+        and(
+          eq(entities.tenantId, tenant.id),
+          eq(entities.primaryFunctionId, newId)
+        )
+      )
       .all();
     await db
       .update(vocabularyTerms)

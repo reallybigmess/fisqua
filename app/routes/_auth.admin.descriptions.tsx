@@ -1,7 +1,7 @@
 /**
  * Descriptions Admin — Tree and Column Views
  *
- * The archival descriptions explorer. Renders the hierarchy of
+ * This page is the archival descriptions explorer. It renders the hierarchy of
  * fonds-to-item records either as a lazy-loaded tree or as a Miller
  * column view for deeper browsing, backed by the FTS5 search index
  * for accent-insensitive find-as-you-type across reference codes and
@@ -10,14 +10,39 @@
  * through the move dialog. The "New description" button opens the
  * create form; each row deep-links into the edit page.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`. Every read/update/delete of `descriptions` and
+ * `repositories` is filtered by `tenant.id`.
+ *
+ * Standard-aware label routing: this route renders no section labels
+ * (those live in the form's collapsible sections), no hardcoded
+ * standard names ("ISAD"/"ISAD(G)"/etc.) anywhere in page chrome,
+ * and only level labels and column-header labels in the column view.
+ * Description-level labels (fonds / series / file / item / etc.) are
+ * universal across ISAD(G) / DACS / RAD and STAY FLAT as
+ * `t("level_" + level)` — the convention is shared across at least
+ * three files (this one, the description form, the breadcrumbs in
+ * the cataloguing surface) and changing it here without updating the
+ * others would create lockstep drift. No `tStd` routing is needed
+ * here because no section / per-standard-divergent labels are
+ * rendered in this file. The route is therefore standard-neutral by
+ * construction.
+ *
+ * Trust-boundary note: any future addition of breadcrumb chains or
+ * page-chrome sub-labels that mention archival sections (e.g.
+ * "Identity statement" / "Context") MUST route through `tStd(t,
+ * "sections.<id>", standard)` with `standard =
+ * tenant.descriptiveStandard` read from `tenantContext`. Level
+ * labels — even in a future breadcrumb — stay flat.
+ *
+ * @version v0.4.0
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Link, useSearchParams, useFetcher } from "react-router";
 import { useTranslation } from "react-i18next";
 import { Plus, Search, Check } from "lucide-react";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import { MillerColumns } from "~/components/descriptions/miller-columns";
 import { MetadataPreview } from "~/components/descriptions/metadata-preview";
 import { DataTable } from "~/components/data-table/data-table";
@@ -65,6 +90,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -88,7 +114,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const repoFilter = url.searchParams.get("repoId");
   const hasDigitalFilter = url.searchParams.get("hasDigital");
 
-  // Validate filters (T-28-09)
+  // Validate filters against the closed enum.
   const validLevel =
     levelFilter &&
     (DESCRIPTION_LEVELS as readonly string[]).includes(levelFilter)
@@ -110,8 +136,11 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       .from(descriptions)
       .where(
         q
-          ? sql`(${descriptions.title} LIKE ${likePattern} OR ${descriptions.referenceCode} LIKE ${likePattern})`
-          : undefined
+          ? and(
+              eq(descriptions.tenantId, tenant.id),
+              sql`(${descriptions.title} LIKE ${likePattern} OR ${descriptions.referenceCode} LIKE ${likePattern})`
+            )
+          : eq(descriptions.tenantId, tenant.id)
       )
       .orderBy(asc(descriptions.referenceCode))
       .limit(20)
@@ -127,11 +156,12 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       code: repositories.code,
     })
     .from(repositories)
+    .where(eq(repositories.tenantId, tenant.id))
     .orderBy(asc(repositories.name))
     .all();
 
-  // Build base conditions
-  const baseConditions: any[] = [];
+  // Build base conditions. Tenant predicate is always present.
+  const baseConditions: any[] = [eq(descriptions.tenantId, tenant.id)];
   if (validLevel) {
     baseConditions.push(eq(descriptions.descriptionLevel, validLevel));
   }
@@ -146,7 +176,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   if (search) {
     let searchIds: string[] | null = null;
     try {
-      // Build FTS5 query (T-28-08: parameterised)
+      // Build FTS5 query (parameterised).
       const ftsQuery = search.startsWith('"')
         ? search
         : search
@@ -173,7 +203,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         )})`
       );
     } else if (searchIds === null) {
-      // LIKE fallback (T-28-08: parameterised)
+      // LIKE fallback (parameterised).
       const likePattern = `%${search}%`;
       baseConditions.push(
         sql`(${descriptions.title} LIKE ${likePattern} OR ${descriptions.referenceCode} LIKE ${likePattern})`
@@ -284,6 +314,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -292,7 +323,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   switch (intent) {
     // -----------------------------------------------------------------
-    // Reorder siblings (T-21-17)
+    // Reorder siblings
     // -----------------------------------------------------------------
     case "reorder": {
       const descriptionId = formData.get("descriptionId") as string;
@@ -310,7 +341,12 @@ export async function action({ request, context }: Route.ActionArgs) {
           depth: descriptions.depth,
         })
         .from(descriptions)
-        .where(eq(descriptions.id, descriptionId))
+        .where(
+          and(
+            eq(descriptions.tenantId, tenant.id),
+            eq(descriptions.id, descriptionId)
+          )
+        )
         .get();
 
       if (!desc) {
@@ -322,13 +358,23 @@ export async function action({ request, context }: Route.ActionArgs) {
         ? await db
             .select({ id: descriptions.id, position: descriptions.position })
             .from(descriptions)
-            .where(eq(descriptions.parentId, desc.parentId))
+            .where(
+              and(
+                eq(descriptions.tenantId, tenant.id),
+                eq(descriptions.parentId, desc.parentId)
+              )
+            )
             .orderBy(asc(descriptions.position))
             .all()
         : await db
             .select({ id: descriptions.id, position: descriptions.position })
             .from(descriptions)
-            .where(eq(descriptions.depth, 0))
+            .where(
+              and(
+                eq(descriptions.tenantId, tenant.id),
+                eq(descriptions.depth, 0)
+              )
+            )
             .orderBy(asc(descriptions.position))
             .all();
 
@@ -347,17 +393,27 @@ export async function action({ request, context }: Route.ActionArgs) {
       await db
         .update(descriptions)
         .set({ position: target.position })
-        .where(eq(descriptions.id, current.id));
+        .where(
+          and(
+            eq(descriptions.tenantId, tenant.id),
+            eq(descriptions.id, current.id)
+          )
+        );
       await db
         .update(descriptions)
         .set({ position: current.position })
-        .where(eq(descriptions.id, target.id));
+        .where(
+          and(
+            eq(descriptions.tenantId, tenant.id),
+            eq(descriptions.id, target.id)
+          )
+        );
 
       return Response.json({ ok: true });
     }
 
     // -----------------------------------------------------------------
-    // Move to new parent (T-21-16)
+    // Move to new parent
     // -----------------------------------------------------------------
     case "move": {
       const descriptionId = formData.get("descriptionId") as string;
@@ -372,12 +428,30 @@ export async function action({ request, context }: Route.ActionArgs) {
         return Response.json({ ok: false, error: "self_move" });
       }
 
-      const desc = await db.select().from(descriptions).where(eq(descriptions.id, descriptionId)).get();
+      const desc = await db
+        .select()
+        .from(descriptions)
+        .where(
+          and(
+            eq(descriptions.tenantId, tenant.id),
+            eq(descriptions.id, descriptionId)
+          )
+        )
+        .get();
       if (!desc) {
         return Response.json({ ok: false, error: "not_found" });
       }
 
-      const newParent = await db.select().from(descriptions).where(eq(descriptions.id, newParentId)).get();
+      const newParent = await db
+        .select()
+        .from(descriptions)
+        .where(
+          and(
+            eq(descriptions.tenantId, tenant.id),
+            eq(descriptions.id, newParentId)
+          )
+        )
+        .get();
       if (!newParent) {
         return Response.json({ ok: false, error: "parent_not_found" });
       }
@@ -392,7 +466,12 @@ export async function action({ request, context }: Route.ActionArgs) {
         const ancestor = await db
           .select({ parentId: descriptions.parentId })
           .from(descriptions)
-          .where(eq(descriptions.id, checkId))
+          .where(
+            and(
+              eq(descriptions.tenantId, tenant.id),
+              eq(descriptions.id, checkId)
+            )
+          )
           .get();
         checkId = ancestor?.parentId ?? null;
         depth++;
@@ -412,7 +491,12 @@ export async function action({ request, context }: Route.ActionArgs) {
       const newSiblings = await db
         .select({ id: descriptions.id })
         .from(descriptions)
-        .where(eq(descriptions.parentId, newParentId))
+        .where(
+          and(
+            eq(descriptions.tenantId, tenant.id),
+            eq(descriptions.parentId, newParentId)
+          )
+        )
         .all();
       const newPosition = newSiblings.length;
 
@@ -429,7 +513,12 @@ export async function action({ request, context }: Route.ActionArgs) {
             : desc.id,
           updatedAt: Date.now(),
         })
-        .where(eq(descriptions.id, descriptionId));
+        .where(
+          and(
+            eq(descriptions.tenantId, tenant.id),
+            eq(descriptions.id, descriptionId)
+          )
+        );
 
       // Update descendants: rootDescriptionId and depth via recursive CTE
       if (desc.childCount > 0) {
@@ -451,13 +540,23 @@ export async function action({ request, context }: Route.ActionArgs) {
         const oldParent = await db
           .select({ childCount: descriptions.childCount })
           .from(descriptions)
-          .where(eq(descriptions.id, oldParentId))
+          .where(
+            and(
+              eq(descriptions.tenantId, tenant.id),
+              eq(descriptions.id, oldParentId)
+            )
+          )
           .get();
         if (oldParent) {
           await db
             .update(descriptions)
             .set({ childCount: Math.max(0, oldParent.childCount - 1) })
-            .where(eq(descriptions.id, oldParentId));
+            .where(
+              and(
+                eq(descriptions.tenantId, tenant.id),
+                eq(descriptions.id, oldParentId)
+              )
+            );
         }
       }
 
@@ -465,13 +564,18 @@ export async function action({ request, context }: Route.ActionArgs) {
       await db
         .update(descriptions)
         .set({ childCount: newParent.childCount + 1 })
-        .where(eq(descriptions.id, newParentId));
+        .where(
+          and(
+            eq(descriptions.tenantId, tenant.id),
+            eq(descriptions.id, newParentId)
+          )
+        );
 
       return Response.json({ ok: true });
     }
 
     // -----------------------------------------------------------------
-    // Delete from tree (T-21-18)
+    // Delete from tree
     // -----------------------------------------------------------------
     case "delete": {
       const descriptionId = formData.get("descriptionId") as string;
@@ -485,7 +589,12 @@ export async function action({ request, context }: Route.ActionArgs) {
           parentId: descriptions.parentId,
         })
         .from(descriptions)
-        .where(eq(descriptions.id, descriptionId))
+        .where(
+          and(
+            eq(descriptions.tenantId, tenant.id),
+            eq(descriptions.id, descriptionId)
+          )
+        )
         .get();
 
       if (!desc) {
@@ -501,20 +610,37 @@ export async function action({ request, context }: Route.ActionArgs) {
       }
 
       // Delete (entity/place links cascade per schema)
-      await db.delete(descriptions).where(eq(descriptions.id, descriptionId));
+      await db
+        .delete(descriptions)
+        .where(
+          and(
+            eq(descriptions.tenantId, tenant.id),
+            eq(descriptions.id, descriptionId)
+          )
+        );
 
       // Decrement parent's childCount
       if (desc.parentId) {
         const parent = await db
           .select({ childCount: descriptions.childCount })
           .from(descriptions)
-          .where(eq(descriptions.id, desc.parentId))
+          .where(
+            and(
+              eq(descriptions.tenantId, tenant.id),
+              eq(descriptions.id, desc.parentId)
+            )
+          )
           .get();
         if (parent) {
           await db
             .update(descriptions)
             .set({ childCount: Math.max(0, parent.childCount - 1) })
-            .where(eq(descriptions.id, desc.parentId));
+            .where(
+              and(
+                eq(descriptions.tenantId, tenant.id),
+                eq(descriptions.id, desc.parentId)
+              )
+            );
         }
       }
 

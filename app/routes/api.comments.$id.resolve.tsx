@@ -1,8 +1,9 @@
 /**
  * Comments API — Resolve
  *
- * POST marks one comment thread as resolved. Scoped to project leads
- * and reviewers; writes the resolve timestamp and resolver id onto
+ * This API endpoint accepts a POST that marks one comment thread as
+ * resolved. Scoped to project leads and reviewers; it writes the
+ * resolve timestamp and resolver id onto
  * the thread row so the audit trail survives.
  *
  * @version v0.3.0

@@ -1,19 +1,25 @@
 /**
  * Vocabularies — Enums Editor
  *
- * Admin surface for managing the enum-valued controlled vocabularies
- * used across the app. Lets superadmins add new values, deprecate old
+ * This page is the admin surface for managing the enum-valued
+ * controlled vocabularies used across the app. It lets superadmins
+ * add new values, deprecate old
  * ones, and merge duplicates; every mutation writes an audit row so
  * the change trail is recoverable.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`. Usage counts on `entities` and `places` are
+ * scoped to `tenant.id`; descriptionEntities and descriptionPlaces
+ * inherit tenant scope via FK chain.
+ *
+ * @version v0.4.0
  */
 
 import { useState } from "react";
 import { Form, Link, redirect, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, AlertTriangle, Pencil, Trash2, Plus, X, Check } from "lucide-react";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import {
   ENTITY_ROLES,
   PLACE_ROLES,
@@ -54,7 +60,7 @@ type VocabKey = keyof typeof VOCAB_MAP;
 export async function loader({ request, context }: Route.LoaderArgs) {
   const { requireAdmin } = await import("~/lib/permissions.server");
   const { drizzle } = await import("drizzle-orm/d1");
-  const { sql } = await import("drizzle-orm");
+  const { and, eq, sql } = await import("drizzle-orm");
   const {
     descriptionEntities,
     descriptionPlaces,
@@ -64,6 +70,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const url = new URL(request.url);
   const vocabParam = url.searchParams.get("vocab") as VocabKey | null;
@@ -105,7 +112,12 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         count: sql<number>`count(*)`,
       })
       .from(entities)
-      .where(sql`${entities.mergedInto} IS NULL`)
+      .where(
+        and(
+          eq(entities.tenantId, tenant.id),
+          sql`${entities.mergedInto} IS NULL`
+        )
+      )
       .groupBy(entities.entityType)
       .all();
     for (const row of rows) usageMap.set(row.type, row.count);
@@ -116,6 +128,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         count: sql<number>`count(*)`,
       })
       .from(places)
+      .where(eq(places.tenantId, tenant.id))
       .groupBy(places.placeType)
       .all();
     for (const row of rows) usageMap.set(row.type ?? "", row.count);

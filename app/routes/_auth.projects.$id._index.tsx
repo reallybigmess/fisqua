@@ -1,8 +1,8 @@
 /**
  * Project Root Redirect
  *
- * Lands on `/projects/:id` and forwards the caller to the project
- * overview so the sidebar never surfaces a blank panel when a
+ * This route lands on `/projects/:id` and forwards the caller to the
+ * project overview so the sidebar never surfaces a blank panel when a
  * project is selected.
  *
  * @version v0.3.0

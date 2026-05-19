@@ -1,11 +1,11 @@
 /**
  * Comment Partition
  *
- * Pure helpers that split an array of comments into the buckets the
- * viewer and outline render: by page, by entry, by QC flag, and
- * by anchored region. Keeps the partitioning logic in one testable
- * place so the server and client agree on how each comment is
- * surfaced.
+ * This module deals with the pure helpers that split an array of
+ * comments into the buckets the viewer and outline render: by page,
+ * by entry, by QC flag, and by anchored region. Keeping the
+ * partitioning logic in one testable place means the server and
+ * client agree on how each comment is surfaced.
  *
  * @version v0.3.0
  */

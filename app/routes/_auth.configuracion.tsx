@@ -1,8 +1,9 @@
 /**
  * Account Configuration Page
  *
- * Personal account preferences for the signed-in user: display name,
- * locale, and notification toggles. Scoped to the caller — no
+ * This page is the personal account preferences surface for the
+ * signed-in user: display name, locale, and notification toggles.
+ * Scoped to the caller — no
  * administrative surfaces live here. Reachable from the sidebar
  * footer and the top-bar user menu.
  *

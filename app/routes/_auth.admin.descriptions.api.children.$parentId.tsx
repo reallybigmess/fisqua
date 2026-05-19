@@ -1,16 +1,20 @@
 /**
  * Descriptions Admin — Children API
  *
- * A thin JSON endpoint the description tree and Miller columns call to
- * lazy-load the direct children of a given parent. Keeps the initial
+ * This API endpoint is a thin JSON surface the description tree and
+ * Miller columns call to lazy-load the direct children of a given parent. Keeps the initial
  * page weight small by deferring deeper branches until the user expands
  * them, and avoids a full recursive CTE on every tree render.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`. Repository, description-count, and child-list
+ * queries are filtered by `tenant.id`.
+ *
+ * @version v0.4.0
  */
 
 import type { Route } from "./+types/_auth.admin.descriptions.api.children.$parentId";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 
 export async function loader({ params, context }: Route.LoaderArgs) {
   const { requireAdmin } = await import("~/lib/permissions.server");
@@ -20,6 +24,7 @@ export async function loader({ params, context }: Route.LoaderArgs) {
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const db = drizzle(context.cloudflare.env.DB);
   const parentId = params.parentId;
@@ -42,6 +47,7 @@ export async function loader({ params, context }: Route.LoaderArgs) {
     const repos = await db
       .select({ id: repositories.id, name: repositories.name, code: repositories.code })
       .from(repositories)
+      .where(eq(repositories.tenantId, tenant.id))
       .orderBy(asc(repositories.name))
       .all();
 
@@ -52,7 +58,9 @@ export async function loader({ params, context }: Route.LoaderArgs) {
         n: sql<number>`COUNT(*)`,
       })
       .from(descriptions)
-      .where(eq(descriptions.depth, 0))
+      .where(
+        and(eq(descriptions.tenantId, tenant.id), eq(descriptions.depth, 0))
+      )
       .groupBy(descriptions.repositoryId)
       .all();
     const countByRepo = new Map(counts.map((c) => [c.repositoryId, Number(c.n)]));
@@ -79,7 +87,13 @@ export async function loader({ params, context }: Route.LoaderArgs) {
     const roots = await db
       .select(selectFields)
       .from(descriptions)
-      .where(and(eq(descriptions.repositoryId, repoId), eq(descriptions.depth, 0)))
+      .where(
+        and(
+          eq(descriptions.tenantId, tenant.id),
+          eq(descriptions.repositoryId, repoId),
+          eq(descriptions.depth, 0)
+        )
+      )
       .orderBy(asc(descriptions.position))
       .all();
     return Response.json(roots);
@@ -88,7 +102,9 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   const children = await db
     .select(selectFields)
     .from(descriptions)
-    .where(eq(descriptions.parentId, parentId))
+    .where(
+      and(eq(descriptions.tenantId, tenant.id), eq(descriptions.parentId, parentId))
+    )
     .orderBy(asc(descriptions.position))
     .all();
 

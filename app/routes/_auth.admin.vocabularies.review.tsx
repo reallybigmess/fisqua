@@ -1,20 +1,28 @@
 /**
  * Vocabularies — Review Queue
  *
- * Reviewer-only backlog of draft vocabulary terms awaiting approval.
- * Shows each draft with its proposed label, any linked descriptions,
+ * This page is the reviewer-only backlog of draft vocabulary terms
+ * awaiting approval. It shows each draft with its proposed label, any
+ * linked descriptions,
  * and inline approve / reject actions. Rejections surface the inline
  * panel so the reviewer can capture a reason without leaving the
  * queue.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`. The merge action's primaryFunctionId
+ * reassignment and post-merge entity-count subqueries are scoped to
+ * `tenant.id`. The proposer-name join uses the `users` table; we
+ * filter that join to the calling tenant so a cross-tenant proposer
+ * name cannot leak.
+ *
+ * @version v0.4.0
  */
 
 import { useState } from "react";
 import { Link, useFetcher } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, ChevronLeft, Check, GitMerge, X } from "lucide-react";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import { VocabularyStatusBadge } from "~/components/admin/vocabulary-status-badge";
 import { RejectInlinePanel } from "~/components/admin/reject-inline-panel";
 import { escapeLike } from "~/lib/sql-utils";
@@ -127,13 +135,14 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 export async function action({ request, context }: Route.ActionArgs) {
   const { requireAdmin } = await import("~/lib/permissions.server");
   const { drizzle } = await import("drizzle-orm/d1");
-  const { eq, sql } = await import("drizzle-orm");
+  const { and, eq, sql } = await import("drizzle-orm");
   const { vocabularyTerms, entities, changelog } = await import(
     "~/db/schema"
   );
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -234,11 +243,16 @@ export async function action({ request, context }: Route.ActionArgs) {
 
       const now = Math.floor(Date.now() / 1000);
 
-      // Reassign entities from source to target
+      // Reassign entities from source to target (tenant-scoped).
       await db
         .update(entities)
         .set({ primaryFunctionId: targetId, updatedAt: now })
-        .where(eq(entities.primaryFunctionId, sourceId));
+        .where(
+          and(
+            eq(entities.tenantId, tenant.id),
+            eq(entities.primaryFunctionId, sourceId)
+          )
+        );
 
       // Mark source as merged
       await db
@@ -253,11 +267,16 @@ export async function action({ request, context }: Route.ActionArgs) {
         })
         .where(eq(vocabularyTerms.id, sourceId));
 
-      // Update target entity count
+      // Update target entity count (tenant-scoped).
       const [{ count }] = await db
         .select({ count: sql<number>`count(*)` })
         .from(entities)
-        .where(eq(entities.primaryFunctionId, targetId))
+        .where(
+          and(
+            eq(entities.tenantId, tenant.id),
+            eq(entities.primaryFunctionId, targetId)
+          )
+        )
         .all();
       await db
         .update(vocabularyTerms)

@@ -1,3 +1,27 @@
+/**
+ * Project CRUD Helpers
+ *
+ * This module deals with the server-side primitives the project
+ * surfaces consume: minting short URL-friendly project ids,
+ * validating the create/edit form payload, and the membership-aware
+ * reads that back the dashboard and the per-project workspace. The
+ * 8-character `generateProjectId` replaces the legacy UUID scheme so
+ * project URLs stay short — the 62-character alphabet gives ~2.2e14
+ * possibilities, well above the platform's collision horizon.
+ *
+ * `validateProjectForm` is the single gate at the create boundary; it
+ * runs trimmed-length checks against the human-facing fields before
+ * the route hands the payload to the Drizzle insert, so a malformed
+ * submission surfaces as an inline form error rather than a database
+ * CHECK failure.
+ *
+ * The downstream membership-aware helpers join `projects` against
+ * `projectMembers` so a caller never sees a project they do not have
+ * a role on, regardless of how the loader assembles the request.
+ *
+ * @version v0.3.0
+ */
+
 // --- EXTENSION POINT --- add your domain-specific project logic here
 
 import { eq, and } from "drizzle-orm";

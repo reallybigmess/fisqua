@@ -1,20 +1,24 @@
 /**
  * Repositories Admin — Create
  *
- * The create form for a new repository. Captures the minimum viable
+ * This page is the create form for a new repository. It captures the minimum viable
  * record -- institutional code, display name, short name, city,
  * country, website -- and posts it to the server action. Richer fields
  * like rights statement, hero image, and subtitle live on the edit
  * page; the create form stays focused on "what you need to start
  * cataloguing for this institution".
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`; the new repository row is attributed to
+ * `tenant.id` rather than a single-tenant hard-code.
+ *
+ * @version v0.4.0
  */
 
 import { Form, useActionData, redirect, Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ChevronRight } from "lucide-react";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import type { Route } from "./+types/_auth.admin.repositories.new";
 
 export async function action({ request, context }: Route.ActionArgs) {
@@ -27,6 +31,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -74,6 +79,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   try {
     await db.insert(repositories).values({
+      tenantId: tenant.id,
       id,
       ...parsed.data,
       shortName: parsed.data.shortName ?? null,

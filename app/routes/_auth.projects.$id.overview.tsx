@@ -1,8 +1,9 @@
 /**
  * Project Overview Page
  *
- * Landing page for one project: headline stats, the list of volumes
- * with their descrption-workflow status, and quick links into the
+ * This page is the landing surface for one project: headline stats,
+ * the list of volumes with their descrption-workflow status, and
+ * quick links into the
  * more specialised project surfaces. Read-only — every mutation lives
  * on the dedicated sub-pages.
  *

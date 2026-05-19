@@ -1,18 +1,40 @@
 /**
  * User Admin — Detail Page
  *
- * Superadmin surface for one user account: email, display name,
+ * This page is the superadmin surface for one user account: email, display name,
  * all five role flags, session state, and the audit log of
  * administrative changes. The edit form is guarded behind
  * `requireSuperAdmin`; the audit panel is read-only.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`. Every read/update/delete of the `users` table is
+ * filtered by `tenant.id`, including the role-flag update and the
+ * email-uniqueness check, so cross-tenant id-guessing 404s and
+ * writes cannot reattribute users between tenants.
+ *
+ * When the request tenant has `crowdsourcingEnabled === false`, the
+ * JSX omits the `isCollabAdmin` and `isCataloguer` checkboxes
+ * entirely from the role-flag fieldset. The matching
+ * `applyUpdateRoles` helper skips writing those two fields under the
+ * same condition, so a dormant DB value (set on a user before
+ * crowdsourcing was disabled) is left intact rather than silently
+ * cleared by an unchecked-as-false read of the form body. The four
+ * other role flags (`isAdmin`, `isSuperAdmin`, `isArchiveUser`,
+ * `isUserManager`) always render and always update normally.
+ *
+ * `applyUpdateRoles` is exported so the
+ * `tests/admin/users-capability.test.ts` test pool can exercise the
+ * dormant-flag-preserved behaviour without paying the cost of the
+ * full route-action wiring (the i18n middleware in particular pulls
+ * in `~/locales` which the Workers test pool does not alias).
+ *
+ * @version v0.4.0
  */
 
 import { useState } from "react";
 import { Form, Link, useFetcher, redirect } from "react-router";
 import { useTranslation } from "react-i18next";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import { formatDate } from "../lib/format";
 import type { Route } from "./+types/_auth.admin.users.$id";
 
@@ -22,13 +44,14 @@ import type { Route } from "./+types/_auth.admin.users.$id";
 
 export async function loader({ params, context }: Route.LoaderArgs) {
   const { drizzle } = await import("drizzle-orm/d1");
-  const { eq, isNull } = await import("drizzle-orm");
+  const { and, eq, isNull } = await import("drizzle-orm");
   const { users, projectMembers, projects } = await import("../db/schema");
 
   const currentUser = context.get(userContext);
   if (!currentUser.isSuperAdmin && !currentUser.isUserManager) {
     throw new Response("Forbidden", { status: 403 });
   }
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -36,7 +59,7 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   const [targetUser] = await db
     .select()
     .from(users)
-    .where(eq(users.id, params.id))
+    .where(and(eq(users.tenantId, tenant.id), eq(users.id, params.id)))
     .limit(1)
     .all();
 
@@ -77,7 +100,80 @@ export async function loader({ params, context }: Route.LoaderArgs) {
     assignableProjects,
     isSelf: currentUser.id === params.id,
     canEditRoles: currentUser.isSuperAdmin,
+    // Surface only the capability flag the JSX gates on. The JSX
+    // hides isCollabAdmin and isCataloguer when crowdsourcing is
+    // off; the other three capabilities are not consumed here.
+    tenant: {
+      crowdsourcingEnabled: tenant.crowdsourcingEnabled,
+    },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Role-update helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Applies the role-flag update for one user. Extracted from `action`
+ * so the test pool can exercise the capability-aware skip-write
+ * behaviour without paying for the full i18n / Host-header /
+ * middleware wiring (the route module imports `~/locales` which is
+ * not aliased in `vitest.config.ts`).
+ *
+ * Behaviour contract:
+ *
+ *   - The four always-rendered flags (`isAdmin`, `isSuperAdmin`,
+ *     `isArchiveUser`, `isUserManager`) are always written from the
+ *     form-data; an unchecked checkbox arrives as missing and reads
+ *     as `false`, which clears the flag (existing v0.3 semantics).
+ *   - When `crowdsourcingEnabled === false`, `isCollabAdmin` and
+ *     `isCataloguer` are NOT included in the UPDATE — their DB
+ *     values stay intact. This is the "no auto-clear of dormant
+ *     flags" rule from CONTEXT.md C-05; it also defends against a
+ *     tampered POST body that re-adds a hidden `isCataloguer=on`
+ *     field (defence-in-depth — the parent layout's 404 already
+ *     makes the persisted flag a no-op, but skipping the write
+ *     avoids accidentally toggling state from the admin UI either
+ *     way).
+ *   - When `crowdsourcingEnabled === true`, both flags are written
+ *     from the form-data; an unchecked checkbox clears the flag,
+ *     same as the always-rendered four.
+ *
+ * The UPDATE is scoped to `(tenantId, userId)` so a cross-tenant
+ * id-guess on the URL cannot rewrite another tenant's user row.
+ */
+export async function applyUpdateRoles(args: {
+  db: import("drizzle-orm/d1").DrizzleD1Database<any>;
+  tenantId: string;
+  crowdsourcingEnabled: boolean;
+  targetUserId: string;
+  formData: FormData;
+}): Promise<void> {
+  const { eq, and } = await import("drizzle-orm");
+  const { users } = await import("../db/schema");
+
+  const isAdmin = args.formData.get("isAdmin") === "on";
+  const isSuperAdmin = args.formData.get("isSuperAdmin") === "on";
+  const isArchiveUser = args.formData.get("isArchiveUser") === "on";
+  const isUserManager = args.formData.get("isUserManager") === "on";
+
+  // Build the update set. Only include the two capability-dependent
+  // fields when the tenant has crowdsourcing on.
+  const updateSet: Record<string, unknown> = {
+    isAdmin,
+    isSuperAdmin,
+    isArchiveUser,
+    isUserManager,
+  };
+  if (args.crowdsourcingEnabled) {
+    updateSet.isCollabAdmin = args.formData.get("isCollabAdmin") === "on";
+    updateSet.isCataloguer = args.formData.get("isCataloguer") === "on";
+  }
+
+  await args.db
+    .update(users)
+    .set(updateSet)
+    .where(and(eq(users.tenantId, args.tenantId), eq(users.id, args.targetUserId)));
 }
 
 // ---------------------------------------------------------------------------
@@ -95,6 +191,7 @@ export async function action({ request, params, context }: Route.ActionArgs) {
   if (!currentUser.isSuperAdmin && !currentUser.isUserManager) {
     throw new Response(i18n.t("user_admin:error_forbidden"), { status: 403 });
   }
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -109,7 +206,10 @@ export async function action({ request, params, context }: Route.ActionArgs) {
       return { ok: false, error: i18n.t("user_admin:error_email_required") };
     }
 
-    // Check for duplicate email (excluding this user)
+    // Check for duplicate email (excluding this user). Email is globally
+    // unique on `users` (schema-level), so the duplicate check is across
+    // tenants; the UPDATE is scoped to the calling tenant so a cross-tenant
+    // id-guess cannot rename another tenant's user.
     const { ne } = await import("drizzle-orm");
     const [duplicate] = await db
       .select({ id: users.id })
@@ -124,7 +224,7 @@ export async function action({ request, params, context }: Route.ActionArgs) {
     await db
       .update(users)
       .set({ name, email })
-      .where(eq(users.id, params.id));
+      .where(and(eq(users.tenantId, tenant.id), eq(users.id, params.id)));
 
     return { ok: true, message: i18n.t("user_admin:success_profile_updated") };
   }
@@ -137,17 +237,13 @@ export async function action({ request, params, context }: Route.ActionArgs) {
       return { ok: false, error: i18n.t("user_admin:error_cannot_change_own_roles") };
     }
 
-    const isAdmin = formData.get("isAdmin") === "on";
-    const isSuperAdmin = formData.get("isSuperAdmin") === "on";
-    const isCollabAdmin = formData.get("isCollabAdmin") === "on";
-    const isArchiveUser = formData.get("isArchiveUser") === "on";
-    const isUserManager = formData.get("isUserManager") === "on";
-    const isCataloguer = formData.get("isCataloguer") === "on";
-
-    await db
-      .update(users)
-      .set({ isAdmin, isSuperAdmin, isCollabAdmin, isArchiveUser, isUserManager, isCataloguer })
-      .where(eq(users.id, params.id));
+    await applyUpdateRoles({
+      db,
+      tenantId: tenant.id,
+      crowdsourcingEnabled: tenant.crowdsourcingEnabled,
+      targetUserId: params.id,
+      formData,
+    });
 
     return { ok: true, message: i18n.t("user_admin:success_roles_updated") };
   }
@@ -269,8 +365,14 @@ function RoleCheckbox({
 export default function UserDetailPage({
   loaderData,
 }: Route.ComponentProps) {
-  const { targetUser: u, memberships, assignableProjects, isSelf, canEditRoles } =
-    loaderData;
+  const {
+    targetUser: u,
+    memberships,
+    assignableProjects,
+    isSelf,
+    canEditRoles,
+    tenant,
+  } = loaderData;
   const { t } = useTranslation("user_admin");
   const fetcher = useFetcher();
   const [showAssignForm, setShowAssignForm] = useState(false);
@@ -393,28 +495,35 @@ export default function UserDetailPage({
             </div>
           </div>
 
-          {/* Cataloguing */}
-          <div>
-            <h2 className="mb-3 font-sans text-xs font-semibold uppercase tracking-wider text-stone-500">
-              {t("section_cataloguing")}
-            </h2>
-            <div className="space-y-2">
-              <RoleCheckbox
-                label={t("role_cataloguing_admin")}
-                description={t("cataloguing_admin_description")}
-                name="isCollabAdmin"
-                checked={!!u.isCollabAdmin}
-                disabled={isSelf || !canEditRoles}
-              />
-              <RoleCheckbox
-                label={t("role_cataloguer")}
-                description={t("cataloguer_description")}
-                name="isCataloguer"
-                checked={!!u.isCataloguer}
-                disabled={isSelf || !canEditRoles}
-              />
+          {/* Cataloguing — hidden entirely when crowdsourcing
+              capability is off. Dormant DB values for
+              `isCollabAdmin` / `isCataloguer` are not auto-cleared
+              and the matching action helper skips writing them; the
+              surface they gate (cataloguing routes) 404s at the
+              parent layout's capability check. */}
+          {tenant.crowdsourcingEnabled && (
+            <div>
+              <h2 className="mb-3 font-sans text-xs font-semibold uppercase tracking-wider text-stone-500">
+                {t("section_cataloguing")}
+              </h2>
+              <div className="space-y-2">
+                <RoleCheckbox
+                  label={t("role_cataloguing_admin")}
+                  description={t("cataloguing_admin_description")}
+                  name="isCollabAdmin"
+                  checked={!!u.isCollabAdmin}
+                  disabled={isSelf || !canEditRoles}
+                />
+                <RoleCheckbox
+                  label={t("role_cataloguer")}
+                  description={t("cataloguer_description")}
+                  name="isCataloguer"
+                  checked={!!u.isCataloguer}
+                  disabled={isSelf || !canEditRoles}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Records management */}
           <div>

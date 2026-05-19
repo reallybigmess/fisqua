@@ -1,16 +1,32 @@
 /**
  * Descriptions Admin — Edit
  *
- * The ISAD(G) editor for a single archival description. Surfaces every
- * section defined by the standard -- identity (3.1), context (3.2),
- * content (3.3), access (3.4), allied materials (3.5), notes (3.6) --
- * plus the bibliographic extensions the project adds on top, with
- * entity and place linker panels in the sidebar. Autosaves to `drafts`
- * on a debounce and writes a diff to `changelog` on explicit save so
- * every edit is auditable. A conflict banner warns when another user
- * holds an open draft on the same record.
+ * The standard-aware editor for a single archival description.
+ * Surfaces every section defined by the active descriptive standard
+ * (resolved from `tenant.descriptiveStandard` via
+ * `getStandardConfig`) plus the bibliographic, digital, and entity/
+ * place linker primitives the renderer composes. Autosaves to
+ * `drafts` on a debounce and writes a diff to `changelog` on
+ * explicit save so every edit is auditable. A conflict banner warns
+ * when another user holds an open draft on the same record.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`. Every read/update/delete of `descriptions`,
+ * `repositories`, and `users` is filtered by `tenant.id`;
+ * description-entities and description-places joins inherit tenant
+ * scope through the parent `descriptions.tenantId`.
+ *
+ * The `case "update"` branch invokes the standard-aware validator
+ * factory
+ * (`descriptionValidatorFor(tenant.descriptiveStandard,
+ * desc.descriptionLevel)`) before the DB write — this is the single
+ * write boundary the per-standard mandatoriness rules enforce. The
+ * `case "autosave"` branch is INTENTIONALLY untouched: autosave
+ * writes to the `drafts` table, which is a forgiving snapshot
+ * store; only the explicit save path crosses into `descriptions` and
+ * only that path enforces the validator.
+ *
+ * @version v0.4.0
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -24,7 +40,7 @@ import {
 } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, Pencil, Trash2, Plus, Image } from "lucide-react";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import { DescriptionForm } from "~/components/descriptions/description-form";
 import { ResizablePane } from "~/components/descriptions/resizable-pane";
 import { AdminIiifViewer } from "~/components/descriptions/admin-iiif-viewer";
@@ -39,7 +55,7 @@ import type { Route } from "./+types/_auth.admin.descriptions.$id";
 export async function loader({ params, context }: Route.LoaderArgs) {
   const { requireAdmin } = await import("~/lib/permissions.server");
   const { drizzle } = await import("drizzle-orm/d1");
-  const { eq, sql } = await import("drizzle-orm");
+  const { and, eq, sql } = await import("drizzle-orm");
   const {
     descriptions,
     repositories,
@@ -54,6 +70,14 @@ export async function loader({ params, context }: Route.LoaderArgs) {
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
+  // Schema-invariant guard — see action handler.
+  if (tenant.descriptiveStandard == null) {
+    throw new Error(
+      "Schema invariant violation: tenant.descriptiveStandard is null",
+    );
+  }
+  const descriptiveStandard = tenant.descriptiveStandard;
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -63,7 +87,7 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   const description = await db
     .select()
     .from(descriptions)
-    .where(eq(descriptions.id, id))
+    .where(and(eq(descriptions.tenantId, tenant.id), eq(descriptions.id, id)))
     .get();
 
   if (!description) {
@@ -83,7 +107,12 @@ export async function loader({ params, context }: Route.LoaderArgs) {
         parentId: descriptions.parentId,
       })
       .from(descriptions)
-      .where(eq(descriptions.id, currentParentId))
+      .where(
+        and(
+          eq(descriptions.tenantId, tenant.id),
+          eq(descriptions.id, currentParentId)
+        )
+      )
       .get();
 
     if (!ancestor) break;
@@ -100,7 +129,9 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   const repoList = await db
     .select({ id: repositories.id, name: repositories.name })
     .from(repositories)
-    .where(eq(repositories.enabled, true))
+    .where(
+      and(eq(repositories.tenantId, tenant.id), eq(repositories.enabled, true))
+    )
     .all();
 
   // Fetch parent for level constraint in edit mode
@@ -110,7 +141,12 @@ export async function loader({ params, context }: Route.LoaderArgs) {
       (await db
         .select({ descriptionLevel: descriptions.descriptionLevel })
         .from(descriptions)
-        .where(eq(descriptions.id, description.parentId))
+        .where(
+          and(
+            eq(descriptions.tenantId, tenant.id),
+            eq(descriptions.id, description.parentId)
+          )
+        )
         .get()) ?? null;
   }
 
@@ -175,7 +211,9 @@ export async function loader({ params, context }: Route.LoaderArgs) {
     const conflictUser = await db
       .select({ name: users.name })
       .from(users)
-      .where(eq(users.id, conflictRaw.userId))
+      .where(
+        and(eq(users.tenantId, tenant.id), eq(users.id, conflictRaw.userId))
+      )
       .get();
     conflictDraft = {
       userName: conflictUser?.name || "Unknown",
@@ -194,6 +232,9 @@ export async function loader({ params, context }: Route.LoaderArgs) {
     entityLinks,
     placeLinks,
     conflictDraft,
+    // Hand the active standard down to <DescriptionForm> so the
+    // renderer picks the correct StandardConfig.
+    descriptiveStandard,
   };
 }
 
@@ -215,9 +256,15 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     PLACE_ROLES,
   } = await import("~/lib/validation/enums");
   const { z } = await import("zod/v4");
+  const { descriptionValidatorFor } = await import(
+    "~/lib/standards/validator-factory"
+  );
+  type DescriptionLevel =
+    import("~/lib/standards/types").DescriptionLevel;
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -231,7 +278,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const desc = await db
         .select({ isPublished: descriptions.isPublished })
         .from(descriptions)
-        .where(eq(descriptions.id, id))
+        .where(and(eq(descriptions.tenantId, tenant.id), eq(descriptions.id, id)))
         .get();
 
       if (!desc) {
@@ -244,7 +291,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
           isPublished: !desc.isPublished,
           updatedAt: Date.now(),
         })
-        .where(eq(descriptions.id, id));
+        .where(and(eq(descriptions.tenantId, tenant.id), eq(descriptions.id, id)));
 
       return { ok: true as const };
     }
@@ -287,7 +334,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const language = getField("language");
       const locationOfOriginals = getField("locationOfOriginals");
       const locationOfCopies = getField("locationOfCopies");
-      const relatedMaterials = getField("relatedMaterials");
+      // relatedMaterials dropped in 0036 (0% populated).
       const findingAids = getField("findingAids");
       const notes = getField("notes");
       const internalNotes = getField("internalNotes");
@@ -298,28 +345,34 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const issueNumber = getField("issueNumber");
       const pages = getField("pages");
       const sectionTitle = getField("sectionTitle");
+      // Standard-aware columns surfaced through the validator. These
+      // MUST also flow into `updatedFields` below — reading them
+      // inline into `formObject` only would silently drop the values
+      // on save (the validator would pass but the DB write would
+      // omit them). Hoisting through `getField` matches the pattern
+      // of every other field above so the formObject / updatedFields
+      // pair stays parallel by inspection.
+      const publicationTitle = getField("publicationTitle");
+      const adminBiogHistory = getField("adminBiogHistory");
+      const acquisitionInfo = getField("acquisitionInfo");
+      const preferredCitation = getField("preferredCitation");
+      const systemOfArrangement = getField("systemOfArrangement");
+      const physicalCharacteristics = getField("physicalCharacteristics");
+      const creatorDisplay = getField("creatorDisplay");
       const iiifManifestUrl = getField("iiifManifestUrl");
       const hasDigital = formData.get("hasDigital") === "on";
 
-      // Validate required fields
-      const updateSchema = z.object({
-        title: z.string().min(1, "required"),
-        descriptionLevel: z.enum(DESCRIPTION_LEVELS),
-        localIdentifier: z.string().min(1, "required").max(100),
-        repositoryId: z.string().uuid("required"),
-      });
-
-      const parsed = updateSchema.safeParse({
-        title,
-        descriptionLevel,
-        localIdentifier,
-        repositoryId,
-      });
-
-      if (!parsed.success) {
+      // Pre-validate the descriptionLevel against the closed enum.
+      // The standard-aware validator factory (below) trusts that the
+      // level is one of `DescriptionLevel`; if a malicious payload
+      // ships an arbitrary string, we want a clean field-level error
+      // here rather than an obscure config-lookup throw downstream.
+      const levelEnum = z.enum(DESCRIPTION_LEVELS);
+      const levelParse = levelEnum.safeParse(descriptionLevel);
+      if (!levelParse.success) {
         return {
           ok: false as const,
-          errors: parsed.error.flatten().fieldErrors,
+          errors: { descriptionLevel: ["required"] },
         };
       }
 
@@ -330,21 +383,26 @@ export async function action({ params, request, context }: Route.ActionArgs) {
           referenceCode: descriptions.referenceCode,
         })
         .from(descriptions)
-        .where(eq(descriptions.id, id))
+        .where(and(eq(descriptions.tenantId, tenant.id), eq(descriptions.id, id)))
         .get();
 
       if (desc?.parentId) {
         const parent = await db
           .select({ descriptionLevel: descriptions.descriptionLevel })
           .from(descriptions)
-          .where(eq(descriptions.id, desc.parentId))
+          .where(
+            and(
+              eq(descriptions.tenantId, tenant.id),
+              eq(descriptions.id, desc.parentId)
+            )
+          )
           .get();
 
         if (
           parent &&
           !isValidChildLevel(
             parent.descriptionLevel,
-            parsed.data.descriptionLevel
+            levelParse.data
           )
         ) {
           return {
@@ -352,6 +410,83 @@ export async function action({ params, request, context }: Route.ActionArgs) {
             errors: { descriptionLevel: ["invalid_level"] },
           };
         }
+      }
+
+      // Standard-aware validation. Build the full form payload as a
+      // column-keyed object and run it through the per-standard
+      // validator picked from `tenant.descriptiveStandard`. The
+      // factory enforces every mandatory field for the (standard,
+      // level) pair via Zod v4 `.check()` — collecting ALL
+      // required-field issues in a single pass so the form surfaces
+      // them together.
+      const formObject: Record<string, unknown> = {
+        title,
+        descriptionLevel: levelParse.data,
+        localIdentifier,
+        repositoryId,
+        translatedTitle,
+        uniformTitle,
+        resourceType,
+        genre,
+        dateExpression,
+        dateStart,
+        dateEnd,
+        dateCertainty,
+        extent,
+        dimensions,
+        medium,
+        provenance,
+        scopeContent,
+        ocrText,
+        arrangement,
+        accessConditions,
+        reproductionConditions,
+        language,
+        locationOfOriginals,
+        locationOfCopies,
+        findingAids,
+        notes,
+        internalNotes,
+        imprint,
+        editionStatement,
+        seriesStatement,
+        volumeNumber,
+        issueNumber,
+        pages,
+        sectionTitle,
+        publicationTitle,
+        adminBiogHistory,
+        acquisitionInfo,
+        preferredCitation,
+        systemOfArrangement,
+        physicalCharacteristics,
+        creatorDisplay,
+        iiifManifestUrl,
+        hasDigital,
+      };
+
+      // `tenants.descriptive_standard` is NOT NULL when
+      // `kind = 'tenant'` per the schema CHECK in
+      // drizzle/0034_tenants_table.sql. Operators with
+      // `kind = 'platform'` never reach description CRUD routes (the
+      // auth middleware blocks). The Drizzle inferred type is
+      // nullable; we narrow with an explicit invariant throw rather
+      // than silently defaulting.
+      if (tenant.descriptiveStandard == null) {
+        throw new Error(
+          "Schema invariant violation: tenant.descriptiveStandard is null",
+        );
+      }
+      const validator = descriptionValidatorFor(
+        tenant.descriptiveStandard,
+        levelParse.data as DescriptionLevel,
+      );
+      const stdParsed = validator.safeParse(formObject);
+      if (!stdParsed.success) {
+        return {
+          ok: false as const,
+          errors: z.flattenError(stdParsed.error).fieldErrors,
+        };
       }
 
       // Check referenceCode uniqueness would not apply on update since
@@ -362,7 +497,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const original = await db
         .select()
         .from(descriptions)
-        .where(eq(descriptions.id, id))
+        .where(and(eq(descriptions.tenantId, tenant.id), eq(descriptions.id, id)))
         .get();
 
       // Optimistic lock check: compare updatedAt from form vs DB
@@ -381,7 +516,9 @@ export async function action({ params, request, context }: Route.ActionArgs) {
           const modifier = await db
             .select({ name: users.name })
             .from(users)
-            .where(eq(users.id, original.updatedBy))
+            .where(
+              and(eq(users.tenantId, tenant.id), eq(users.id, original.updatedBy))
+            )
             .get();
           if (modifier?.name) modifiedBy = modifier.name;
         }
@@ -394,10 +531,10 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       }
 
       const updatedFields = {
-        title: parsed.data.title,
-        descriptionLevel: parsed.data.descriptionLevel,
-        localIdentifier: parsed.data.localIdentifier,
-        repositoryId: parsed.data.repositoryId,
+        title: title ?? "",
+        descriptionLevel: levelParse.data,
+        localIdentifier,
+        repositoryId: repositoryId ?? "",
         translatedTitle,
         uniformTitle,
         resourceType:
@@ -424,7 +561,6 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         language,
         locationOfOriginals,
         locationOfCopies,
-        relatedMaterials,
         findingAids,
         notes,
         internalNotes,
@@ -435,6 +571,19 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         issueNumber,
         pages,
         sectionTitle,
+        // Standard-aware columns. These MUST stay in lockstep with
+        // the `formObject` constructor above and with `getField`
+        // reads higher in this action — see the parallel-by-
+        // inspection note. Adding a new standard-aware column
+        // requires three touch-points: the `getField` block,
+        // `formObject`, and this object.
+        publicationTitle,
+        adminBiogHistory,
+        acquisitionInfo,
+        preferredCitation,
+        systemOfArrangement,
+        physicalCharacteristics,
+        creatorDisplay,
         iiifManifestUrl,
         hasDigital,
       };
@@ -447,7 +596,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
             updatedBy: user.id,
             updatedAt: Date.now(),
           })
-          .where(eq(descriptions.id, id));
+          .where(and(eq(descriptions.tenantId, tenant.id), eq(descriptions.id, id)));
       } catch {
         return { ok: false as const, error: "generic" };
       }
@@ -487,7 +636,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const desc = await db
         .select({ childCount: descriptions.childCount, parentId: descriptions.parentId })
         .from(descriptions)
-        .where(eq(descriptions.id, id))
+        .where(and(eq(descriptions.tenantId, tenant.id), eq(descriptions.id, id)))
         .get();
 
       if (!desc) {
@@ -503,21 +652,33 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       }
 
       // Delete description (entity/place links cascade per schema)
-      await db.delete(descriptions).where(eq(descriptions.id, id));
+      await db
+        .delete(descriptions)
+        .where(and(eq(descriptions.tenantId, tenant.id), eq(descriptions.id, id)));
 
       // Decrement parent's childCount if parentId exists
       if (desc.parentId) {
         const parent = await db
           .select({ childCount: descriptions.childCount })
           .from(descriptions)
-          .where(eq(descriptions.id, desc.parentId))
+          .where(
+            and(
+              eq(descriptions.tenantId, tenant.id),
+              eq(descriptions.id, desc.parentId)
+            )
+          )
           .get();
 
         if (parent) {
           await db
             .update(descriptions)
             .set({ childCount: Math.max(0, parent.childCount - 1) })
-            .where(eq(descriptions.id, desc.parentId));
+            .where(
+              and(
+                eq(descriptions.tenantId, tenant.id),
+                eq(descriptions.id, desc.parentId)
+              )
+            );
         }
       }
 
@@ -574,14 +735,14 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     }
 
     case "update_entity_link": {
-      const updateSchema = z.object({
+      const entityLinkSchema = z.object({
         linkId: z.string().uuid(),
         role: z.enum(ENTITY_ROLES),
         honorific: z.string().max(100).optional(),
         function: z.string().max(300).optional(),
         nameAsRecorded: z.string().max(500).optional(),
       });
-      const parsed = updateSchema.safeParse({
+      const parsed = entityLinkSchema.safeParse({
         linkId: formData.get("linkId"),
         role: formData.get("role"),
         honorific: (formData.get("honorific") as string)?.trim() || undefined,
@@ -692,11 +853,11 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     }
 
     case "update_place_link": {
-      const updateSchema = z.object({
+      const placeLinkSchema = z.object({
         linkId: z.string().uuid(),
         role: z.enum(PLACE_ROLES),
       });
-      const parsed = updateSchema.safeParse({
+      const parsed = placeLinkSchema.safeParse({
         linkId: formData.get("linkId"),
         role: formData.get("role"),
       });
@@ -741,6 +902,7 @@ export default function DescriptionDetailPage({
     entityLinks,
     placeLinks,
     conflictDraft,
+    descriptiveStandard,
   } = loaderData;
   const actionData = useActionData<typeof action>();
   const { t } = useTranslation("descriptions_admin");
@@ -999,6 +1161,7 @@ export default function DescriptionDetailPage({
                 errors={errors as Record<string, string[]> | undefined}
                 entityLinks={entityLinks}
                 placeLinks={placeLinks}
+                standard={descriptiveStandard}
               />
             </Form>
           }

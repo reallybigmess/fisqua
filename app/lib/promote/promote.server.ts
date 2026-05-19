@@ -1,17 +1,35 @@
 /**
  * Crowdsourced Promotion
  *
- * Server-side engine for turning a reviewed crowdsourcing volume entry
- * into a published archival description. Loads the entry, validates
- * its reference code and field payload, copies the mapped ISAD(G)
- * fields onto a fresh `descriptions` row, writes the promotion manifest
- * to R2, and records the audit trail. Batch size is capped so a single
- * superadmin click cannot fan out into an unbounded workload.
+ * This module deals with the server-side engine for turning a
+ * reviewed crowdsourcing volume entry into a published archival
+ * description. It loads the entry, validates its reference code and
+ * field payload, copies the mapped fields onto a fresh `descriptions`
+ * row, writes the promotion manifest to R2, and records the audit
+ * trail. Batch size is capped so a single superadmin click cannot fan
+ * out into an unbounded workload.
  *
- * @version v0.3.0
+ * `PromotionArgs` carries an explicit `tenantId` so the
+ * request-boundary tenant from `context.get(tenantContext).id` is
+ * plumbed through to `mapEntryToDescription` rather than relying on a
+ * single-tenant hard-code.
+ *
+ * `PromotionArgs` also carries a `standard: Standard` field; each
+ * per-entry mapping pass calls
+ * `descriptionValidatorFor(standard, "item").safeParse(output.description)`
+ * BEFORE persistence. Promotion forces `descriptionLevel: "item"`
+ * (see `field-mapping.ts`), so the validator's level argument is
+ * locked to `"item"` here. A standard-mismatched entry is recorded as
+ * an error rather than persisted — a DACS or RAD tenant with
+ * `crowdsourcing_enabled` does not produce ISAD-shaped output. The
+ * validator factory is the same one the admin form save action
+ * consumes.
+ *
+ * @version v0.4.0
  */
 import { eq, and, isNull, inArray, sql, desc } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { z } from "zod/v4";
 import {
   entries,
   descriptions,
@@ -21,6 +39,8 @@ import {
 import { mapEntryToDescription } from "./field-mapping";
 import { buildDocumentManifest } from "./manifest-builder";
 import { parseManifest } from "../iiif.server";
+import { descriptionValidatorFor } from "../standards/validator-factory";
+import type { Standard } from "../standards/types";
 import type { VolumePage } from "./types";
 
 /** D1 batch limit per established pattern in entries.server.ts */
@@ -29,8 +49,14 @@ const CHUNK_SIZE = 89;
 /** Maximum entries per promotion batch */
 const MAX_BATCH_SIZE = 200;
 
-/** Reference code validation: alphanumeric + hyphens, max 50 chars */
-const REFERENCE_CODE_PATTERN = /^[a-zA-Z0-9-]{1,50}$/;
+/**
+ * Reference code validation: Unicode letters + digits + hyphen,
+ * max 50 chars. Multilingual posture (v0.4 round 1) — `\p{L}` admits
+ * Spanish/Portuguese/French/Catalan diacritics so cataloguers can
+ * emit reference codes like `Tutela-Niño` without lossy ASCII fold.
+ * Mirrors `scripts/commands/descriptions.ts:REFERENCE_CODE_PATTERN`.
+ */
+const REFERENCE_CODE_PATTERN = /^[\p{L}\p{N}-]{1,50}$/u;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -42,6 +68,14 @@ export interface PromotionArgs {
   entries: Array<{ entryId: string; referenceCode: string }>;
   volumeId: string;
   userId: string;
+  tenantId: string;
+  /**
+   * Active descriptive standard for the request-boundary tenant.
+   * Plumbed through to `mapEntryToDescription` and used to select
+   * the validator at the persistence boundary via
+   * `descriptionValidatorFor(standard, "item")`.
+   */
+  standard: Standard;
   manifestBaseUrl: string;
 }
 
@@ -155,7 +189,7 @@ export async function getPromotableEntries(
 /**
  * Promote approved entries into the description hierarchy.
  *
- * Steps (per Research Pattern 3 and Pitfall 6 ordering):
+ * Steps (mapping-then-persist ordering):
  * a. Validate inputs (type, status, volumeId, idempotency, ref code format & uniqueness)
  * b. Load parent context (description matching volume referenceCode)
  * c. Load volume manifest and parse pages
@@ -170,7 +204,12 @@ export async function getPromotableEntries(
 export async function promoteEntries(
   args: PromotionArgs
 ): Promise<PromotionResult> {
-  const { db, manifestsBucket, entries: inputEntries, volumeId, userId, manifestBaseUrl } = args;
+  const { db, manifestsBucket, entries: inputEntries, volumeId, userId, tenantId, standard, manifestBaseUrl } = args;
+
+  // Build the per-standard validator once per batch and reuse for
+  // every entry. Promotion forces `descriptionLevel: "item"` in
+  // `mapEntryToDescription`, so the level argument is locked here.
+  const validator = descriptionValidatorFor(standard, "item");
 
   const promoted: PromotionResult["promoted"] = [];
   const skipped: PromotionResult["skipped"] = [];
@@ -269,12 +308,24 @@ export async function promoteEntries(
     return { promoted, skipped, errors };
   }
 
-  // Pitfall 5: check reference code uniqueness against descriptions table
+  // Check reference code uniqueness against descriptions table.
+  // Defensively scope the lookup to the calling tenant. The
+  // `descriptions.referenceCode` index is GLOBALLY UNIQUE today (see
+  // `tests/helpers/db.ts:257`), so collision across tenants is rare
+  // in practice — but the read should still tenant-filter so that if
+  // the global-unique constraint is ever relaxed (a multi-tenant
+  // ref-code uniqueness review), this code path continues to fail
+  // loudly rather than silently mis-attributing.
   const refCodes = toProcess.map((p) => p.referenceCode);
   const existingDescs = await db
     .select({ referenceCode: descriptions.referenceCode })
     .from(descriptions)
-    .where(inArray(descriptions.referenceCode, refCodes))
+    .where(
+      and(
+        eq(descriptions.tenantId, tenantId),
+        inArray(descriptions.referenceCode, refCodes),
+      ),
+    )
     .all();
 
   const existingRefCodes = new Set(existingDescs.map((d) => d.referenceCode));
@@ -307,11 +358,25 @@ export async function promoteEntries(
     throw new Error(`Volume not found: ${volumeId}`);
   }
 
-  // find description matching volume's referenceCode
+  // find description matching volume's referenceCode. Scope by
+  // tenantId so a volume reference code that happens to collide with
+  // a description in a different tenant cannot become the promotion
+  // parent. The mapper at line ~417 below assigns
+  // `parentDescriptionId: parentDescription.id` and writes the
+  // calling tenantId to the new row; without this filter, a tenant
+  // could silently graft new descriptions onto another tenant's
+  // parent. Today's global-unique index on referenceCode makes the
+  // collision rare, but this is defence-in-depth for the day that
+  // changes (a future multi-tenant ref-code uniqueness review).
   const parentDescription = await db
     .select()
     .from(descriptions)
-    .where(eq(descriptions.referenceCode, volume.referenceCode))
+    .where(
+      and(
+        eq(descriptions.tenantId, tenantId),
+        eq(descriptions.referenceCode, volume.referenceCode),
+      ),
+    )
     .get();
 
   if (!parentDescription) {
@@ -364,18 +429,36 @@ export async function promoteEntries(
 
   for (const { entry, referenceCode } of uniqueToProcess) {
     const descriptionId = crypto.randomUUID();
-    const result = mapEntryToDescription({
-      entry,
-      volumeReferenceCode: volume.referenceCode,
-      assignedReferenceCode: referenceCode,
-      repositoryId: parentDescription.repositoryId,
-      parentDescriptionId: parentDescription.id,
-      rootDescriptionId:
-        parentDescription.rootDescriptionId ?? parentDescription.id,
-      parentDepth: parentDescription.depth,
-      parentPathCache: parentDescription.pathCache ?? "",
-      userId,
-    });
+    const result = mapEntryToDescription(
+      {
+        entry,
+        volumeReferenceCode: volume.referenceCode,
+        assignedReferenceCode: referenceCode,
+        repositoryId: parentDescription.repositoryId,
+        parentDescriptionId: parentDescription.id,
+        rootDescriptionId:
+          parentDescription.rootDescriptionId ?? parentDescription.id,
+        parentDepth: parentDescription.depth,
+        parentPathCache: parentDescription.pathCache ?? "",
+        userId,
+        tenantId,
+      },
+      standard,
+    );
+
+    // Per-standard validator runs at this write boundary BEFORE
+    // persistence. A miss surfaces as a per-entry error rather than
+    // silently writing a standard-mismatched row.
+    const parsed = validator.safeParse(result.description);
+    if (!parsed.success) {
+      const flat = z.flattenError(parsed.error).fieldErrors;
+      const fields = Object.keys(flat).join(", ") || "validation failed";
+      errors.push({
+        entryId: entry.id,
+        error: `Standard '${standard}' validation failed: ${fields}`,
+      });
+      continue;
+    }
 
     // Set position and iiifManifestUrl
     const descData = {

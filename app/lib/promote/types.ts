@@ -1,11 +1,17 @@
 /**
  * Promotion Types
  *
- * Shared shapes for the promotion pipeline: the summary row the UI
- * renders, the per-entry payload the action validates, and the
- * manifest contract the frontend reads from R2.
+ * This module deals with the shared shapes for the promotion
+ * pipeline: the summary row the UI renders, the per-entry payload the
+ * action validates, and the manifest contract the frontend reads from
+ * R2.
  *
- * @version v0.3.0
+ * `tenantId` on `PromotionInput` lets the pure
+ * `mapEntryToDescription` mapper attribute the new description row to
+ * the request-boundary tenant from `context.get(tenantContext).id`,
+ * which replaced the earlier single-tenant hard-code.
+ *
+ * @version v0.4.0
  */
 
 import type { entries, descriptions } from "../../db/schema";
@@ -21,6 +27,7 @@ export interface PromotionInput {
   parentDepth: number;
   parentPathCache: string;
   userId: string;
+  tenantId: string;
 }
 
 /** Output from the pure mapping function */

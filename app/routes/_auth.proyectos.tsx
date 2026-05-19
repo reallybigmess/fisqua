@@ -1,8 +1,9 @@
 /**
  * Member Dashboard — /proyectos
  *
- * The signed-in member's landing page: a merged view of their work
- * across every project they belong to, grouped into Segmentation,
+ * This page is the signed-in member's landing surface: a merged view
+ * of their work across every project they belong to, grouped into
+ * Segmentation,
  * Description, and Messages sections. Reviewers and leads see two
  * columns (My work / To review) when their role justifies it;
  * cataloguers see a single column. Project administration (create,

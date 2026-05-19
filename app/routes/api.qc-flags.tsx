@@ -1,8 +1,9 @@
 /**
  * QC Flags API
  *
- * POST raises a new QC flag against a page; PATCH resolves an open
- * flag. Both routes are behind the project-role guard, and the PATCH
+ * This API endpoint is the back-end for the QC-flag workflow. POST
+ * raises a new QC flag against a page; PATCH resolves an open flag.
+ * Both routes are behind the project-role guard, and the PATCH
  * additionally enforces the lead-only resolver rule. GET lists open
  * flags for the requested volume or entry.
  *

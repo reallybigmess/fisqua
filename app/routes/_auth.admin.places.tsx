@@ -1,7 +1,7 @@
 /**
  * Places Admin — List
  *
- * The index page for the place authority records. Places are modelled
+ * This page is the index for the place authority records. Places are modelled
  * after the Linked Places Format with fields for coordinates,
  * historical administrative divisions (gobernación / partido /
  * region), and external authority links (Wikidata, Getty TGN, WHG,
@@ -10,14 +10,19 @@
  * columns for label, place type, country, and parent place. The "New
  * place" button jumps to the create form.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`; every read of `places` is filtered by
+ * `tenant.id` (browse, search, advanced search, and FTS5 fast
+ * path).
+ *
+ * @version v0.4.0
  */
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { Search, Plus, Check } from "lucide-react";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import { DataTable } from "~/components/data-table/data-table";
 import { ColumnToggle } from "~/components/data-table/column-toggle";
 import { CursorPagination } from "~/components/data-table/cursor-pagination";
@@ -47,17 +52,14 @@ interface Place {
   latitude: number | null;
   longitude: number | null;
   coordinatePrecision: string | null;
-  historicalGobernacion: string | null;
-  historicalPartido: string | null;
-  historicalRegion: string | null;
-  countryCode: string | null;
-  adminLevel1: string | null;
-  adminLevel2: string | null;
+  // historicalGobernacion, historicalPartido, historicalRegion,
+  // countryCode, adminLevel1, adminLevel2, wikidataId all dropped in
+  // 0036 (0% populated in production audit).
+  fclass: "P" | "H" | "A" | "T" | "S" | null;
   mergedInto: string | null;
   tgnId: string | null;
   hgisId: string | null;
   whgId: string | null;
-  wikidataId: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -76,6 +78,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -87,7 +90,10 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     const searchQ = sp.get("q")?.trim() || "";
     const excludeId = sp.get("exclude") || "";
     const likePattern = `%${searchQ}%`;
-    const conditions = [like(places.label, likePattern)];
+    const conditions = [
+      eq(places.tenantId, tenant.id),
+      like(places.label, likePattern),
+    ];
     if (excludeId) {
       conditions.push(sql`${places.id} != ${excludeId}`);
     }
@@ -121,21 +127,18 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const advLabel = sp.get("label")?.trim() || null;
   const advDisplayName = sp.get("displayName")?.trim() || null;
   const advPlaceCode = sp.get("placeCode")?.trim() || null;
-  const advHistGob = sp.get("historicalGobernacion")?.trim() || null;
-  const advHistPart = sp.get("historicalPartido")?.trim() || null;
-  const advHistReg = sp.get("historicalRegion")?.trim() || null;
+  // Historical search fields and wikidataId removed in 0036 (columns dropped).
   const advTgn = sp.get("tgnId")?.trim() || null;
   const advHgis = sp.get("hgisId")?.trim() || null;
   const advWhg = sp.get("whgId")?.trim() || null;
-  const advWikidata = sp.get("wikidataId")?.trim() || null;
 
   const isAdvanced =
-    advLabel || advDisplayName || advPlaceCode || advHistGob ||
-    advHistPart || advHistReg || advTgn || advHgis || advWhg || advWikidata;
+    advLabel || advDisplayName || advPlaceCode ||
+    advTgn || advHgis || advWhg;
 
-  // Shared filters
+  // Shared filters. Tenant predicate is always present.
   function baseConditions() {
-    const conditions = [];
+    const conditions: any[] = [eq(places.tenantId, tenant.id)];
     if (placeType) conditions.push(eq(places.placeType, placeType));
     if (!showMerged) conditions.push(sql`${places.mergedInto} IS NULL`);
     return conditions;
@@ -171,6 +174,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         SELECT p.* FROM places p
         INNER JOIN places_fts fts ON fts.rowid = p.rowid
         WHERE places_fts MATCH ${matchExpr}
+        AND p.tenant_id = ${tenant.id}
         ORDER BY rank
         LIMIT ${PAGE_SIZE + 1}
       `;
@@ -215,16 +219,12 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     // Text fields: LIKE
     if (advLabel) conditions.push(like(places.label, `%${advLabel}%`));
     if (advDisplayName) conditions.push(like(places.displayName, `%${advDisplayName}%`));
-    if (advHistGob) conditions.push(like(places.historicalGobernacion, `%${advHistGob}%`));
-    if (advHistPart) conditions.push(like(places.historicalPartido, `%${advHistPart}%`));
-    if (advHistReg) conditions.push(like(places.historicalRegion, `%${advHistReg}%`));
 
     // Exact match fields
     if (advPlaceCode) conditions.push(eq(places.placeCode, advPlaceCode));
     if (advTgn) conditions.push(eq(places.tgnId, advTgn));
     if (advHgis) conditions.push(eq(places.hgisId, advHgis));
     if (advWhg) conditions.push(eq(places.whgId, advWhg));
-    if (advWikidata) conditions.push(eq(places.wikidataId, advWikidata));
 
     // Cursor pagination (sort by label, id)
     if (cursor) {
@@ -371,13 +371,10 @@ export default function AdminPlacesPage({
       { name: "label", label: t("field.label") },
       { name: "displayName", label: t("field.displayName") },
       { name: "placeCode", label: t("field.placeCode") },
-      { name: "historicalGobernacion", label: t("field.historicalGobernacion") },
-      { name: "historicalPartido", label: t("field.historicalPartido") },
-      { name: "historicalRegion", label: t("field.historicalRegion") },
+      // Historical search fields and wikidataId removed in 0036.
       { name: "tgnId", label: t("field.tgnId") },
       { name: "hgisId", label: t("field.hgisId") },
       { name: "whgId", label: t("field.whgId") },
-      { name: "wikidataId", label: t("field.wikidataId") },
     ],
     [t]
   );
@@ -438,20 +435,8 @@ export default function AdminPlacesPage({
           );
         },
       },
-      {
-        accessorKey: "historicalGobernacion",
-        header: t("field.historicalGobernacion"),
-        enableSorting: false,
-        cell: ({ row }) =>
-          (row.getValue("historicalGobernacion") as string) || "\u2014",
-      },
-      {
-        accessorKey: "historicalPartido",
-        header: t("field.historicalPartido"),
-        enableSorting: false,
-        cell: ({ row }) =>
-          (row.getValue("historicalPartido") as string) || "\u2014",
-      },
+      // historicalGobernacion, historicalPartido, historicalRegion,
+      // adminLevel1, adminLevel2, wikidataId columns dropped in 0036.
       {
         accessorKey: "tgnId",
         header: t("field.tgnId"),
@@ -486,17 +471,6 @@ export default function AdminPlacesPage({
           ),
       },
       {
-        accessorKey: "wikidataId",
-        header: t("field.wikidataId"),
-        enableSorting: false,
-        cell: ({ row }) =>
-          row.getValue("wikidataId") ? (
-            <Check className="h-4 w-4 text-verdigris" />
-          ) : (
-            "\u2014"
-          ),
-      },
-      {
         id: "coordinates",
         header: t("field.latitude"),
         enableSorting: false,
@@ -508,27 +482,6 @@ export default function AdminPlacesPage({
           ),
       },
       // Hidden by default
-      {
-        accessorKey: "historicalRegion",
-        header: t("field.historicalRegion"),
-        enableSorting: false,
-        cell: ({ row }) =>
-          (row.getValue("historicalRegion") as string) || "\u2014",
-      },
-      {
-        accessorKey: "adminLevel1",
-        header: t("field.adminLevel1"),
-        enableSorting: false,
-        cell: ({ row }) =>
-          (row.getValue("adminLevel1") as string) || "\u2014",
-      },
-      {
-        accessorKey: "adminLevel2",
-        header: t("field.adminLevel2"),
-        enableSorting: false,
-        cell: ({ row }) =>
-          (row.getValue("adminLevel2") as string) || "\u2014",
-      },
       {
         accessorKey: "displayName",
         header: t("field.displayName"),
@@ -543,9 +496,6 @@ export default function AdminPlacesPage({
   // Default column visibility: hide optional columns
   const defaultColumnVisibility = useMemo(
     () => ({
-      historicalRegion: false,
-      adminLevel1: false,
-      adminLevel2: false,
       displayName: false,
     }),
     []

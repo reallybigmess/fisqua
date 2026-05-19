@@ -1,9 +1,9 @@
 /**
  * Project Layout
  *
- * Shared frame for every project-scoped page: the sidebar project
- * selector, the secondary navigation pills (Overview, Volumes,
- * Members, Settings), and the project header. Loads the project
+ * This layout is the shared frame for every project-scoped page: the
+ * sidebar project selector, the secondary navigation pills (Overview,
+ * Volumes, Members, Settings), and the project header. It loads the project
  * record once and passes it to children through the React Router
  * outlet context.
  *

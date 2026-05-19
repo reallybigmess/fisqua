@@ -1,7 +1,7 @@
 /**
  * Places Admin — Edit
  *
- * The edit page for a single place authority record. Edits every
+ * This page is the edit form for a single place authority record. It edits every
  * Linked Places Format field -- label, display name, place type,
  * coordinates with precision, historical gobernación / partido /
  * region, modern country and admin-level divisions, name variants --
@@ -15,7 +15,12 @@
  * target, confirm direction, server moves every `description_places`
  * row onto the canonical place.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`. Every read/update/delete of `places` is filtered
+ * by `tenant.id`; the split-action insert attributes the new place
+ * to `tenant.id` rather than a single-tenant hard-code.
+ *
+ * @version v0.4.0
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -29,7 +34,7 @@ import {
 } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, Pencil, Trash2, Merge, Split, Plus } from "lucide-react";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import { CollapsibleSection } from "~/components/admin/collapsible-section";
 import { MergeDialog } from "~/components/admin/merge-dialog";
 import { SplitDialog } from "~/components/admin/split-dialog";
@@ -50,13 +55,14 @@ import type { Route } from "./+types/_auth.admin.places.$id";
 export async function loader({ params, context }: Route.LoaderArgs) {
   const { requireAdmin } = await import("~/lib/permissions.server");
   const { drizzle } = await import("drizzle-orm/d1");
-  const { eq, sql } = await import("drizzle-orm");
+  const { and, eq, sql } = await import("drizzle-orm");
   const { places, descriptionPlaces, descriptions } = await import(
     "~/db/schema"
   );
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -65,7 +71,7 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   const place = await db
     .select()
     .from(places)
-    .where(eq(places.id, id))
+    .where(and(eq(places.tenantId, tenant.id), eq(places.id, id)))
     .get();
 
   if (!place) {
@@ -100,7 +106,9 @@ export async function loader({ params, context }: Route.LoaderArgs) {
     const target = await db
       .select({ id: places.id, label: places.label })
       .from(places)
-      .where(eq(places.id, place.mergedInto))
+      .where(
+        and(eq(places.tenantId, tenant.id), eq(places.id, place.mergedInto))
+      )
       .get();
     if (target) mergeTarget = target;
   }
@@ -165,6 +173,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -192,18 +201,9 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const nameVariantsRaw = formData.get("nameVariants") as string;
       const parentId =
         (formData.get("parentId") as string)?.trim() || undefined;
-      const historicalGobernacion =
-        (formData.get("historicalGobernacion") as string)?.trim() || undefined;
-      const historicalPartido =
-        (formData.get("historicalPartido") as string)?.trim() || undefined;
-      const historicalRegion =
-        (formData.get("historicalRegion") as string)?.trim() || undefined;
-      const countryCode =
-        (formData.get("countryCode") as string)?.trim() || undefined;
-      const adminLevel1 =
-        (formData.get("adminLevel1") as string)?.trim() || undefined;
-      const adminLevel2 =
-        (formData.get("adminLevel2") as string)?.trim() || undefined;
+      // historical_gobernacion, historical_partido, historical_region,
+      // country_code, admin_level_1, admin_level_2 all dropped in 0036
+      // (0% populated in production audit).
       const coordinatePrecision =
         (formData.get("coordinatePrecision") as string)?.trim() || undefined;
 
@@ -220,8 +220,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         (formData.get("hgisId") as string)?.trim() || undefined;
       const whgId =
         (formData.get("whgId") as string)?.trim() || undefined;
-      const wikidataId =
-        (formData.get("wikidataId") as string)?.trim() || undefined;
+      // wikidata_id dropped from places in 0036.
 
       const parsed = updatePlaceSchema.safeParse({
         id,
@@ -233,16 +232,9 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         latitude: latitude != null && !isNaN(latitude) ? latitude : null,
         longitude: longitude != null && !isNaN(longitude) ? longitude : null,
         coordinatePrecision,
-        historicalGobernacion,
-        historicalPartido,
-        historicalRegion,
-        countryCode,
-        adminLevel1,
-        adminLevel2,
         tgnId: tgnId || null,
         hgisId: hgisId || null,
         whgId: whgId || null,
-        wikidataId: wikidataId || null,
       });
 
       if (!parsed.success) {
@@ -256,7 +248,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const original = await db
         .select()
         .from(places)
-        .where(eq(places.id, id))
+        .where(and(eq(places.tenantId, tenant.id), eq(places.id, id)))
         .get();
 
       // Optimistic lock check
@@ -285,7 +277,6 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         tgnId: updates.tgnId ?? null,
         hgisId: updates.hgisId ?? null,
         whgId: updates.whgId ?? null,
-        wikidataId: updates.wikidataId ?? null,
       };
 
       try {
@@ -295,7 +286,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
             ...updatedFields,
             updatedAt: Date.now(),
           })
-          .where(eq(places.id, id));
+          .where(and(eq(places.tenantId, tenant.id), eq(places.id, id)));
       } catch (e) {
         if (String(e).includes("UNIQUE constraint failed")) {
           return { ok: false as const, error: "duplicate_code" };
@@ -338,7 +329,9 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         return { ok: false as const, error: "has_descriptions" };
       }
 
-      await db.delete(places).where(eq(places.id, id));
+      await db
+        .delete(places)
+        .where(and(eq(places.tenantId, tenant.id), eq(places.id, id)));
       return redirect("/admin/places");
     }
 
@@ -355,7 +348,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const target = await db
         .select()
         .from(places)
-        .where(eq(places.id, targetId))
+        .where(and(eq(places.tenantId, tenant.id), eq(places.id, targetId)))
         .get();
       if (!target) {
         return { ok: false as const, error: "generic" };
@@ -401,7 +394,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const source = await db
         .select()
         .from(places)
-        .where(eq(places.id, id))
+        .where(and(eq(places.tenantId, tenant.id), eq(places.id, id)))
         .get();
 
       const now = new Date().toISOString().slice(0, 10);
@@ -415,7 +408,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
           mergedInto: targetId,
           updatedAt: Date.now(),
         })
-        .where(eq(places.id, id));
+        .where(and(eq(places.tenantId, tenant.id), eq(places.id, id)));
 
       return redirect(`/admin/places/${targetId}`);
     }
@@ -432,7 +425,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const source = await db
         .select()
         .from(places)
-        .where(eq(places.id, id))
+        .where(and(eq(places.tenantId, tenant.id), eq(places.id, id)))
         .get();
       if (!source) {
         return { ok: false as const, error: "generic" };
@@ -451,6 +444,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 
       // Create new place (copy all fields from source)
       await db.insert(places).values({
+        tenantId: tenant.id,
         id: newId,
         placeCode: newCode,
         label: source.label,
@@ -461,18 +455,13 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         latitude: source.latitude,
         longitude: source.longitude,
         coordinatePrecision: source.coordinatePrecision,
-        historicalGobernacion: source.historicalGobernacion,
-        historicalPartido: source.historicalPartido,
-        historicalRegion: source.historicalRegion,
-        countryCode: source.countryCode,
-        adminLevel1: source.adminLevel1,
-        adminLevel2: source.adminLevel2,
+        // historical_*, country_code, admin_level_*, wikidata_id all
+        // dropped on places in 0036.
         needsGeocoding: source.needsGeocoding,
         mergedInto: null,
         tgnId: null,
         hgisId: null,
         whgId: null,
-        wikidataId: null,
         createdAt: timestamp,
         updatedAt: timestamp,
       });
@@ -501,7 +490,10 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         })
         .from(descriptions)
         .where(
-          sql`(${descriptions.title} LIKE ${"%" + q + "%"} OR ${descriptions.referenceCode} LIKE ${"%" + q + "%"})`
+          and(
+            eq(descriptions.tenantId, tenant.id),
+            sql`(${descriptions.title} LIKE ${"%" + q + "%"} OR ${descriptions.referenceCode} LIKE ${"%" + q + "%"})`
+          )
         )
         .limit(20)
         .all();
@@ -1080,39 +1072,16 @@ function ViewMode({
         </div>
       </CollapsibleSection>
 
-      {/* Historical Context */}
-      <CollapsibleSection title={t("sectionHistorical")}>
-        <div className="space-y-3">
-          <FieldDisplay
-            label={t("field.historicalGobernacion")}
-            value={place.historicalGobernacion}
-          />
-          <FieldDisplay
-            label={t("field.historicalPartido")}
-            value={place.historicalPartido}
-          />
-          <FieldDisplay
-            label={t("field.historicalRegion")}
-            value={place.historicalRegion}
-          />
-        </div>
-      </CollapsibleSection>
+      {/* Historical Context section removed alongside the column
+          drops in drizzle/0036_union_schema.sql \u2014
+          historicalGobernacion, historicalPartido, historicalRegion
+          all dropped (0% populated in production audit). */}
 
       {/* Modern Geography & LOD */}
       <CollapsibleSection title={t("sectionGeography")}>
         <div className="space-y-3">
-          <FieldDisplay
-            label={t("field.countryCode")}
-            value={place.countryCode}
-          />
-          <FieldDisplay
-            label={t("field.adminLevel1")}
-            value={place.adminLevel1}
-          />
-          <FieldDisplay
-            label={t("field.adminLevel2")}
-            value={place.adminLevel2}
-          />
+          {/* countryCode, adminLevel1, adminLevel2, wikidataId all
+              dropped on places in 0036 (0% populated). */}
           <div>
             <p className="text-xs text-stone-500">
               {t("field.latitude")} / {t("field.longitude")}
@@ -1126,10 +1095,6 @@ function ViewMode({
           <FieldDisplay label={t("field.tgnId")} value={place.tgnId} />
           <FieldDisplay label={t("field.hgisId")} value={place.hgisId} />
           <FieldDisplay label={t("field.whgId")} value={place.whgId} />
-          <FieldDisplay
-            label={t("field.wikidataId")}
-            value={place.wikidataId}
-          />
         </div>
       </CollapsibleSection>
     </div>
@@ -1189,7 +1154,7 @@ function EditMode({
   const [tgnId, setTgnId] = useState(place.tgnId || "");
   const [hgisId, setHgisId] = useState(place.hgisId || "");
   const [whgId, setWhgId] = useState(place.whgId || "");
-  const [wikidataId, setWikidataId] = useState(place.wikidataId || "");
+  // wikidataId dropped on places in 0036 (0% populated).
 
   return (
     <Form method="post" ref={formRef} onChange={onFormChange}>
@@ -1222,7 +1187,6 @@ function EditMode({
       <input type="hidden" name="tgnId" value={tgnId} />
       <input type="hidden" name="hgisId" value={hgisId} />
       <input type="hidden" name="whgId" value={whgId} />
-      <input type="hidden" name="wikidataId" value={wikidataId} />
 
       {/* Identity */}
       <CollapsibleSection title={t("sectionIdentity")}>
@@ -1293,51 +1257,16 @@ function EditMode({
         </div>
       </CollapsibleSection>
 
-      {/* Historical Context */}
-      <CollapsibleSection title={t("sectionHistorical")}>
-        <div className="space-y-4">
-          <EditField
-            name="historicalGobernacion"
-            label={t("field.historicalGobernacion")}
-            defaultValue={place.historicalGobernacion || ""}
-            error={errors?.historicalGobernacion?.[0]}
-          />
-          <EditField
-            name="historicalPartido"
-            label={t("field.historicalPartido")}
-            defaultValue={place.historicalPartido || ""}
-            error={errors?.historicalPartido?.[0]}
-          />
-          <EditField
-            name="historicalRegion"
-            label={t("field.historicalRegion")}
-            defaultValue={place.historicalRegion || ""}
-            error={errors?.historicalRegion?.[0]}
-          />
-        </div>
-      </CollapsibleSection>
+      {/* Historical Context section removed alongside the column
+          drops in drizzle/0036_union_schema.sql —
+          historicalGobernacion, historicalPartido, historicalRegion
+          all dropped (0% populated). */}
 
       {/* Modern Geography & LOD */}
       <CollapsibleSection title={t("sectionGeography")}>
         <div className="space-y-4">
-          <EditField
-            name="countryCode"
-            label={t("field.countryCode")}
-            defaultValue={place.countryCode || ""}
-            error={errors?.countryCode?.[0]}
-          />
-          <EditField
-            name="adminLevel1"
-            label={t("field.adminLevel1")}
-            defaultValue={place.adminLevel1 || ""}
-            error={errors?.adminLevel1?.[0]}
-          />
-          <EditField
-            name="adminLevel2"
-            label={t("field.adminLevel2")}
-            defaultValue={place.adminLevel2 || ""}
-            error={errors?.adminLevel2?.[0]}
-          />
+          {/* countryCode, adminLevel1, adminLevel2 dropped on places
+              in 0036 (0% populated). */}
           <CoordinateInput
             latitude={latitude}
             longitude={longitude}
@@ -1364,12 +1293,7 @@ function EditMode({
             onChange={setWhgId}
             service="whg"
           />
-          <LodLinkField
-            label={t("field.wikidataId")}
-            value={wikidataId}
-            onChange={setWikidataId}
-            service="wikidata"
-          />
+          {/* wikidataId dropped on places in 0036 (0% populated). */}
         </div>
       </CollapsibleSection>
 

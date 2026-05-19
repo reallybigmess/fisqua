@@ -1,8 +1,9 @@
 /**
  * Project Volumes Page
  *
- * Leads-only volume management for one project. Lists every volume the
- * project holds — each one rendered as a `VolumeCard` with its status,
+ * This page is the leads-only volume management surface for one
+ * project. It lists every volume the project holds — each one
+ * rendered as a `VolumeCard` with its status,
  * assignments, and open-QC-flag count denormalised at read time so the
  * page can render in a single round-trip. Leads can add new volumes
  * from a IIIF manifest URL here; per-volume deep management lives on

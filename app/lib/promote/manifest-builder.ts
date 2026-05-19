@@ -1,10 +1,10 @@
 /**
  * Promotion Manifest Builder
  *
- * Builds the R2 manifest payload that ties a promoted archival
- * description back to the IIIF pages it originated from. Writes are
- * atomic per volume so a half-written manifest never surfaces on the
- * public site.
+ * This builder deals with the R2 manifest payload that ties a
+ * promoted archival description back to the IIIF pages it originated
+ * from. Writes are atomic per volume so a half-written manifest never
+ * surfaces on the public site.
  *
  * @version v0.3.0
  */

@@ -1,9 +1,9 @@
 /**
  * Cataloguing Admin Redirect
  *
- * The cataloguing admin landing URL has no content of its own — it
- * just redirects to the Projects panel, which is the primary surface
- * cataloguing admins work from.
+ * This route is the cataloguing admin landing URL. It has no content
+ * of its own — the loader just redirects to the Projects panel, which
+ * is the primary surface cataloguing admins work from.
  *
  * @version v0.3.0
  */

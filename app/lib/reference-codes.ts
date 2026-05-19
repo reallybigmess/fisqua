@@ -1,3 +1,29 @@
+/**
+ * Reference Code Generation
+ *
+ * This module deals with the pure helpers that mint and recompute the
+ * hierarchical reference codes a volume's entries carry. Reference
+ * codes are the human-facing identifiers an archivist sees on every
+ * outline row and citation; their structure mirrors the entry tree so
+ * a code like `co-ahr/0042.03.05` reads as "fonds co-ahr, entry 42,
+ * sub-entry 3, sub-sub-entry 5" without further lookup.
+ *
+ * `generateRefCode` builds one segment given a parent code, position,
+ * and depth — top-level entries get a slash + four-digit position
+ * (room for ten thousand siblings before a fonds runs out of slots),
+ * nested entries get a dot + two-digit position. `computeAllRefCodes`
+ * walks the entire entry tree depth-first against a volume's root
+ * code and produces a Map keyed by entry id so the viewer can render
+ * every code in one pass without re-walking on every render.
+ *
+ * The helpers are deliberately pure — no DB reads, no React, no
+ * mutation — so the boundary reducer and the server-side
+ * recomputation that runs after a reordering can call the same code
+ * with identical results.
+ *
+ * @version v0.3.0
+ */
+
 import type { Entry } from "./boundary-types";
 
 /**

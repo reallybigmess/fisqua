@@ -1,10 +1,12 @@
 /**
  * Comments Panel URL Helpers
  *
- * Pure helpers that encode the currently focused comment thread into
- * the URL search params — `?comments=entry:<id>` or `?comments=
- * flag:<id>` — and decode it on the way back in. Lets the outline,
- * viewer, and flag card stay in sync through ordinary URL state.
+ * This module deals with the pure helpers that encode the currently
+ * focused comment thread into the URL search params —
+ * `?comments=entry:<id>` or `?comments=flag:<id>` — and decode it on
+ * the way back in. Routing selection through ordinary URL state lets
+ * the outline, viewer, and flag card stay in sync without a separate
+ * client-side store.
  *
  * @version v0.3.0
  */

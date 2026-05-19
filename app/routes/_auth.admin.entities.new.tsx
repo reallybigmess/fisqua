@@ -1,7 +1,7 @@
 /**
  * Entities Admin — Create
  *
- * The create form for a new entity authority record. Captures the
+ * This page is the create form for a new entity authority record. It captures the
  * identity fields (display name, sort name, given name, surname,
  * honorific), the entity type (person, corporate body, family), and
  * the primary function, then posts to the server action which mints
@@ -10,14 +10,20 @@
  * on the edit page so the create form stays focused on "what you need
  * to start linking descriptions to this entity".
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`; the new entity row is attributed to `tenant.id`
+ * rather than a single-tenant hard-code, and the existing-term
+ * lookup + primary-function-count subqueries are scoped to the
+ * calling tenant.
+ *
+ * @version v0.4.0
  */
 
 import { useState } from "react";
 import { Form, useActionData, redirect, Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ChevronRight } from "lucide-react";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import { CollapsibleSection } from "~/components/admin/collapsible-section";
 import { NameVariantInput } from "~/components/forms/name-variant-input";
 import { LodLinkField } from "~/components/forms/lod-link-field";
@@ -49,6 +55,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -121,8 +128,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     (formData.get("history") as string)?.trim() || undefined;
   const primaryFunction =
     (formData.get("primaryFunction") as string)?.trim() || undefined;
-  const legalStatus =
-    (formData.get("legalStatus") as string)?.trim() || undefined;
+  // legalStatus dropped in 0036 (0% populated in production audit).
   const functions =
     (formData.get("functions") as string)?.trim() || undefined;
   const sources =
@@ -146,7 +152,6 @@ export async function action({ request, context }: Route.ActionArgs) {
     dateStart: dateStart || null,
     dateEnd: dateEnd || null,
     history,
-    legalStatus,
     functions,
     sources,
     wikidataId: wikidataId || null,
@@ -203,6 +208,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   try {
     await db.insert(entities).values({
+      tenantId: tenant.id,
       id,
       ...parsed.data,
       surname: parsed.data.surname ?? null,
@@ -214,7 +220,6 @@ export async function action({ request, context }: Route.ActionArgs) {
       dateStart: parsed.data.dateStart ?? null,
       dateEnd: parsed.data.dateEnd ?? null,
       history: parsed.data.history ?? null,
-      legalStatus: parsed.data.legalStatus ?? null,
       functions: parsed.data.functions ?? null,
       sources: parsed.data.sources ?? null,
       wikidataId: parsed.data.wikidataId ?? null,
@@ -228,7 +233,12 @@ export async function action({ request, context }: Route.ActionArgs) {
       const [{ count: entityCountForTerm }] = await db
         .select({ count: sql<number>`count(*)` })
         .from(entities)
-        .where(eq(entities.primaryFunctionId, resolvedFunctionId))
+        .where(
+          and(
+            eq(entities.tenantId, tenant.id),
+            eq(entities.primaryFunctionId, resolvedFunctionId)
+          )
+        )
         .all();
       await db
         .update(vocabularyTerms)
@@ -429,11 +439,8 @@ export default function NewEntityPage() {
                   </p>
                 )}
               </div>
-              <FieldInput
-                name="legalStatus"
-                label={t("field.legalStatus")}
-                error={errors?.legalStatus?.[0]}
-              />
+              {/* legalStatus dropped in drizzle/0036_union_schema.sql
+                  — 0% populated in production audit. */}
               <FieldTextarea
                 name="functions"
                 label={t("field.functions")}

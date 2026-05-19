@@ -8,10 +8,46 @@
  * page / entry / flag / region, open QC flags per page, and any open
  * resegmentation requests — so the render never waterfalls.
  *
- * @version v0.3.0
+ * In-app navigation must not discard in-flight saves. `useBlocker`
+ * (React Router 7) interrupts any client-side navigation away from
+ * the viewer route while the boundary state is dirty, a save is in
+ * flight, or the last save settled to error. On confirm-leave we
+ * attempt a single best-effort `navigator.sendBeacon` flush of the
+ * current entries to `/api/entries/save` (FormData body — a
+ * first-class sendBeacon type) before calling `blocker.proceed()`.
+ * The back-arrow `<Link>` in `ViewerTopBar` is intercepted
+ * automatically because `useBlocker` covers all client-side RR
+ * navigations.
+ *
+ * The blocker's confirmation is a Tailwind-styled, i18n-driven
+ * `<UnsavedChangesDialog>` from
+ * `app/components/viewer/unsaved-changes-dialog.tsx` rendered at the
+ * route's JSX tree root when `blocker.state === "blocked"`. A
+ * native `window.confirm` would have no i18n leverage on its buttons
+ * and would block browser automation. The sendBeacon flush
+ * semantics are: onLeave builds the FormData via
+ * `buildEntriesBeaconBody`, estimates size via the JSON-serialised
+ * entries length (FormData has no portable synchronous `.size`),
+ * gates with `shouldSendBeacon`, fires `navigator.sendBeacon` and
+ * then `blocker.proceed()`. onStay calls `blocker.reset()`. The
+ * dialog uses four `save_status.unsaved_dialog_*` keys for its
+ * strings.
+ *
+ * Manual save escape hatch: the `useAutosave` hook exposes a stable
+ * `flush()` callable; the viewer route destructures it and wires it
+ * to (a) a window-level `keydown` handler that intercepts Cmd/Ctrl+S
+ * with `preventDefault()` so the browser's native save-page dialog
+ * does not fire, and (b) the "Save now" button rendered by
+ * `ViewerTopBar` next to the SaveStatus pill (the button click is
+ * forwarded via the `onSaveNow` prop). Both paths fire-and-forget
+ * `void flush()` — the SaveStatus pill drives the UI via
+ * MARK_SAVING / MARK_SAVED / MARK_ERROR transitions inside the
+ * hook itself.
+ *
+ * @version v0.4.1
  */
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useRevalidator } from "react-router";
+import { useRevalidator, useBlocker } from "react-router";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { userContext } from "../context";
@@ -29,6 +65,12 @@ import { computeAllRefCodes } from "../lib/reference-codes";
 import { boundaryReducer, createInitialState } from "../lib/boundary-reducer";
 import { useUndoableReducer, type UndoRedoAction } from "../lib/use-undoable-reducer";
 import { useAutosave } from "../lib/use-autosave";
+import { shouldBlockNavigation } from "../lib/blocker-condition";
+import {
+  shouldSendBeacon,
+  buildEntriesBeaconBody,
+} from "../lib/beacon-save";
+import { UnsavedChangesDialog } from "../components/viewer/unsaved-changes-dialog";
 import { findCurrentEntry } from "../lib/entry-ownership";
 import { partitionComments } from "../lib/comment-partition";
 import type { BoundaryAction } from "../lib/boundary-types";
@@ -428,11 +470,59 @@ export default function ViewerRoute({ loaderData }: Route.ComponentProps) {
  [rawDispatch, accessLevel, userId]
   );
 
-  const { saveStatus } = useAutosave(state, rawDispatch, volume.id);
+  const { saveStatus, flush } = useAutosave(state, rawDispatch, volume.id);
   const revalidator = useRevalidator();
   const handleCommentAdded = useCallback(() => {
  revalidator.revalidate();
   }, [revalidator]);
+
+  // Intercepts in-app navigations (Link clicks like the back-arrow
+  // in ViewerTopBar, browser back via popstate, etc.) while the
+  // boundary state has unflushed work. The
+  // `currentLocation.pathname !== nextLocation.pathname` guard
+  // prevents the blocker from firing on search-param-only changes
+  // (e.g. `?comments=` toggles).
+  const blocker = useBlocker(
+ ({ currentLocation, nextLocation }) =>
+ shouldBlockNavigation(saveStatus, state.isDirty) &&
+ currentLocation.pathname !== nextLocation.pathname,
+  );
+
+  // The blocker's confirmation is a Tailwind/i18n-driven
+  // `<UnsavedChangesDialog>` rendered at the bottom of the route's
+  // JSX tree, controlled by `blocker.state === "blocked"`. The
+  // handlers below close over `volume.id`, `state.entries`, and
+  // `blocker` so the sendBeacon flush semantics are preserved
+  // verbatim — only the UI of the confirmation changes.
+  const handleUnsavedStay = useCallback(() => {
+    if (blocker.state === "blocked") {
+      blocker.reset();
+    }
+  }, [blocker]);
+
+  const handleUnsavedLeave = useCallback(() => {
+    if (blocker.state !== "blocked") return;
+    // Best-effort fire-and-forget flush via sendBeacon.
+    // The Worker accepts the POST even after navigation begins; the
+    // 60 KiB strict-less-than guard protects against silent drop for
+    // unusually large payloads. typeof guard so SSR / test pools
+    // without `navigator.sendBeacon` don't blow up.
+    if (
+      typeof navigator !== "undefined" &&
+      typeof navigator.sendBeacon === "function"
+    ) {
+      const body = buildEntriesBeaconBody(volume.id, state.entries);
+      // FormData size is not directly observable in all runtimes;
+      // conservatively estimate via the serialised JSON length (a
+      // reasonable upper bound on the payload's entries field, which
+      // dominates the body).
+      const approxSize = JSON.stringify(state.entries).length;
+      if (shouldSendBeacon(approxSize)) {
+        navigator.sendBeacon("/api/entries/save", body);
+      }
+    }
+    blocker.proceed();
+  }, [blocker, volume.id, state.entries]);
 
   // clear draftRegion once the revalidator settles
   // after a successful comment POST (best-effort: a draft that fails
@@ -481,6 +571,40 @@ export default function ViewerRoute({ loaderData }: Route.ComponentProps) {
  window.addEventListener("keydown", handleKeyDown);
  return () => window.removeEventListener("keydown", handleKeyDown);
   }, [dispatch]);
+
+  // Cmd/Ctrl+S — manual save escape hatch. Routes the platform
+  // save shortcut to the autosave
+  // hook's exposed `flush()` instead of letting the browser
+  // surface its native "save page" dialog. `preventDefault()` is
+  // essential: without it the browser dialog fires. Listening on
+  // `window` (not `document`) covers focus-in-iframe cases. The
+  // handler lives in its own effect — separate from the undo/redo
+  // shortcuts above — so each shortcut's dep array can be tight
+  // and the handlers do not interfere with each other's
+  // preventDefault timing. `e.key.toLowerCase()` is defensive
+  // against platforms that report Shift-modified keys as
+  // capitalised under Cmd/Ctrl modifier combinations.
+  useEffect(() => {
+ const onSaveKey = (e: KeyboardEvent) => {
+ if (!((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s")) return;
+ e.preventDefault();
+ // Fire-and-forget: the SaveStatus pill drives the UI via
+ // the hook's MARK_SAVING / MARK_SAVED / MARK_ERROR
+ // transitions. `void` here keeps any aborted-result from
+ // surfacing as an unhandled promise rejection.
+ void flush();
+ };
+ window.addEventListener("keydown", onSaveKey);
+ return () => window.removeEventListener("keydown", onSaveKey);
+  }, [flush]);
+
+  // Stable click handler for the Save now button rendered by
+  // `ViewerTopBar` next to the SaveStatus pill. Same fire-and-forget
+  // contract as the Cmd/Ctrl+S handler above — the pill drives the
+  // UI via the hook's reducer transitions.
+  const handleSaveNow = useCallback(() => {
+ void flush();
+  }, [flush]);
 
   const handlePageChange = useCallback((pageIndex: number) => {
  setCurrentPageIndex(pageIndex);
@@ -772,6 +896,7 @@ export default function ViewerRoute({ loaderData }: Route.ComponentProps) {
  canRedo={canRedo}
  onUndo={handleUndo}
  onRedo={handleRedo}
+ onSaveNow={handleSaveNow}
  />
  <div className="flex flex-1 overflow-hidden">
  {/* Viewer panel */}
@@ -1047,6 +1172,20 @@ export default function ViewerRoute({ loaderData }: Route.ComponentProps) {
  />
  );
  })()}
+ {/* In-app unsaved-changes dialog. Renders when `useBlocker` has
+     intercepted a dirty navigation. Stay → blocker.reset();
+     Leave → sendBeacon flush + blocker.proceed(). Stay is the safe
+     default (autoFocus + Escape + backdrop + X all route through
+     onStay). */}
+ <UnsavedChangesDialog
+ open={blocker.state === "blocked"}
+ titleLabel={t("viewer:save_status.unsaved_dialog_title")}
+ bodyLabel={t("viewer:save_status.unsaved_dialog_body")}
+ stayLabel={t("viewer:save_status.unsaved_dialog_stay")}
+ leaveLabel={t("viewer:save_status.unsaved_dialog_leave")}
+ onStay={handleUnsavedStay}
+ onLeave={handleUnsavedLeave}
+ />
  </div>
   );
 }

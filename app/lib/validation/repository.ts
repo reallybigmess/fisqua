@@ -1,9 +1,9 @@
 /**
  * Repository Validation
  *
- * Zod schemas for repository-row writes: display metadata, short
- * code, locality, and enabled flag. Shared by the admin routes and
- * the bulk import CLI.
+ * This module deals with the Zod schemas for repository-row writes:
+ * display metadata, short code, locality, and enabled flag. Shared by
+ * the admin routes and the bulk import CLI.
  *
  * @version v0.3.0
  */

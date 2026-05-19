@@ -1,10 +1,10 @@
 /**
  * ISO-like Date Formatting
  *
- * Formats a unix-ms timestamp as `YYYY-MM-DD HH:MM:SS` in UTC. Used on
- * the publish dashboard and anywhere else archival precision matters more
- * than locale formatting. Single source of truth — do not re-implement
- * elsewhere.
+ * This helper formats a unix-ms timestamp as `YYYY-MM-DD HH:MM:SS` in
+ * UTC. The publish dashboard and other surfaces where archival
+ * precision matters more than locale formatting consume it as a
+ * single source of truth — do not re-implement elsewhere.
  *
  * @version v0.3.0
  */

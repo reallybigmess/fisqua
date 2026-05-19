@@ -1,8 +1,9 @@
 /**
  * Project Members Page
  *
- * Lead-only project membership editor. Lists every member with their
- * role (lead, reviewer, cataloguer), exposes the invite-by-email form
+ * This page is the lead-only project membership editor. It lists
+ * every member with their role (lead, reviewer, cataloguer), exposes
+ * the invite-by-email form
  * for adding new members, and lets leads change roles or remove a
  * member. Cross-references the cataloguing admin team page so the
  * project lead can work without an admin round-trip.

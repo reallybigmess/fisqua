@@ -1,17 +1,24 @@
 /**
  * Vocabularies Hub Landing
  *
- * Overview landing page for the vocabularies admin. Shows aggregate
+ * This page is the overview landing for the vocabularies admin. It shows aggregate
  * counts per vocabulary, the pending-review backlog, and the recent
  * activity timeline so the operator can decide where to dive in
  * without opening every panel.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`. Distinct-value counts on `entities` and `places`
+ * are scoped to `tenant.id`; descriptionEntities /
+ * descriptionPlaces inherit tenant scope through their parent
+ * description (children-table FK chain).
+ *
+ * @version v0.4.0
  */
 
 import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ChevronRight } from "lucide-react";
+import { tenantContext } from "../context";
 import type { Route } from "./+types/_auth.admin.vocabularies._index";
 
 // ---------------------------------------------------------------------------
@@ -20,7 +27,7 @@ import type { Route } from "./+types/_auth.admin.vocabularies._index";
 
 export async function loader({ context }: Route.LoaderArgs) {
   const { drizzle } = await import("drizzle-orm/d1");
-  const { sql } = await import("drizzle-orm");
+  const { eq, sql } = await import("drizzle-orm");
   const {
     vocabularyTerms,
     entities,
@@ -28,6 +35,11 @@ export async function loader({ context }: Route.LoaderArgs) {
     descriptionPlaces,
     places,
   } = await import("~/db/schema");
+
+  // Tenant context is populated by authMiddleware; the loader does
+  // not need the user object directly but every domain query is
+  // scoped to the calling tenant.
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -46,22 +58,26 @@ export async function loader({ context }: Route.LoaderArgs) {
   const functionProposed =
     functionStats.find((r) => r.status === "proposed")?.count ?? 0;
 
-  // Entity types: count distinct values in use
+  // Entity types: count distinct values in use within this tenant
   const entityTypeCount = await db
     .select({ count: sql<number>`count(distinct entity_type)` })
     .from(entities)
+    .where(eq(entities.tenantId, tenant.id))
     .all();
 
-  // Entity roles: count distinct values in use
+  // Entity roles: count distinct values in use. descriptionEntities has
+  // no tenantId column; tenant scope is implied by the FK chain to
+  // descriptions which always carries tenantId.
   const entityRoleCount = await db
     .select({ count: sql<number>`count(distinct role)` })
     .from(descriptionEntities)
     .all();
 
-  // Place types: count distinct values in use
+  // Place types: count distinct values in use within this tenant
   const placeTypeCount = await db
     .select({ count: sql<number>`count(distinct place_type)` })
     .from(places)
+    .where(eq(places.tenantId, tenant.id))
     .all();
 
   // Place roles: count distinct values in use

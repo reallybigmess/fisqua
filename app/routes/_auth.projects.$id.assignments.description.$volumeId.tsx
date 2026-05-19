@@ -1,8 +1,23 @@
 /**
- * Per-volume description entry assignment page.
+ * Per-Volume Description Assignment
  *
- * Shows all entries in a volume with their description status,
- * assignment dropdowns, bulk selection, and re-segmentation warning.
+ * This page is the lead-only entry-level assignment surface for one
+ * volume's description workflow. It drills into the volume from the
+ * project assignments tab and lists every entry the volume holds with
+ * its current description status, the assigned cataloguer and
+ * reviewer, and a per-row dropdown for reassignment. A stacked
+ * progress bar at the top renders the status mix across the volume
+ * (unassigned, assigned, in-progress, described, reviewed, approved,
+ * sent back) so a lead can see at a glance whether the volume is
+ * blocked. Bulk selection feeds the shared `DescriptionAssignmentTable`
+ * actions.
+ *
+ * A re-segmentation warning surfaces when the volume has an open
+ * resegmentation request — assigning new describers while the
+ * outline is being reshaped would only churn the workflow, so the
+ * banner prompts the lead to resolve the request first.
+ *
+ * @version v0.3.0
  */
 
 import { Link } from "react-router";

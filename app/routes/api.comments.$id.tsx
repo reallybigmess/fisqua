@@ -1,10 +1,11 @@
 /**
  * Comments API — Single Thread
  *
- * PATCH edits the body or anchor of a comment the caller owns; DELETE
- * removes the comment when the caller owns it or when they are the
- * project lead. GET fetches the thread with denormalised author
- * display names.
+ * This API endpoint owns the per-thread operations on a single
+ * comment. PATCH edits the body or anchor of a comment the caller
+ * owns; DELETE removes the comment when the caller owns it or when
+ * they are the project lead. GET fetches the thread with denormalised
+ * author display names.
  *
  * @version v0.3.0
  */

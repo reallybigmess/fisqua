@@ -1,18 +1,30 @@
 /**
  * Cataloguing Admin — Users
  *
- * The cataloguing-side user directory: shows every account that holds
+ * This page is the cataloguing-side user directory: it shows every account that holds
  * at least one cataloguing role and lets a cataloguing admin edit
  * per-row role flags. Sensitive toggles — superadmin, collab admin —
  * remain superadmin-only in the UI, even though the route lives in
  * the cataloguing admin subsection.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`; the loader filters `users` by `tenant.id` and
+ * the action plumbs `tenant.id` into `handleUsersAction` so user
+ * mutations attribute to the calling tenant.
+ *
+ * The invite-form `isCollabAdmin` checkbox and the per-row
+ * `toggleCollabAdmin` button are hidden entirely when
+ * `tenant.crowdsourcingEnabled === false`. The route itself 404s on
+ * a crowdsourcing-off tenant via the parent layout's capability
+ * gate; the JSX gate here is belt-and-braces. Dormant flag values
+ * stay in the DB (no auto-clear).
+ *
+ * @version v0.4.0
  */
 
 import { Form, useActionData } from "react-router";
 import { useTranslation } from "react-i18next";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import { formatDate } from "../lib/format";
 import type { Route } from "./+types/_auth.admin.cataloguing.users";
 
@@ -24,6 +36,7 @@ export async function loader({ context }: Route.LoaderArgs) {
 
   const user = context.get(userContext);
   requireCollabAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -40,6 +53,7 @@ export async function loader({ context }: Route.LoaderArgs) {
   const allUsersRaw = await db
     .select()
     .from(users)
+    .where(eq(users.tenantId, tenant.id))
     .orderBy(desc(users.createdAt))
     .all();
 
@@ -54,6 +68,10 @@ export async function loader({ context }: Route.LoaderArgs) {
       isSuperAdmin: user.isSuperAdmin,
       isCollabAdmin: user.isCollabAdmin,
     },
+    // Surface only the capability flag the JSX gates on.
+    tenant: {
+      crowdsourcingEnabled: tenant.crowdsourcingEnabled,
+    },
   };
 }
 
@@ -67,6 +85,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   const user = context.get(userContext);
   requireCollabAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -75,13 +94,13 @@ export async function action({ request, context }: Route.ActionArgs) {
   const formData = await request.formData();
   const origin = new URL(request.url).origin;
 
-  return handleUsersAction(user, db, formData, env, i18n, origin);
+  return handleUsersAction(user, tenant.id, db, formData, env, i18n, origin);
 }
 
 export default function AdminCataloguingUsers({
   loaderData,
 }: Route.ComponentProps) {
-  const { users: allUsers, currentUser } = loaderData;
+  const { users: allUsers, currentUser, tenant } = loaderData;
   const actionData = useActionData<typeof action>();
   const { t } = useTranslation("admin");
 
@@ -140,8 +159,12 @@ export default function AdminCataloguingUsers({
               className="mt-1 block w-48 rounded-lg border border-stone-200 px-3 py-2 font-sans text-sm shadow-sm focus:border-indigo focus:ring-1 focus:ring-indigo focus:outline-none"
             />
           </div>
-          {/* isCollabAdmin checkbox is hidden unless current user is superadmin. */}
-          {currentUser.isSuperAdmin && (
+          {/* isCollabAdmin checkbox is hidden unless current user is
+              superadmin AND the tenant has crowdsourcing enabled.
+              On a crowdsourcing-off tenant the flag becomes a no-op
+              (the parent layout 404s the cataloguing routes), so
+              surfacing it would be misleading. */}
+          {currentUser.isSuperAdmin && tenant.crowdsourcingEnabled && (
             <label className="flex items-center gap-2 font-sans text-sm font-medium text-indigo">
               <input type="checkbox" name="isCollabAdmin" />
               Collab admin
@@ -216,24 +239,31 @@ export default function AdminCataloguingUsers({
                               {u.isAdmin ? t("table.admin") : t("table.user")}
                             </button>
                           </Form>
-                          <Form method="post" className="inline">
-                            <input
-                              type="hidden"
-                              name="_action"
-                              value="toggleCollabAdmin"
-                            />
-                            <input type="hidden" name="userId" value={u.id} />
-                            <button
-                              type="submit"
-                              className={`inline-flex items-center rounded-full px-2 py-0.5 font-sans text-xs font-semibold ${
-                                u.isCollabAdmin
-                                  ? "bg-verdigris-tint text-verdigris hover:bg-verdigris/20"
-                                  : "bg-stone-200 text-stone-500 hover:bg-stone-200"
-                              }`}
-                            >
-                              Collab
-                            </button>
-                          </Form>
+                          {/* Toggle for the capability-dependent flag is
+                              hidden when crowdsourcing is off — the
+                              flag becomes a dormant no-op and the
+                              surface it gates 404s at the parent
+                              layout's capability check. */}
+                          {tenant.crowdsourcingEnabled && (
+                            <Form method="post" className="inline">
+                              <input
+                                type="hidden"
+                                name="_action"
+                                value="toggleCollabAdmin"
+                              />
+                              <input type="hidden" name="userId" value={u.id} />
+                              <button
+                                type="submit"
+                                className={`inline-flex items-center rounded-full px-2 py-0.5 font-sans text-xs font-semibold ${
+                                  u.isCollabAdmin
+                                    ? "bg-verdigris-tint text-verdigris hover:bg-verdigris/20"
+                                    : "bg-stone-200 text-stone-500 hover:bg-stone-200"
+                                }`}
+                              >
+                                Collab
+                              </button>
+                            </Form>
+                          )}
                         </div>
                       ) : (
                         <span

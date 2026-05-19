@@ -1,12 +1,13 @@
 /**
  * Volume Server Operations
  *
- * Covers the create / list / delete lifecycle for volumes plus the
- * volume list shape consumed by the project volumes page, the member
- * dashboard, and the per-project workspace. Volume cards across the
- * platform read from `getProjectVolumes`, which also reports the
- * `openQcFlagCount` per volume so the "N open flags" badge can render
- * without the caller having to fan out a second query.
+ * This module deals with the create / list / delete lifecycle for
+ * volumes plus the volume list shape consumed by the project volumes
+ * page, the member dashboard, and the per-project workspace. Volume
+ * cards across the platform read from `getProjectVolumes`, which
+ * also reports the `openQcFlagCount` per volume so the "N open
+ * flags" badge can render without the caller having to fan out a
+ * second query.
  *
  * @version v0.3.0
  */

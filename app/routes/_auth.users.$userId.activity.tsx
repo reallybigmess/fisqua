@@ -1,10 +1,23 @@
 /**
- * User activity page with two client-side tabs:
- * - "Recent activity" -- timeline of milestone events
- * - "Volumes" -- per-volume progress view
+ * User Activity Page
  *
- * Visibility: users see their own page; leads see any team member's page;
- * cataloguers and reviewers cannot see each other's pages.
+ * This page is the per-user activity surface reached from the
+ * project members table and from the user's own avatar menu. The
+ * loader fans out a single `getActivityForUser` call that returns
+ * both a chronological timeline of milestone events (volume
+ * transitions, entry workflow moves, QC flag raises and resolutions)
+ * and a per-volume progress digest, then renders them through two
+ * client-side tabs — "Recent activity" and "Volumes" — so the lead
+ * can drill from "what has this teammate been doing" to "where do
+ * their volumes stand right now" without a separate round-trip.
+ *
+ * Visibility is intentionally tiered: a user can always see their own
+ * activity, a lead can see any team member's activity inside a
+ * project they lead, but cataloguers and reviewers cannot peek at
+ * each other — that would turn the timeline into a surveillance
+ * surface and erode the workflow's trust assumptions.
+ *
+ * @version v0.3.0
  */
 
 import { useState } from "react";

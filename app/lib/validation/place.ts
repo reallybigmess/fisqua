@@ -1,16 +1,23 @@
 /**
  * Place Validation Schemas
  *
- * Zod schemas that validate place authority records on every write
- * path -- create, edit, bulk import, and autosave draft. The
+ * This module deals with the Zod schemas that validate place
+ * authority records on every write path -- create, edit, bulk
+ * import, and autosave draft. The
  * `placeSchema` captures the full Linked Places-adjacent shape with
- * coordinates, historical administrative divisions, and external
- * authority IDs (Wikidata, Getty TGN, WHG, HGIS). The `placeCode`
- * regex pins the `nl-xxxxxx` format (6 lowercase alphanumeric
- * characters from a 32-char alphabet) so external references stay
- * stable across merges and renames.
+ * coordinates and external authority IDs (Getty TGN, WHG, HGIS).
+ * The `placeCode` regex pins the `nl-xxxxxx` format (6 lowercase
+ * alphanumeric characters from a 32-char alphabet) so external
+ * references stay stable across merges and renames.
  *
- * @version v0.3.0
+ * Migration `drizzle/0036_union_schema.sql` dropped
+ * historical_gobernacion, historical_partido, historical_region,
+ * country_code, admin_level_1, admin_level_2, and wikidata_id from
+ * the places table (0% populated in production audit). It added the
+ * `fclass` column (5-value GeoNames feature class) with a CHECK
+ * constraint and `legacyIds` JSON for migration provenance.
+ *
+ * @version v0.4.0
  */
 
 import { z } from "zod/v4";
@@ -27,18 +34,16 @@ export const placeSchema = z.object({
   latitude: z.number().min(-90).max(90).nullable().optional(),
   longitude: z.number().min(-180).max(180).nullable().optional(),
   coordinatePrecision: z.string().max(20).optional(),
-  historicalGobernacion: z.string().max(100).optional(),
-  historicalPartido: z.string().max(100).optional(),
-  historicalRegion: z.string().max(10).optional(),
-  countryCode: z.string().max(3).optional(),
-  adminLevel1: z.string().max(100).optional(),
-  adminLevel2: z.string().max(100).optional(),
   needsGeocoding: z.boolean().default(true),
   mergedInto: z.string().uuid().nullable().optional(),
   tgnId: z.string().max(20).nullable().optional(),
   hgisId: z.string().max(50).nullable().optional(),
   whgId: z.string().max(50).nullable().optional(),
-  wikidataId: z.string().max(20).nullable().optional(),
+  // 5-value GeoNames feature class enum (added in 0036).
+  fclass: z.enum(["P", "H", "A", "T", "S"]).nullable().optional(),
+  // Generic legacy id JSON column (0036). Stored as a JSON string at
+  // the DB layer; full Zod shape lives in app/lib/validation/legacy-ids.ts.
+  legacyIds: z.string().default("[]"),
   createdAt: z.number().int(),
   updatedAt: z.number().int(),
 });

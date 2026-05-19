@@ -1,8 +1,9 @@
 /**
  * Entity Validation Schemas
  *
- * Zod schemas that validate entity authority records on every write
- * path -- create, edit, bulk import, and autosave draft. The
+ * This module deals with the Zod schemas that validate entity
+ * authority records on every write path -- create, edit, bulk
+ * import, and autosave draft. The
  * `entitySchema` captures the full shape the DB expects and is
  * intentionally stricter than the UI form: the admin UI may defer
  * optional fields, but a row committed to `entities` has to satisfy
@@ -10,7 +11,12 @@
  * `ne-xxxxxx` format (6 lowercase alphanumeric characters from a
  * 32-char alphabet) so external references have a stable shape.
  *
- * @version v0.3.0
+ * Migration `drizzle/0036_union_schema.sql` dropped `legal_status`
+ * (0% populated in production audit) and added `dbe_id` (Diccionario
+ * Biográfico Electrónico authority ref) and the generic `legacy_ids`
+ * JSON column.
+ *
+ * @version v0.4.0
  */
 
 import { z } from "zod/v4";
@@ -39,12 +45,16 @@ export const entitySchema = z.object({
     .nullable()
     .optional(),
   history: z.string().optional(),
-  legalStatus: z.string().max(100).optional(),
   functions: z.string().optional(),
   sources: z.string().optional(),
   mergedInto: z.string().uuid().nullable().optional(),
   wikidataId: z.string().max(20).nullable().optional(),
   viafId: z.string().max(20).nullable().optional(),
+  // Diccionario Biográfico Electrónico authority ref (added in 0036).
+  dbeId: z.string().max(20).nullable().optional(),
+  // Generic legacy id JSON column (0036). Full Zod shape lives in
+  // app/lib/validation/legacy-ids.ts.
+  legacyIds: z.string().default("[]"),
   createdAt: z.number().int(),
   updatedAt: z.number().int(),
 });

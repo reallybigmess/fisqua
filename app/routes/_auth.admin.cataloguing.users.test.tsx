@@ -1,7 +1,23 @@
 /**
  * Tests for Cataloguing Admin Users Actions
  *
- * @version v0.3.0
+ * This module deals with unit-testing the server-side handlers that
+ * sit behind the cataloguing-users admin page — role-flag toggles,
+ * email-address changes, and the audit-log writes that accompany
+ * every mutation. The handlers themselves live in
+ * `_auth.admin.cataloguing.users.action.server.ts`; splitting them
+ * out lets the tests exercise the logic without standing up a full
+ * React Router request, which keeps the suite fast and lets us
+ * assert on the i18n key strings rather than on rendered DOM.
+ *
+ * Each test seeds a fresh D1 with `applyMigrations` + `cleanDatabase`,
+ * builds a `User` fixture via `makeUser`, and asserts both the
+ * mutation effect (DB row state after the call) and the audit-log
+ * row that should accompany it. Tenant scope is held flat on
+ * `NEOGRANADINA_TENANT_ID` so cross-tenant behaviours can be added
+ * later without rewriting the existing tests.
+ *
+ * @version v0.4.0
  */
 
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
@@ -12,6 +28,7 @@ import * as schema from "../db/schema";
 import { applyMigrations, cleanDatabase } from "../../tests/helpers/db";
 import { handleUsersAction } from "./_auth.admin.cataloguing.users.action.server";
 import { requireCollabAdmin } from "../lib/permissions.server";
+import { NEOGRANADINA_TENANT_ID } from "../lib/tenant";
 import type { User } from "../context";
 
 // A tiny i18n stub — just echoes the key so tests can assert on it.
@@ -20,6 +37,7 @@ const i18n = { t: (key: string) => key };
 function makeUser(overrides: Partial<User> = {}): User {
   return {
     id: overrides.id ?? crypto.randomUUID(),
+    tenantId: overrides.tenantId ?? NEOGRANADINA_TENANT_ID,
     email: overrides.email ?? "u@example.com",
     name: overrides.name ?? null,
     isAdmin: false,
@@ -95,6 +113,7 @@ describe("cataloguing users admin: action handler", () => {
     const now = Date.now();
     const targetId = crypto.randomUUID();
     await db.insert(schema.users).values({
+      tenantId: NEOGRANADINA_TENANT_ID,
       id: targetId,
       email: "target@example.com",
       isAdmin: false,
@@ -105,6 +124,7 @@ describe("cataloguing users admin: action handler", () => {
     await expectForbidden(() =>
       handleUsersAction(
         collabAdmin,
+        NEOGRANADINA_TENANT_ID,
         db,
         fd({ _action: "toggleAdmin", userId: targetId }),
         env,
@@ -128,6 +148,7 @@ describe("cataloguing users admin: action handler", () => {
     const now = Date.now();
     const targetId = crypto.randomUUID();
     await db.insert(schema.users).values({
+      tenantId: NEOGRANADINA_TENANT_ID,
       id: targetId,
       email: "target2@example.com",
       isAdmin: false,
@@ -138,6 +159,7 @@ describe("cataloguing users admin: action handler", () => {
     await expectForbidden(() =>
       handleUsersAction(
         collabAdmin,
+        NEOGRANADINA_TENANT_ID,
         db,
         fd({ _action: "toggleCollabAdmin", userId: targetId }),
         env,
@@ -153,6 +175,7 @@ describe("cataloguing users admin: action handler", () => {
     const now = Date.now();
     const targetId = crypto.randomUUID();
     await db.insert(schema.users).values({
+      tenantId: NEOGRANADINA_TENANT_ID,
       id: targetId,
       email: "target3@example.com",
       isAdmin: false,
@@ -162,6 +185,7 @@ describe("cataloguing users admin: action handler", () => {
 
     const result = await handleUsersAction(
       superadmin,
+      NEOGRANADINA_TENANT_ID,
       db,
       fd({ _action: "toggleAdmin", userId: targetId }),
       env,
@@ -185,6 +209,7 @@ describe("cataloguing users admin: action handler", () => {
     await expectForbidden(() =>
       handleUsersAction(
         collabAdmin,
+        NEOGRANADINA_TENANT_ID,
         db,
         fd({
           _action: "inviteUser",
@@ -214,6 +239,7 @@ describe("cataloguing users admin: action handler", () => {
 
     const result = await handleUsersAction(
       collabAdmin,
+      NEOGRANADINA_TENANT_ID,
       db,
       fd({
         _action: "inviteUser",
@@ -250,6 +276,7 @@ describe("cataloguing users admin: action handler", () => {
     const collabAdmin = makeUser({ isCollabAdmin: true });
     const now = Date.now();
     await db.insert(schema.users).values({
+      tenantId: NEOGRANADINA_TENANT_ID,
       id: crypto.randomUUID(),
       email: "dup@example.com",
       isAdmin: false,
@@ -259,6 +286,7 @@ describe("cataloguing users admin: action handler", () => {
 
     const result = await handleUsersAction(
       collabAdmin,
+      NEOGRANADINA_TENANT_ID,
       db,
       fd({
         _action: "inviteUser",
@@ -289,6 +317,7 @@ describe("cataloguing users admin: action handler", () => {
 
     const result = await handleUsersAction(
       collabAdmin,
+      NEOGRANADINA_TENANT_ID,
       db,
       fd({
         _action: "inviteUser",

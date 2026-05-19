@@ -1,8 +1,9 @@
 /**
  * Role-Dependent Dashboard
  *
- * Legacy dashboard route kept for deep links and admin-first users.
- * Determines the caller's primary project role — with lead taking
+ * This route is the legacy dashboard kept for deep links and
+ * admin-first users. It determines the caller's primary project role
+ * — with lead taking
  * precedence over reviewer, reviewer over cataloguer — and renders
  * the appropriate dashboard view (`LeadDashboard`, `ReviewerDashboard`,
  * or `CataloguerDashboard`) with the role-specific payload the loader

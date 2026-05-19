@@ -1,8 +1,9 @@
 /**
  * Project Settings Page
  *
- * Lead-only general settings surface for one project, enforced in both
- * loader and action through `requireProjectRole`. Hosts three groups
+ * This page is the lead-only general settings surface for one
+ * project, enforced in both loader and action through
+ * `requireProjectRole`. It hosts three groups
  * of controls: the project name / description / conventions / settings
  * JSON form, the Colombian Spanish document subtype list editor, and
  * the danger-zone archive and delete actions.

@@ -1,7 +1,21 @@
 /**
- * Status transition API endpoint.
- * Action-only route -- no loader, no component.
- * Accepts POST with form data: volumeId, projectId, targetStatus, comment?
+ * Volume Workflow API
+ *
+ * This API endpoint is the volume-level status-transition spine.
+ * Action-only — no loader, no component. POST accepts a form body
+ * carrying `volumeId`, `projectId`, `targetStatus`, and an optional
+ * `comment`, then delegates to `transitionVolumeStatus` which runs
+ * the workflow state-machine check (only certain transitions are
+ * allowed, only from certain roles), writes the new status to the
+ * `volumes` row, and records an audit-log entry so the lead can see
+ * who moved the volume and when.
+ *
+ * Submit-for-review dialogs, the lead's overview kanban, and the
+ * reviewer footer actions all post here rather than mutating
+ * `volumes` directly — keeping every status change behind one
+ * guarded handler is what lets the state machine stay enforceable.
+ *
+ * @version v0.3.0
  */
 
 import { userContext } from "../context";

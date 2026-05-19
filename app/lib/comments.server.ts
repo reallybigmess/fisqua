@@ -1,11 +1,11 @@
 /**
  * Comments Server Module
  *
- * Server-side engine behind the comments thread API and the comment-
- * aware surfaces. Handles creating, editing, resolving, and deleting
- * comment threads, anchoring threads to entries or regions, and
- * joining denormalised author display names so the UI renders
- * without follow-up queries.
+ * This module deals with the server-side engine behind the comments
+ * thread API and the comment-aware surfaces. It handles creating,
+ * editing, resolving, and deleting comment threads, anchoring threads
+ * to entries or regions, and joining denormalised author display
+ * names so the UI renders without follow-up queries.
  *
  * @version v0.3.0
  */

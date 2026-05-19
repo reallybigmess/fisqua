@@ -1,7 +1,7 @@
 /**
  * Vocabularies — Functions List
  *
- * Index of the function-style vocabulary terms — typically archival
+ * This page is the index of the function-style vocabulary terms — typically archival
  * activities like "correspondence" or "accounting" — with bulk
  * actions for approve, reject, and merge. Each row deep-links to the
  * per-function detail page.

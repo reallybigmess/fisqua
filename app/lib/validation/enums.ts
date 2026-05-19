@@ -1,12 +1,13 @@
 /**
  * Shared Enum Arrays
  *
- * Single source of truth for the controlled-vocabulary arrays used by
- * the Drizzle schema, the Zod validation schemas, and the vocabularies
- * admin surfaces. Values mirror the Django backend (`catalog/models.py`)
- * exactly so a payload that validates here validates there too.
+ * This module deals with the single source of truth for the
+ * controlled-vocabulary arrays used by the Drizzle schema, the Zod
+ * validation schemas, and the vocabularies admin surfaces. Values
+ * mirror the Django backend (`catalog/models.py`) exactly so a
+ * payload that validates here validates there too.
  *
- * @version v0.3.0
+ * @version v0.4.0
  */
 
 // Description levels
@@ -40,10 +41,11 @@ export const ENTITY_ROLES = [
   "scribe", "witness", "notary",
   "photographer", "artist",
   "plaintiff", "defendant", "petitioner", "judge", "appellant",
+  "apoderado",
   "official",
   "heir", "albacea", "spouse", "victim",
   "grantor", "donor", "seller", "buyer",
-  "mortgagor", "mortgagee", "creditor", "debtor",
+  "mortgagor", "mortgagee", "creditor", "debtor", "fiador",
 ] as const;
 
 // Place roles in descriptions

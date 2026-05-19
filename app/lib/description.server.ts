@@ -11,7 +11,29 @@
  * actions (which handle request parsing and permission checks) and the
  * Drizzle queries (which do the actual table writes).
  *
- * @version v0.3.0
+ * Additive-save contract: `saveDescription` writes only the
+ * description columns whose keys are present in the incoming `fields`
+ * object, and never nulls a column merely because its key was absent.
+ * Explicit `null` in the input is still honoured so callers can clear
+ * a field on purpose. Combined with the belt-and-braces client fix in
+ * `app/routes/_auth.description.$projectId.$entryId.tsx`, this closes
+ * the data-loss bug surfaced in the 2026-05-14 UAT session where a
+ * single-field autosave was nulling every other description column on
+ * the same entry. The regression contract is pinned by
+ * `tests/description/autosave.test.ts` ("preserves omitted fields
+ * across a partial save").
+ *
+ * The `title` field is in the allowlist. Earlier in development the
+ * title was missing from both the client's `buildFieldsPayload`
+ * allowlist AND the server's `DESCRIPTION_FIELD_KEYS` tuple, so
+ * editing the description editor's "Title *" input cycled the
+ * save-status pill but the value never reached `entries.title` on
+ * disk. Both surfaces now lead with `"title"` and a pair of
+ * regression tests in `tests/description/autosave.test.ts` pin the
+ * behaviour from both angles: title persists, and the additive
+ * contract still holds for the newly-allowed key.
+ *
+ * @version v0.4.1
  */
 
 import { eq, sql } from "drizzle-orm";
@@ -38,6 +60,7 @@ const submitSchema = z.object({
 });
 
 export type DescriptionFields = {
+  title?: string | null;
   translatedTitle?: string | null;
   resourceType?: "texto" | "imagen" | "cartografico" | "mixto" | null;
   dateExpression?: string | null;
@@ -51,7 +74,36 @@ export type DescriptionFields = {
 };
 
 /**
+ * Description-form column keys that `saveDescription` is allowed to
+ * touch. Listed explicitly (rather than derived from `Object.keys` on
+ * the incoming `fields` object) so the function cannot be coaxed into
+ * writing arbitrary columns by a caller that smuggles extra keys into
+ * the payload. Must stay in sync with `DescriptionFields`.
+ */
+const DESCRIPTION_FIELD_KEYS = [
+  "title",
+  "translatedTitle",
+  "resourceType",
+  "dateExpression",
+  "dateStart",
+  "dateEnd",
+  "extent",
+  "scopeContent",
+  "language",
+  "descriptionNotes",
+  "internalNotes",
+] as const satisfies ReadonlyArray<keyof DescriptionFields>;
+
+/**
  * Save description fields on an entry (autosave).
+ *
+ * Additive contract: only keys present in `fields` are written.
+ * Absent keys are preserved on disk; an
+ * explicit `null` in the payload still clears the column. The
+ * `updated_at` timestamp is always bumped when at least one column is
+ * being written; an empty payload is a no-op (no UPDATE issued at
+ * all) so a stray empty-fields call cannot churn the timestamp.
+ *
  * Does NOT change description status.
  */
 export async function saveDescription(
@@ -59,23 +111,28 @@ export async function saveDescription(
   entryId: string,
   fields: DescriptionFields
 ): Promise<void> {
-  const now = Date.now();
+  // Build the SET payload from only the keys actually present in the
+  // input. `key in fields` distinguishes "absent" from "explicitly
+  // undefined" / "explicitly null"; absent keys are skipped, while
+  // both explicit null and explicit value pass through unchanged.
+  const updateValues: Record<string, unknown> = {};
+  for (const key of DESCRIPTION_FIELD_KEYS) {
+    if (key in fields) {
+      updateValues[key] = fields[key];
+    }
+  }
+
+  // Empty payload — nothing to write. Skip the UPDATE entirely so
+  // callers cannot accidentally bump `updated_at` with a no-op save.
+  if (Object.keys(updateValues).length === 0) {
+    return;
+  }
+
+  updateValues.updatedAt = Date.now();
 
   await db
     .update(entries)
-    .set({
-      translatedTitle: fields.translatedTitle ?? null,
-      resourceType: fields.resourceType ?? null,
-      dateExpression: fields.dateExpression ?? null,
-      dateStart: fields.dateStart ?? null,
-      dateEnd: fields.dateEnd ?? null,
-      extent: fields.extent ?? null,
-      scopeContent: fields.scopeContent ?? null,
-      language: fields.language ?? null,
-      descriptionNotes: fields.descriptionNotes ?? null,
-      internalNotes: fields.internalNotes ?? null,
-      updatedAt: now,
-    })
+    .set(updateValues)
     .where(eq(entries.id, entryId));
 }
 

@@ -1,11 +1,11 @@
 /**
  * Project Settings Helpers
  *
- * Typed readers and writers for the per-project settings JSON blob.
- * Exposes helpers for the document subtype list, description
- * conventions, and the rest of the structured settings that live
- * alongside the free-form JSON textarea on the project settings
- * page.
+ * This module deals with typed readers and writers for the
+ * per-project settings JSON blob. It exposes helpers for the
+ * document subtype list, description conventions, and the rest of
+ * the structured settings that live alongside the free-form JSON
+ * textarea on the project settings page.
  *
  * @version v0.3.0
  */

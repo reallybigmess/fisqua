@@ -1,7 +1,7 @@
 /**
  * Crowdsourcing Promotion Page
  *
- * The superadmin workflow for promoting reviewed crowdsourcing
+ * This page is the superadmin workflow for promoting reviewed crowdsourcing
  * volume entries into long-lived archival descriptions. The loader
  * fetches every volume that has at least one promotable entry and,
  * when a volume is selected, its promotable-entries list and the
@@ -11,14 +11,20 @@
  * committing the batch; the server action writes the new descriptions
  * and records the audit trail.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`. The action plumbs `tenant.id` into
+ * `promoteEntries` so promoted descriptions are attributed to the
+ * calling tenant rather than a single-tenant hard-code in
+ * `mapEntryToDescription`.
+ *
+ * @version v0.4.0
  */
 
 import { useState, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router";
 import { z } from "zod";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import { VolumeSelector } from "../components/promote/volume-selector";
 import { PromotionTable } from "../components/promote/promotion-table";
 import { RefCodePattern } from "../components/promote/ref-code-pattern";
@@ -99,6 +105,20 @@ export async function action({ context, request }: Route.ActionArgs) {
   if (!user.isSuperAdmin) {
     return { error: "Unauthorized" };
   }
+  const tenant = context.get(tenantContext);
+
+  // Drizzle infers `tenant.descriptiveStandard` as nullable because
+  // the column is NOT NULL only when `kind = 'tenant'`. The schema
+  // CHECK in drizzle/0034_tenants_table.sql means a
+  // `kind = 'tenant'` row CANNOT have a null standard; if we ever
+  // hit this branch the tenant row is malformed (CHECK was
+  // bypassed) — surface as a 500 rather than silently default to
+  // ISAD-shaped output for what should be a DACS or RAD tenant.
+  if (tenant.descriptiveStandard == null) {
+    throw new Error(
+      "Schema invariant violation: tenant.descriptiveStandard is null on a tenant route",
+    );
+  }
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -140,6 +160,11 @@ export async function action({ context, request }: Route.ActionArgs) {
       entries,
       volumeId,
       userId: user.id,
+      tenantId: tenant.id,
+      // Plumb the active descriptive standard so the per-entry
+      // mapping pass validates against the right schema before
+      // persistence.
+      standard: tenant.descriptiveStandard,
       manifestBaseUrl,
     });
 

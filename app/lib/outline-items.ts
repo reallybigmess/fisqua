@@ -1,10 +1,10 @@
 /**
  * Outline Item Builder
  *
- * Pure helpers that turn a volume's entries and pages into the
- * flat outline-item list the outline panel renders. Handles
- * entry/page interleaving, resegmentation placeholders, and the
- * comment/flag counts each row surfaces.
+ * This module deals with the pure helpers that turn a volume's
+ * entries and pages into the flat outline-item list the outline panel
+ * renders. It handles entry/page interleaving, resegmentation
+ * placeholders, and the comment/flag counts each row surfaces.
  *
  * @version v0.3.0
  */

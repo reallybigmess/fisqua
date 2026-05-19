@@ -1,9 +1,26 @@
 /**
- * Resegmentation flag operations.
+ * Resegmentation Flag Operations
  *
- * Resegmentation flags pause description work on a volume while
- * segmentation issues are resolved. Rather than adding a column to
- * the volumes table, we query for open flags when checking pause state.
+ * This module deals with the server-side primitives that govern
+ * resegmentation — the moment a reviewer or describer discovers that
+ * a volume's boundaries were drawn wrongly and needs the cataloguer
+ * to redo them before description work can continue. Each flag
+ * implicitly pauses description on its volume; rather than
+ * denormalise a `description_paused` column onto the volumes table,
+ * the pause state is derived by querying for open flags wherever it
+ * is needed, so a flag's lifecycle is the single source of truth.
+ *
+ * The helpers cover the small surface the pipeline board, viewer,
+ * and resegmentation panel rely on: creating a flag with the
+ * affected entry ids in its payload, listing the open flags for a
+ * volume so the dashboards can render the right state, and joining
+ * the reporter's denormalised display name so the UI does not have
+ * to chase a second query. Callers pass the guarded user in;
+ * resolution writes (closing a flag once segmentation is corrected)
+ * live alongside the create path so the lifecycle stays in one
+ * place.
+ *
+ * @version v0.3.0
  */
 
 import { eq, and } from "drizzle-orm";

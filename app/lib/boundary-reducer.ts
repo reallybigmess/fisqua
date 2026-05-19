@@ -1,3 +1,34 @@
+/**
+ * Boundary reducer
+ *
+ * This module deals with every state transition in the segmentation
+ * viewer. `boundaryReducer` is the pure reducer that takes a
+ * `BoundaryState` and a `BoundaryAction` and returns the new state;
+ * `createInitialState` builds the starting snapshot from a list of
+ * entries fetched off the server. The reducer is exhaustive over the
+ * action union — adding, moving, deleting, indenting, outdenting,
+ * renaming and re-typing outline entries; plus the four save-status
+ * transitions (`MARK_SAVED`, `MARK_SAVING`, `MARK_DIRTY`,
+ * `MARK_ERROR`) that the autosave pipeline drives.
+ *
+ * Structural edits validate before they mutate. The minimum y-gap
+ * (`MIN_Y_GAP`, 2% of page height) keeps two boundaries from landing
+ * on top of each other; child entries are kept inside their parent's
+ * (page, y) range; the very first top-level entry is protected from
+ * deletion. When a validation rejects an edit, the reducer returns
+ * the same state reference, which the undoable wrapper reads as a
+ * no-op and skips pushing onto the history stack. ID generation for
+ * `ADD_BOUNDARY` reads an optional `id` field off the action and
+ * falls back to `crypto.randomUUID()` — that seam lets tests pin
+ * deterministic IDs.
+ *
+ * No side effects: this module imports nothing but its own types
+ * and does no I/O. It pairs with `boundary-types.ts` (type
+ * vocabulary) and `use-undoable-reducer.ts` (history wrapper).
+ *
+ * @version v0.4.0
+ */
+
 import type { Entry, BoundaryAction, BoundaryState } from "./boundary-types";
 
 /** Minimum gap between boundaries on the same page (2% of page height). */
@@ -11,6 +42,7 @@ export function createInitialState(entries: Entry[]): BoundaryState {
     entries: [...entries],
     isDirty: false,
     saveStatus: "saved",
+    lastError: null,
     version: 0,
   };
 }
@@ -30,6 +62,7 @@ export function boundaryReducer(
         entries: [...action.entries],
         isDirty: false,
         saveStatus: "saved",
+        lastError: null,
         version: state.version,
       };
     }
@@ -327,13 +360,31 @@ export function boundaryReducer(
     }
 
     case "MARK_SAVED":
-      return { ...state, isDirty: false, saveStatus: "saved" };
+      // Successful save clears any stuck error state too.
+      return {
+        ...state,
+        isDirty: false,
+        saveStatus: "saved",
+        lastError: null,
+      };
 
     case "MARK_SAVING":
-      return { ...state, saveStatus: "saving" };
+      // Starting a fresh attempt clears the prior error message so a
+      // stale code does not survive into the next pill render.
+      return { ...state, saveStatus: "saving", lastError: null };
 
     case "MARK_DIRTY":
       return { ...state, isDirty: true, saveStatus: "unsaved" };
+
+    // Bounded-retry exhaustion. Caller still has unflushed work —
+    // `isDirty` deliberately stays true — but the pill goes red and
+    // surfaces the retry affordance.
+    case "MARK_ERROR":
+      return {
+        ...state,
+        saveStatus: "error",
+        lastError: action.error,
+      };
 
     default:
       return state;

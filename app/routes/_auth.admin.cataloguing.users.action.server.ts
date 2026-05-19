@@ -1,13 +1,19 @@
 /**
  * Cataloguing Admin Users Actions
  *
- * Shared server-side handlers behind the cataloguing-users admin page:
+ * This module deals with the shared server-side handlers behind the cataloguing-users admin page:
  * role-flag toggles, email-address changes, and the audit-log writes
  * that sit behind every mutation. Split out from the route file so
  * the unit tests in `_auth.admin.cataloguing.users.test.tsx` can
  * exercise the logic without a React Router request.
  *
- * @version v0.3.0
+ * Takes an explicit `tenantId` argument so the invite path
+ * attributes the new user row to the request-boundary tenant from
+ * `context.get(tenantContext).id` rather than a single-tenant
+ * hard-code; user reads/updates are also filtered by tenant so
+ * cross-tenant id-guessing 404s.
+ *
+ * @version v0.4.0
  */
 
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -55,6 +61,7 @@ export type UsersActionResult =
  */
 export async function handleUsersAction(
   user: User,
+  tenantId: string,
   db: DrizzleD1Database<any>,
   formData: FormData,
   env: any,
@@ -62,7 +69,7 @@ export async function handleUsersAction(
   origin: string,
   deps: UsersActionDeps = {}
 ): Promise<UsersActionResult> {
-  const { eq } = await import("drizzle-orm");
+  const { and, eq } = await import("drizzle-orm");
   const { users, magicLinks } = await import("../db/schema");
   const { generateMagicLink } = await import("../lib/auth.server");
 
@@ -80,7 +87,7 @@ export async function handleUsersAction(
       const targetUser = await db
         .select()
         .from(users)
-        .where(eq(users.id, targetUserId))
+        .where(and(eq(users.tenantId, tenantId), eq(users.id, targetUserId)))
         .get();
 
       if (!targetUser) {
@@ -90,7 +97,7 @@ export async function handleUsersAction(
       await db
         .update(users)
         .set({ isAdmin: !targetUser.isAdmin, updatedAt: Date.now() })
-        .where(eq(users.id, targetUserId));
+        .where(and(eq(users.tenantId, tenantId), eq(users.id, targetUserId)));
 
       const messageKey = targetUser.isAdmin
         ? "admin:error.admin_toggled_off"
@@ -112,7 +119,7 @@ export async function handleUsersAction(
       const targetUser = await db
         .select()
         .from(users)
-        .where(eq(users.id, targetUserId))
+        .where(and(eq(users.tenantId, tenantId), eq(users.id, targetUserId)))
         .get();
 
       if (!targetUser) {
@@ -125,7 +132,7 @@ export async function handleUsersAction(
           isCollabAdmin: !targetUser.isCollabAdmin,
           updatedAt: Date.now(),
         })
-        .where(eq(users.id, targetUserId));
+        .where(and(eq(users.tenantId, tenantId), eq(users.id, targetUserId)));
 
       return {
         ok: true,
@@ -152,6 +159,9 @@ export async function handleUsersAction(
         requireSuperAdminOr403(user);
       }
 
+      // Email is globally unique on `users` (schema-level), so a duplicate
+      // check across all tenants is correct here. The tenant scoping
+      // applies to the INSERT and to subsequent reads.
       const existing = await db
         .select()
         .from(users)
@@ -165,6 +175,7 @@ export async function handleUsersAction(
       const now = Date.now();
       const newUserId = crypto.randomUUID();
       await db.insert(users).values({
+        tenantId,
         id: newUserId,
         email,
         name,

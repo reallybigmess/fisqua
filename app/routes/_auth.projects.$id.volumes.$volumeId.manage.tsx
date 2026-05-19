@@ -1,8 +1,9 @@
 /**
  * Volume Management Page
  *
- * Lead-only surface for project leads to operate on one volume in depth:
- * change its status, reassign the cataloguer and reviewer, edit its
+ * This page is the lead-only surface for project leads to operate on
+ * one volume in depth: change its status, reassign the cataloguer and
+ * reviewer, edit its
  * metadata, review open QC flags reported against its pages, and — when
  * the volume is still empty and unstarted — delete it altogether.
  *

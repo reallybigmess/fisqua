@@ -1,10 +1,11 @@
 /**
  * Entry Ownership Helpers
  *
- * Pure utilities for deciding who "owns" a volume entry at any given
- * time — the current describer, the reviewer, or the lead — based on
- * the workflow status. Used by the outline, the viewer, and the
- * comments API to route mutations to the right actor.
+ * This module deals with the pure utilities for deciding who "owns" a
+ * volume entry at any given time — the current describer, the
+ * reviewer, or the lead — based on the workflow status. The outline,
+ * the viewer, and the comments API all consult these helpers to route
+ * mutations to the right actor.
  *
  * @version v0.3.0
  */

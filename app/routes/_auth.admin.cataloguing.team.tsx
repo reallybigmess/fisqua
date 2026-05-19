@@ -1,18 +1,24 @@
 /**
  * Cataloguing Admin — Team
  *
- * Per-project membership administration: which users belong to which
+ * This page is the per-project membership administration surface: which users belong to which
  * project and in which role (lead, reviewer, cataloguer). Cataloguing
  * admins and superadmins can add, remove, and reassign members from
  * here; the page pairs a project selector with the member table.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`. Reads of `users` are filtered by `tenant.id`;
+ * project tables (`projects`, `project_members`, `volumes`,
+ * `entries`) inherit tenant scope through the user FK chain
+ * (memberships only join users that already belong to the tenant).
+ *
+ * @version v0.4.0
  */
 
 import { useState } from "react";
 import { useFetcher } from "react-router";
 import { useTranslation } from "react-i18next";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import type { Route } from "./+types/_auth.admin.cataloguing.team";
 
 interface TeamMember {
@@ -46,12 +52,17 @@ export async function loader({ context }: Route.LoaderArgs) {
 
   const user = context.get(userContext);
   requireCollabAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
 
   // 1. Get all users who are project members or collab admins
-  const allUsersRaw = await db.select().from(users).all();
+  const allUsersRaw = await db
+    .select()
+    .from(users)
+    .where(eq(users.tenantId, tenant.id))
+    .all();
 
   const memberUserIds = await db
     .selectDistinct({ userId: projectMembers.userId })
@@ -175,6 +186,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   const user = context.get(userContext);
   requireCollabAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -194,11 +206,11 @@ export async function action({ request, context }: Route.ActionArgs) {
       return { ok: false, error: "Invalid role" };
     }
 
-    // Verify userId exists
+    // Verify userId exists in the calling tenant
     const [targetUser] = await db
       .select({ id: users.id })
       .from(users)
-      .where(eq(users.id, userId))
+      .where(and(eq(users.tenantId, tenant.id), eq(users.id, userId)))
       .limit(1)
       .all();
     if (!targetUser) {

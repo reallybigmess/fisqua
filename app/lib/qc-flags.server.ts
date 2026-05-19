@@ -1,11 +1,11 @@
 /**
  * QC Flags Server Module
  *
- * Server-side engine for the QC flag lifecycle: raising a new flag
- * against a page, listing open flags for a volume or entry,
- * resolving a flag with a reason, and joining denormalised
- * reporter / resolver display names. Every mutation is behind a
- * project-role guard; callers pass the guarded user in.
+ * This module deals with the server-side engine for the QC flag
+ * lifecycle: raising a new flag against a page, listing open flags
+ * for a volume or entry, resolving a flag with a reason, and joining
+ * denormalised reporter / resolver display names. Every mutation is
+ * behind a project-role guard; callers pass the guarded user in.
  *
  * @version v0.3.0
  */

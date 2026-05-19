@@ -1,17 +1,23 @@
 /**
  * User Admin — List
  *
- * Superadmin-only directory of every user in the system with filter
- * chips for role flags and a search box for name or email. Each row
+ * This page is the superadmin-only directory of every user in the
+ * system, with filter chips for role flags and a search box for name
+ * or email. Each row
  * deep-links to the user detail page for edits.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`. Loader filters `users` by `tenant.id`; the
+ * action plumbs `tenant.id` into `handleUsersAction` so the invite
+ * path attributes the new user row to the calling tenant.
+ *
+ * @version v0.4.0
  */
 
 import { useState } from "react";
 import { Link, useFetcher } from "react-router";
 import { useTranslation } from "react-i18next";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import { formatDate } from "../lib/format";
 import type { Route } from "./+types/_auth.admin.users";
 
@@ -28,6 +34,7 @@ export async function loader({ context }: Route.LoaderArgs) {
   if (!user.isSuperAdmin && !user.isUserManager) {
     throw new Response("Forbidden", { status: 403 });
   }
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -47,6 +54,7 @@ export async function loader({ context }: Route.LoaderArgs) {
       createdAt: users.createdAt,
     })
     .from(users)
+    .where(eq(users.tenantId, tenant.id))
     .orderBy(asc(users.name))
     .all();
 
@@ -87,6 +95,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   if (!user.isSuperAdmin && !user.isUserManager) {
     throw new Response("Forbidden", { status: 403 });
   }
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -100,7 +109,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     );
     const i18n = await import("i18next");
     const origin = new URL(request.url).origin;
-    return handleUsersAction(user, db, formData, env, i18n, origin);
+    return handleUsersAction(user, tenant.id, db, formData, env, i18n, origin);
   }
 
   return { ok: false, error: "Unknown action" };
@@ -266,26 +275,26 @@ export default function SystemUsersPage({
       )}
 
       {allUsers.length === 0 ? (
-        <p className="font-sans text-sm text-stone-400">{t("no_users")}</p>
+        <p className="font-sans text-sm text-stone-400">{t("sidebar:no_users")}</p>
       ) : (
         <div className="overflow-hidden rounded-lg border border-stone-200">
           <table className="min-w-full divide-y divide-stone-200">
             <thead className="bg-stone-50">
               <tr>
                 <th className="px-4 py-2.5 text-left font-sans text-xs font-medium uppercase text-stone-500">
-                  {t("col_name")}
+                  {t("sidebar:col_name")}
                 </th>
                 <th className="px-4 py-2.5 text-left font-sans text-xs font-medium uppercase text-stone-500">
-                  {t("col_email")}
+                  {t("sidebar:col_email")}
                 </th>
                 <th className="px-4 py-2.5 text-left font-sans text-xs font-medium uppercase text-stone-500">
-                  {t("col_roles")}
+                  {t("sidebar:col_roles")}
                 </th>
                 <th className="px-4 py-2.5 text-left font-sans text-xs font-medium uppercase text-stone-500">
                   {t("user_admin:col_projects")}
                 </th>
                 <th className="px-4 py-2.5 text-left font-sans text-xs font-medium uppercase text-stone-500">
-                  {t("col_last_login")}
+                  {t("sidebar:col_last_login")}
                 </th>
               </tr>
             </thead>

@@ -1,7 +1,7 @@
 /**
  * Entities Admin — Edit
  *
- * The edit page for a single entity authority record. Surfaces every
+ * This page is the edit form for a single entity authority record. It surfaces every
  * ISAAR(CPF)-adjacent field -- dates of existence, history, legal
  * status, functions over time, name variants, Wikidata / VIAF IDs,
  * merge pointer -- alongside the linked-descriptions panel that shows
@@ -16,7 +16,13 @@
  * leaving the superseded row in place with a `merged_into` pointer so
  * external references do not break.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`. Every read/update/delete of `entities` and the
+ * description-search subquery is filtered by `tenant.id`; the
+ * split-action insert attributes the new entity to `tenant.id`
+ * rather than a single-tenant hard-code.
+ *
+ * @version v0.4.0
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -30,7 +36,7 @@ import {
 } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, Pencil, Trash2, Merge, Split, Plus } from "lucide-react";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import { CollapsibleSection } from "~/components/admin/collapsible-section";
 import { MergeDialog } from "~/components/admin/merge-dialog";
 import { SplitDialog } from "~/components/admin/split-dialog";
@@ -51,13 +57,14 @@ import type { Route } from "./+types/_auth.admin.entities.$id";
 export async function loader({ params, context }: Route.LoaderArgs) {
   const { requireAdmin } = await import("~/lib/permissions.server");
   const { drizzle } = await import("drizzle-orm/d1");
-  const { eq, sql } = await import("drizzle-orm");
+  const { and, eq, sql } = await import("drizzle-orm");
   const { entities, descriptionEntities, descriptions, vocabularyTerms } = await import(
     "~/db/schema"
   );
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -66,7 +73,7 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   const entity = await db
     .select()
     .from(entities)
-    .where(eq(entities.id, id))
+    .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, id)))
     .get();
 
   if (!entity) {
@@ -119,7 +126,9 @@ export async function loader({ params, context }: Route.LoaderArgs) {
     const target = await db
       .select({ id: entities.id, displayName: entities.displayName })
       .from(entities)
-      .where(eq(entities.id, entity.mergedInto))
+      .where(
+        and(eq(entities.tenantId, tenant.id), eq(entities.id, entity.mergedInto))
+      )
       .get();
     if (target) {
       mergeTarget = target;
@@ -159,7 +168,7 @@ export async function loader({ params, context }: Route.LoaderArgs) {
     const conflictUser = await db
       .select({ name: users.name })
       .from(users)
-      .where(eq(users.id, conflictRaw.userId))
+      .where(and(eq(users.tenantId, tenant.id), eq(users.id, conflictRaw.userId)))
       .get();
     conflictDraft = {
       userName: conflictUser?.name || "Unknown",
@@ -194,6 +203,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -246,8 +256,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         (formData.get("history") as string)?.trim() || undefined;
       const primaryFunction =
         (formData.get("primaryFunction") as string)?.trim() || undefined;
-      const legalStatus =
-        (formData.get("legalStatus") as string)?.trim() || undefined;
+      // legalStatus dropped in 0036 (0% populated in production audit).
       const functions =
         (formData.get("functions") as string)?.trim() || undefined;
       const sources =
@@ -271,7 +280,6 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         dateStart: dateStart || null,
         dateEnd: dateEnd || null,
         history,
-        legalStatus,
         functions,
         sources,
         wikidataId: wikidataId || null,
@@ -289,7 +297,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const original = await db
         .select()
         .from(entities)
-        .where(eq(entities.id, id))
+        .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, id)))
         .get();
 
       // Optimistic lock check
@@ -363,7 +371,6 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         dateStart: updates.dateStart ?? null,
         dateEnd: updates.dateEnd ?? null,
         history: updates.history ?? null,
-        legalStatus: updates.legalStatus ?? null,
         functions: updates.functions ?? null,
         sources: updates.sources ?? null,
         wikidataId: updates.wikidataId ?? null,
@@ -377,14 +384,19 @@ export async function action({ params, request, context }: Route.ActionArgs) {
             ...updatedFields,
             updatedAt: Date.now(),
           })
-          .where(eq(entities.id, id));
+          .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, id)));
 
         // Update entity count on the vocabulary term
         if (resolvedFunctionId) {
           const [{ count: entityCountForTerm }] = await db
             .select({ count: sql<number>`count(*)` })
             .from(entities)
-            .where(eq(entities.primaryFunctionId, resolvedFunctionId))
+            .where(
+              and(
+                eq(entities.tenantId, tenant.id),
+                eq(entities.primaryFunctionId, resolvedFunctionId)
+              )
+            )
             .all();
           await db
             .update(vocabularyTerms)
@@ -430,7 +442,9 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         return { ok: false as const, error: "has_descriptions" };
       }
 
-      await db.delete(entities).where(eq(entities.id, id));
+      await db
+        .delete(entities)
+        .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, id)));
       return redirect("/admin/entities");
     }
 
@@ -447,7 +461,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const target = await db
         .select()
         .from(entities)
-        .where(eq(entities.id, targetId))
+        .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, targetId)))
         .get();
       if (!target) {
         return { ok: false as const, error: "generic" };
@@ -493,7 +507,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const source = await db
         .select()
         .from(entities)
-        .where(eq(entities.id, id))
+        .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, id)))
         .get();
 
       const now = new Date().toISOString().slice(0, 10);
@@ -509,7 +523,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
             : sourceNote,
           updatedAt: Date.now(),
         })
-        .where(eq(entities.id, id));
+        .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, id)));
 
       // Audit note on target
       const targetNote = `Merged from ${source?.displayName} (${source?.entityCode}) on ${now}`;
@@ -521,7 +535,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
             : targetNote,
           updatedAt: Date.now(),
         })
-        .where(eq(entities.id, targetId));
+        .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, targetId)));
 
       return redirect(`/admin/entities/${targetId}`);
     }
@@ -538,7 +552,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const source = await db
         .select()
         .from(entities)
-        .where(eq(entities.id, id))
+        .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, id)))
         .get();
       if (!source) {
         return { ok: false as const, error: "generic" };
@@ -559,6 +573,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       // Create new entity (copy all fields from source)
       const splitFromNote = `Split from ${source.displayName} (${source.entityCode}) on ${now}`;
       await db.insert(entities).values({
+        tenantId: tenant.id,
         id: newId,
         entityCode: newCode,
         displayName: source.displayName,
@@ -573,7 +588,6 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         dateStart: source.dateStart,
         dateEnd: source.dateEnd,
         history: source.history,
-        legalStatus: source.legalStatus,
         functions: source.functions,
         sources: splitFromNote,
         mergedInto: null,
@@ -601,7 +615,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
             : splitIntoNote,
           updatedAt: timestamp,
         })
-        .where(eq(entities.id, id));
+        .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, id)));
 
       return redirect(`/admin/entities/${newId}`);
     }
@@ -641,7 +655,10 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         })
         .from(descriptions)
         .where(
-          sql`(${descriptions.title} LIKE ${"%" + q + "%"} OR ${descriptions.referenceCode} LIKE ${"%" + q + "%"})`
+          and(
+            eq(descriptions.tenantId, tenant.id),
+            sql`(${descriptions.title} LIKE ${"%" + q + "%"} OR ${descriptions.referenceCode} LIKE ${"%" + q + "%"})`
+          )
         )
         .limit(20)
         .all();
@@ -1311,10 +1328,7 @@ function ViewMode({
               )}
             </div>
           </div>
-          <FieldDisplay
-            label={t("field.legalStatus")}
-            value={entity.legalStatus}
-          />
+          {/* legalStatus dropped in 0036 (0% populated). */}
           <FieldDisplay
             label={t("field.functions")}
             value={entity.functions}
@@ -1533,12 +1547,8 @@ function EditMode({
               </p>
             )}
           </div>
-          <EditField
-            name="legalStatus"
-            label={t("field.legalStatus")}
-            defaultValue={entity.legalStatus ?? ""}
-            error={errors?.legalStatus?.[0]}
-          />
+          {/* legalStatus form field removed alongside the column
+              drop in drizzle/0036_union_schema.sql (0% populated). */}
           <EditTextarea
             name="functions"
             label={t("field.functions")}

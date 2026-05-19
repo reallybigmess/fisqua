@@ -1,3 +1,27 @@
+/**
+ * Segmentation Viewer Drag Utilities
+ *
+ * This module deals with the pointer-input plumbing that the
+ * segmentation viewer needs to distinguish a tap from a drag, to
+ * convert a screen coordinate into a `(pageNumber, yFraction)` pair
+ * that survives IIIF zoom variants, and to keep auto-scrolling the
+ * page when a drag reaches the viewport edge. The viewer composes
+ * boundary edits, region pins, and within-page click-to-place on top
+ * of these primitives, so the same drag-vs-click threshold and the
+ * same edge-zone behaviour apply everywhere a user can grab something
+ * in the canvas.
+ *
+ * `useDragOrClick` is the central hook: it tracks a press, watches
+ * for movement beyond `DRAG_THRESHOLD`, fires the appropriate
+ * callback (`onDragStart`/`onDragMove`/`onDragEnd` vs `onClick`), and
+ * cleans up its own listeners on unmount. The helper functions
+ * around it convert pointer coordinates against a list of page
+ * layouts so callers can stay in the document's normalised
+ * `yFraction` space rather than dealing with pixel offsets at the
+ * current zoom level.
+ *
+ * @version v0.3.0
+ */
 import { useRef, useCallback } from "react";
 
 // --- Types ---

@@ -1,6 +1,21 @@
 /**
- * Resegmentation flags API endpoint.
- * Handles creating, resolving, and listing resegmentation flags.
+ * Resegmentation Flags API
+ *
+ * This API endpoint is the back-end for the resegmentation-request
+ * workflow — the affordance a cataloguer uses to ask a lead to
+ * redraw the boundaries of one or more entries in a volume. POST
+ * creates a new flag (problem type, affected entries, optional free
+ * text description) anchored to a volume; PATCH resolves an open
+ * flag once the lead has acted on it; GET lists open flags for a
+ * volume so the segmentation viewer can surface them in the
+ * outline.
+ *
+ * Every mutation is gated by `requireEntryAccess` so only members of
+ * the project the entry belongs to can raise or resolve a flag, and
+ * each transition writes to the activity log so the lead's
+ * dashboard reflects the request without a separate write path.
+ *
+ * @version v0.3.0
  */
 
 import { userContext } from "../context";

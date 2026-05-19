@@ -1,8 +1,9 @@
 /**
  * Repositories Admin — Edit
  *
- * The edit page for a single repository. Every ISAD-adjacent field is
- * editable here, including the display metadata that the public
+ * This page is the edit form for a single repository. Every
+ * ISAD-adjacent field is editable here, including the display metadata
+ * that the public
  * frontend surfaces -- display title, subtitle, hero image -- plus the
  * institution's rights statement. Autosaves to `drafts` via useFetcher
  * on a debounce so a curator's work survives a page reload, and
@@ -10,7 +11,11 @@
  * editors can audit who changed what and when. A draft conflict banner
  * appears if another user has an open draft on the same record.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`. Every read/update/delete of `repositories`,
+ * `descriptions`, and `users` is filtered by `tenant.id`.
+ *
+ * @version v0.4.0
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -24,7 +29,7 @@ import {
 } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, Pencil, Trash2 } from "lucide-react";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import { DraftsBanner } from "~/components/admin/drafts-banner";
 import { DescriptionTree } from "~/components/descriptions/description-tree";
 import type { Route } from "./+types/_auth.admin.repositories.$id";
@@ -41,6 +46,7 @@ export async function loader({ params, context }: Route.LoaderArgs) {
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -49,7 +55,7 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   const repository = await db
     .select()
     .from(repositories)
-    .where(eq(repositories.id, id))
+    .where(and(eq(repositories.tenantId, tenant.id), eq(repositories.id, id)))
     .get();
 
   if (!repository) {
@@ -60,7 +66,12 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   const [{ count: descriptionCount }] = await db
     .select({ count: sql<number>`count(*)` })
     .from(descriptions)
-    .where(eq(descriptions.repositoryId, id))
+    .where(
+      and(
+        eq(descriptions.tenantId, tenant.id),
+        eq(descriptions.repositoryId, id)
+      )
+    )
     .all();
 
   // Top-level descriptions for the tree (SSR initial data)
@@ -74,7 +85,13 @@ export async function loader({ params, context }: Route.LoaderArgs) {
           childCount: descriptions.childCount,
         })
         .from(descriptions)
-        .where(and(eq(descriptions.repositoryId, id), eq(descriptions.depth, 0)))
+        .where(
+          and(
+            eq(descriptions.tenantId, tenant.id),
+            eq(descriptions.repositoryId, id),
+            eq(descriptions.depth, 0)
+          )
+        )
         .orderBy(asc(descriptions.position))
         .all()
     : [];
@@ -88,7 +105,9 @@ export async function loader({ params, context }: Route.LoaderArgs) {
     const conflictUser = await db
       .select({ name: users.name })
       .from(users)
-      .where(eq(users.id, conflictRaw.userId))
+      .where(
+        and(eq(users.tenantId, tenant.id), eq(users.id, conflictRaw.userId))
+      )
       .get();
     conflictDraft = {
       userName: conflictUser?.name || "Unknown",
@@ -106,7 +125,7 @@ export async function loader({ params, context }: Route.LoaderArgs) {
 export async function action({ params, request, context }: Route.ActionArgs) {
   const { requireAdmin } = await import("~/lib/permissions.server");
   const { drizzle } = await import("drizzle-orm/d1");
-  const { eq, sql } = await import("drizzle-orm");
+  const { and, eq, sql } = await import("drizzle-orm");
   const { repositories, descriptions } = await import("~/db/schema");
   const { updateRepositorySchema } = await import(
     "~/lib/validation/repository"
@@ -114,6 +133,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -201,7 +221,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const original = await db
         .select()
         .from(repositories)
-        .where(eq(repositories.id, id))
+        .where(and(eq(repositories.tenantId, tenant.id), eq(repositories.id, id)))
         .get();
 
       // Optimistic lock check
@@ -242,7 +262,9 @@ export async function action({ params, request, context }: Route.ActionArgs) {
             ...updatedFields,
             updatedAt: Date.now(),
           })
-          .where(eq(repositories.id, id));
+          .where(
+            and(eq(repositories.tenantId, tenant.id), eq(repositories.id, id))
+          );
       } catch (e) {
         if (String(e).includes("UNIQUE constraint failed")) {
           return { ok: false as const, error: "duplicate_code" };
@@ -285,14 +307,21 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const [{ count }] = await db
         .select({ count: sql<number>`count(*)` })
         .from(descriptions)
-        .where(eq(descriptions.repositoryId, id))
+        .where(
+          and(
+            eq(descriptions.tenantId, tenant.id),
+            eq(descriptions.repositoryId, id)
+          )
+        )
         .all();
 
       if (count > 0) {
         return { ok: false as const, error: "has_descriptions" };
       }
 
-      await db.delete(repositories).where(eq(repositories.id, id));
+      await db
+        .delete(repositories)
+        .where(and(eq(repositories.tenantId, tenant.id), eq(repositories.id, id)));
       return redirect("/admin/repositories");
     }
 
@@ -434,7 +463,7 @@ export default function RepositoryDetailPage({
         ) : null}
       </div>
 
-      {/* Draft conflict banner (D-11) */}
+      {/* Draft conflict banner */}
       {conflictDraft && (
         <div className="mt-4">
           <DraftsBanner

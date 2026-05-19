@@ -4,7 +4,7 @@
  * The full-page description editor for a single entry -- one of the
  * segmented documentary units a cataloguer carved out of a volume.
  * Renders a split-pane layout with the entry's IIIF image tiles on
- * one side and the ISAD(G) description form on the other, with
+ * one side and the standard-aware description form on the other, with
  * autosave and a review workflow (submit / approve / send back) built
  * in. Entity and place linker dialogs attach authority records to the
  * draft description, and the per-page QC-flag dialog lets cataloguers
@@ -13,7 +13,104 @@
  * Breaks out of the sidebar chrome via a path check in `_auth.tsx` so
  * cataloguers have the full viewport for image and form.
  *
- * @version v0.3.0
+ * The route resolves `tenant.descriptiveStandard` from
+ * `tenantContext` and passes it to `<DescriptionForm
+ * standard={...}>`, so a non-ISAD(G) tenant with crowdsourcing on
+ * sees the right per-standard required marks and label overrides at
+ * segmentation time. The section TOC and `sectionCompletion`
+ * property accesses use the English column-name keys (`identity`,
+ * `physical_description`, `content`, `notes`).
+ *
+ * **Autosave shape.** `handleFieldChange` always POSTs the FULL
+ * fields object on every debounced autosave, not just the edited
+ * field. A per-field-only payload would marshal every other
+ * description column as `undefined`, strip it through
+ * `JSON.stringify`, and null it on the server side via the old
+ * `?? null` writer — losing all other description content on the
+ * entry each time a single field was edited. The fix is
+ * belt-and-braces with `saveDescription`'s additive server
+ * contract: the client sends everything, and the server only writes
+ * what it receives. `handleFieldChange` builds the payload from
+ * `entryRef.current` (the latest committed React state) merged with
+ * the just-edited field, so the value crossing the wire is always
+ * current. The full-save path is exposed via `flush()` — same
+ * payload shape, but routed through the bounded-retry helper so
+ * manual flushes inherit the retry contract.
+ *
+ * **Save status indicator.** The top bar renders the shared
+ * `<SaveStatus>` from `app/components/viewer/save-status.tsx`, with
+ * the four-state labels resolved against the description
+ * namespace's nested `editor.save_status_*` shape. The local
+ * `saveStatus` state uses the shared `SaveStatusValue` union so it
+ * can settle to `error` when bounded retry exhausts.
+ *
+ * **Bounded retry.** Both the debounced autosave inside
+ * `handleFieldChange` and the explicit `flush()` path compose
+ * against the shared `withBoundedRetry` helper from
+ * `app/lib/autosave-retry.ts`. Three attempts with 1 s / 2 s
+ * exponential backoff; on exhaustion the pill settles to `error`
+ * and the retry affordance becomes clickable.
+ *
+ * `flush()` cancels the pending debounce, fires a fresh
+ * `withBoundedRetry` against the latest fields, and returns the
+ * `SaveResult` so flush-before-navigate and Cmd/Ctrl+S can await it
+ * and react to failure. It also wires to the SaveStatus retry
+ * affordance's `onRetry` callback so a user-clicked retry attempt
+ * fires immediately.
+ *
+ * **In-app navigation guard.** `useBlocker` (React Router 7)
+ * interrupts any client-side navigation away from this route while
+ * there is unsaved or unsettled work — `hasUnsaved`, `saving`, or
+ * `error`. On confirm-leave we attempt a single best-effort
+ * `navigator.sendBeacon` flush to `/api/description/save` against
+ * the current fields before proceeding with the navigation, then
+ * call `blocker.proceed()`. The beacon is fire-and-forget — the
+ * Worker accepts the request after the page navigates — but the
+ * 60 KiB size guard (`shouldSendBeacon`) skips the beacon for
+ * oversized payloads so we never silently drop work into a request
+ * the browser will reject.
+ *
+ * The blocker's confirmation is a Tailwind-styled, i18n-driven
+ * `<UnsavedChangesDialog>` from
+ * `app/components/viewer/unsaved-changes-dialog.tsx` rendered at
+ * the route's JSX tree root when `blocker.state === "blocked"`. A
+ * native `window.confirm` would have no i18n leverage on its
+ * buttons and would block browser automation. The flush semantics
+ * are: onLeave calls `shouldSendBeacon(body.size)` +
+ * `navigator.sendBeacon(...)` + `blocker.proceed()`, gated by a
+ * `typeof navigator.sendBeacon === "function"` SSR-safety check.
+ * onStay calls `blocker.reset()`. The dialog uses four
+ * `editor.unsaved_dialog_*` keys for its strings.
+ *
+ * `handlePrev`, `handleNext`, and `handleSubmitForReview`
+ * `await flush()` BEFORE navigating or firing the submit fetch. On
+ * a `{ ok: false }` non-aborted return the navigation is aborted
+ * and the SaveStatus pill (already in `error` state) is the user's
+ * exit ramp via the retry affordance.
+ *
+ * The `beforeunload` handler covers true tab-close / refresh; it
+ * also sets `event.returnValue = ""` so modern Chrome and Firefox
+ * actually surface the unload prompt (the spec change ~2022
+ * deprecated `preventDefault()` alone for this case).
+ *
+ * **Manual save escape hatch.** A window-level `keydown` handler
+ * intercepts Cmd/Ctrl+S, calls `event.preventDefault()` to suppress
+ * the browser's native save-page dialog, and routes to `flush()` —
+ * the same bounded-retry call that the debounced autosave uses. A
+ * visible "Save now" button sits next to the SaveStatus pill in the
+ * top bar; its onClick is the same `() => { void flush(); }`. Even
+ * if the autosave path regresses, the cataloguer has a manual
+ * override that never relies on debounce timing or in-app
+ * navigation lifecycle.
+ *
+ * **Title-field coverage.** `buildFieldsPayload` includes
+ * `title: current.title ?? null` as its first key, so the
+ * cataloguer's keystrokes in the "Title *" input reach
+ * `entries.title` on disk via the same autosave path every other
+ * field rides. Pinned by tests in
+ * `tests/description/autosave.test.ts`.
+ *
+ * @version v0.4.1
  */
 
 import {
@@ -23,10 +120,11 @@ import {
   useEffect,
   useMemo,
 } from "react";
-import { Link, useNavigate, useRevalidator } from "react-router";
+import { Link, useNavigate, useRevalidator, useBlocker } from "react-router";
 import { useTranslation } from "react-i18next";
-import { userContext } from "../context";
+import { userContext, tenantContext } from "../context";
 import { getSectionCompletion } from "../lib/description-types";
+import type { Standard } from "../lib/standards/types";
 import type { DescriptionEntry, CommentWithAuthor } from "../lib/description-types";
 import {
   DESCRIPTION_STATUS_STYLES,
@@ -40,6 +138,20 @@ import { SectionTOC } from "../components/description/section-toc";
 import { CommentThread } from "../components/comments/comment-thread";
 import { FlagQcDialog } from "../components/qc-flags/flag-qc-dialog";
 import { ResizableDivider } from "../components/outline/resizable-divider";
+import {
+  SaveStatus,
+  type SaveStatusValue,
+} from "../components/viewer/save-status";
+import { UnsavedChangesDialog } from "../components/viewer/unsaved-changes-dialog";
+import {
+  withBoundedRetry,
+  type SaveResult,
+} from "../lib/autosave-retry";
+import { shouldBlockNavigation } from "../lib/blocker-condition";
+import {
+  shouldSendBeacon,
+  buildDescriptionBeaconBody,
+} from "../lib/beacon-save";
 import type { Route } from "./+types/_auth.description.$projectId.$entryId";
 
 export async function loader({ params, context }: Route.LoaderArgs) {
@@ -55,6 +167,18 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   const { entries, volumes, projectMembers } = await import("../db/schema");
 
   const user = context.get(userContext);
+  const tenant = context.get(tenantContext);
+  // `descriptive_standard` is NOT NULL for `kind = 'tenant'` per
+  // the schema CHECK in drizzle/0034_tenants_table.sql. The
+  // cataloguing form routes do not reach platform-tenant requests,
+  // so a null here is schema corruption (the CHECK was bypassed).
+  // Throw rather than silently defaulting to ISAD-shaped behaviour.
+  if (tenant.descriptiveStandard == null) {
+    throw new Error(
+      "Schema invariant violation: tenant.descriptiveStandard is null",
+    );
+  }
+  const descriptiveStandard: Standard = tenant.descriptiveStandard;
   const db = drizzle(context.cloudflare.env.DB);
 
   // Verify project membership
@@ -135,36 +259,8 @@ export async function loader({ params, context }: Route.LoaderArgs) {
     isReadOnly,
     readOnlyReason,
     projectId: params.projectId,
+    descriptiveStandard,
   };
-}
-
-// --- Save status indicator ---
-
-function DescriptionSaveStatus({
-  status,
-}: {
-  status: "saved" | "saving" | "unsaved";
-}) {
-  const { t } = useTranslation("description");
-  const colors = {
-    saved: "bg-verdigris",
-    saving: "bg-saffron",
-    unsaved: "bg-saffron",
-  };
-  const labels = {
-    saved: t("editor.save_status_saved"),
-    saving: t("editor.save_status_saving"),
-    unsaved: t("editor.save_status_unsaved"),
-  };
-
-  return (
-    <span className="flex items-center gap-1.5 text-xs text-stone-500">
-      <span
-        className={`inline-block h-2 w-2 rounded-full ${colors[status]}`}
-      />
-      {labels[status]}
-    </span>
-  );
 }
 
 // --- Main component ---
@@ -184,6 +280,7 @@ export default function DescriptionEditorRoute({
     isReadOnly,
     readOnlyReason,
     projectId,
+    descriptiveStandard,
   } = loaderData;
 
   const { t } = useTranslation("description");
@@ -195,21 +292,39 @@ export default function DescriptionEditorRoute({
     initialEntry as DescriptionEntry
   );
 
-  // Sync entry state when route changes (new entry loaded)
+  // Sync entry state when route changes (new entry loaded).
+  //
+  // Do NOT touch `saveStatus` here. With `flush()` +
+  // flush-before-navigate wiring, the previous entry's save is fully
+  // settled (success, error, or aborted) before this effect runs —
+  // `runSave` has already pushed `saveStatus` to either "saved" or
+  // "error", or the user explicitly accepted leaving with unsaved
+  // work via the confirm dialog. Touching `saveStatus` here would
+  // race that settlement and let stale state from the prior entry
+  // contaminate the new one.
   useEffect(() => {
     setEntry(initialEntry as DescriptionEntry);
-    setSaveStatus("saved");
   }, [initialEntry.id]);
 
-  // Autosave state
-  const [saveStatus, setSaveStatus] = useState<
-    "saved" | "saving" | "unsaved"
-  >("saved");
+  // Autosave state. Uses the shared `SaveStatusValue` union
+  // (saved / saving / unsaved / error) so the route can dispatch the
+  // `error` state from the bounded-retry helper.
+  const [saveStatus, setSaveStatus] = useState<SaveStatusValue>("saved");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentEntryRef = useRef(initialEntry.id);
   const [validationErrors, setValidationErrors] = useState<
     Record<string, string>
   >({});
+
+  // Latest committed entry state, mirrored into a ref so the
+  // debounced autosave can build a full-fields payload at fire time
+  // without needing the entry object in its `useCallback` dependency
+  // list (which would otherwise rebuild the callback on every keystroke
+  // and lose the in-flight debounce timer).
+  const entryRef = useRef<DescriptionEntry>(initialEntry as DescriptionEntry);
+  useEffect(() => {
+    entryRef.current = entry;
+  }, [entry]);
 
   // Track current entry ID to discard stale saves
   useEffect(() => {
@@ -223,7 +338,7 @@ export default function DescriptionEditorRoute({
   );
 
   // Active section tracking for TOC
-  const [activeSectionId, setActiveSectionId] = useState("identificacion");
+  const [activeSectionId, setActiveSectionId] = useState("identity");
 
   // Resizable panel
   const MIN_PANEL_PCT = 35;
@@ -243,7 +358,147 @@ export default function DescriptionEditorRoute({
     []
   );
 
-  // Field change handler with autosave
+  // Build a full description-fields payload from the latest committed
+  // entry state, with an optional last-keystroke override layered on
+  // top. Centralising this here means `handleFieldChange` and
+  // `flush()` send byte-identical request bodies — the client half
+  // of the belt-and-braces guard that pairs with the server's
+  // additive `saveDescription` writer.
+  const buildFieldsPayload = useCallback(
+    (override?: { fieldName: string; value: string }) => {
+      const current = entryRef.current;
+      const fields = {
+        title: current.title ?? null,
+        translatedTitle: current.translatedTitle ?? null,
+        resourceType: current.resourceType ?? null,
+        dateExpression: current.dateExpression ?? null,
+        dateStart: current.dateStart ?? null,
+        dateEnd: current.dateEnd ?? null,
+        extent: current.extent ?? null,
+        scopeContent: current.scopeContent ?? null,
+        language: current.language ?? null,
+        descriptionNotes: current.descriptionNotes ?? null,
+        internalNotes: current.internalNotes ?? null,
+      } as Record<string, unknown>;
+
+      if (override && override.fieldName in fields) {
+        fields[override.fieldName] = override.value || null;
+      }
+
+      return fields;
+    },
+    []
+  );
+
+  // Per-debounce-cycle AbortController. Aborted when the unmount
+  // cleanup fires (so the bounded-retry helper resolves with
+  // `{ ok: false, error: "aborted" }` instead of dispatching into a
+  // torn-down component).
+  const saveAbortRef = useRef<AbortController | null>(null);
+
+  // Shared save executor used by both the debounced `handleFieldChange`
+  // path and the explicit `flush()` path. Runs `withBoundedRetry`
+  // against a fresh `/api/description/save` fetch, settling the
+  // `saveStatus` UI state on success/failure and discarding stale
+  // results when the user has switched to a different entry during
+  // the save. On bounded-retry exhaustion the pill settles to the
+  // visible `error` state and surfaces the retry affordance.
+  const runSave = useCallback(
+    async (
+      fields: Record<string, unknown>,
+    ): Promise<SaveResult> => {
+      const entryIdAtSave = currentEntryRef.current;
+
+      // Abort any in-flight save before starting a fresh one — a
+      // newer edit (or an explicit flush) supersedes the prior cycle.
+      if (saveAbortRef.current) {
+        saveAbortRef.current.abort();
+      }
+      const controller = new AbortController();
+      saveAbortRef.current = controller;
+
+      setSaveStatus("saving");
+
+      const saveFn = async (): Promise<{ ok: boolean; error?: string }> => {
+        try {
+          const res = await fetch("/api/description/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              entryId: entryIdAtSave,
+              fields,
+            }),
+            credentials: "include",
+            signal: controller.signal,
+          });
+          if (!res.ok) {
+            return { ok: false, error: `HTTP ${res.status}` };
+          }
+          const data = (await res.json()) as { ok?: boolean };
+          if (data.ok) return { ok: true };
+          return { ok: false, error: "server rejected save" };
+        } catch (err) {
+          // AbortError surfaces here when the signal aborts mid-fetch
+          // — propagate to the helper, which has its own abort path.
+          if (err instanceof Error && err.name === "AbortError") {
+            return { ok: false, error: "aborted" };
+          }
+          throw err;
+        }
+      };
+
+      const result = await withBoundedRetry(saveFn, {
+        signal: controller.signal,
+      });
+
+      // Drop the controller reference if it's still ours — a fresh
+      // edit may have installed a new controller via the
+      // abort-and-supersede path above.
+      if (saveAbortRef.current === controller) {
+        saveAbortRef.current = null;
+      }
+
+      if (result.ok) {
+        // Stale-discard guard: only flip back to "saved" if the user
+        // is still on the same entry. If they navigated away during
+        // the save, the new entry's effect has already reset the
+        // pill via the `setSaveStatus("saved")` on `initialEntry.id`
+        // change — touching it again here would race that. The save
+        // itself still landed on the prior entry's server row.
+        if (currentEntryRef.current === entryIdAtSave) {
+          setSaveStatus("saved");
+        }
+        return result;
+      }
+
+      // Aborted: the supersede path or the unmount cleanup fired. Not
+      // a user-visible failure — leave the pill alone.
+      if (result.error === "aborted") return result;
+
+      // Bounded-retry exhaustion. Surface the error pill regardless
+      // of stale-discard — even if the user has navigated, the prior
+      // entry's save genuinely failed, and showing the error is more
+      // honest than silently rolling back to "unsaved". The retry
+      // affordance lets them fire a fresh attempt against the current
+      // fields on the current entry.
+      setSaveStatus("error");
+      return result;
+    },
+    [],
+  );
+
+  // Field change handler with autosave. The autosave POST body
+  // carries the FULL fields object — every controlled field's
+  // current value, plus the just-edited override — not just the
+  // edited field. A per-field-only payload would cause the server to
+  // receive `undefined` for every other column, and the old
+  // `?? null` writer would null it on disk. With the full-fields
+  // payload plus the server-side additive contract in
+  // `saveDescription`, neither half can null an absent column.
+  //
+  // The debounced save routes through `runSave` → `withBoundedRetry`,
+  // so 3-attempt exponential backoff and the `error` settle state
+  // come for free.
   const handleFieldChange = useCallback(
     (fieldName: string, value: string) => {
       setEntry((prev) => ({ ...prev, [fieldName]: value || null }));
@@ -263,160 +518,166 @@ export default function DescriptionEditorRoute({
       }
 
       debounceRef.current = setTimeout(() => {
-        const entryIdAtSave = currentEntryRef.current;
-        setSaveStatus("saving");
-
-        fetch("/api/description/save", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            entryId: entryIdAtSave,
-            fields: {
-              translatedTitle: value === "" ? null : fieldName === "translatedTitle" ? value : undefined,
-              resourceType: fieldName === "resourceType" ? (value || null) : undefined,
-              dateExpression: fieldName === "dateExpression" ? (value || null) : undefined,
-              dateStart: fieldName === "dateStart" ? (value || null) : undefined,
-              dateEnd: fieldName === "dateEnd" ? (value || null) : undefined,
-              extent: fieldName === "extent" ? (value || null) : undefined,
-              scopeContent: fieldName === "scopeContent" ? (value || null) : undefined,
-              language: fieldName === "language" ? (value || null) : undefined,
-              descriptionNotes: fieldName === "descriptionNotes" ? (value || null) : undefined,
-              internalNotes: fieldName === "internalNotes" ? (value || null) : undefined,
-            },
-          }),
-        })
-          .then((res) => res.json())
-          .then((data: any) => {
-            // Discard if navigated to different entry
-            if (currentEntryRef.current !== entryIdAtSave) return;
-            if (data.ok) {
-              setSaveStatus("saved");
-            } else {
-              setSaveStatus("unsaved");
-            }
-          })
-          .catch(() => {
-            if (currentEntryRef.current !== entryIdAtSave) return;
-            setSaveStatus("unsaved");
-          });
+        // Build the full-fields payload at fire time so the latest
+        // committed state is included alongside the just-edited
+        // override. `entryRef.current` is updated by the effect above
+        // on every render, so by the time the 1500 ms debounce
+        // expires it already reflects the keystroke that triggered
+        // this save.
+        const fields = buildFieldsPayload({ fieldName, value });
+        void runSave(fields);
       }, 1500);
     },
-    []
+    [buildFieldsPayload, runSave],
   );
 
-  // Clean up debounce on unmount
+  /**
+   * Flush any pending debounced autosave immediately and run the
+   * bounded-retry helper against the current fields. Returns the
+   * `SaveResult` so callers can discriminate on success vs. failure
+   * without a try/catch.
+   *
+   * Wiring:
+   *   - The shared SaveStatus's retry affordance calls this on click.
+   *   - `handlePrev` / `handleNext` / `handleSubmitForReview` await
+   *     this before navigating so an in-flight save cannot lose
+   *     unflushed edits when the user changes entry.
+   *   - The Cmd/Ctrl+S keyboard handler and the "Save now" button
+   *     both await this.
+   *
+   * Stable via `useCallback` so callers can include it in their own
+   * dependency lists.
+   */
+  const flush = useCallback(async (): Promise<SaveResult> => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    return runSave(buildFieldsPayload());
+  }, [buildFieldsPayload, runSave]);
+
+  // Clean up debounce + abort any in-flight save on unmount. Aborting
+  // makes `withBoundedRetry` settle to `{ ok: false, error: "aborted" }`
+  // so no `setSaveStatus` runs against a torn-down component.
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (saveAbortRef.current) saveAbortRef.current.abort();
     };
   }, []);
 
-  // Full-field autosave: send all description fields at once
-  const saveAllFields = useCallback(() => {
-    const entryIdAtSave = currentEntryRef.current;
-    setSaveStatus("saving");
+  // Submit for review.
+  //
+  // The submit path has the same race shape as prev/next — firing
+  // the "submit" action while a debounced autosave is still pending
+  // would push a partially-stale description into the review queue.
+  // The handler awaits `flush()` before firing. On a non-abort
+  // `{ ok: false }` from flush the submit aborts entirely; the pill
+  // is already in `error` state and the user can retry via the
+  // SaveStatus affordance.
+  const handleSubmitForReview = useCallback(async () => {
+    const flushResult = await flush();
+    if (!flushResult.ok && flushResult.error !== "aborted") {
+      // Save settled to error after bounded retries. Abort submit;
+      // the SaveStatus pill is already showing the error and the
+      // retry affordance is the user's exit.
+      return;
+    }
 
-    return fetch("/api/description/save", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        entryId: entryIdAtSave,
-        fields: {
-          translatedTitle: entry.translatedTitle,
-          resourceType: entry.resourceType,
-          dateExpression: entry.dateExpression,
-          dateStart: entry.dateStart,
-          dateEnd: entry.dateEnd,
-          extent: entry.extent,
-          scopeContent: entry.scopeContent,
-          language: entry.language,
-          descriptionNotes: entry.descriptionNotes,
-          internalNotes: entry.internalNotes,
-        },
-      }),
-    })
-      .then((res) => res.json())
-      .then((data: any) => {
-        if (currentEntryRef.current !== entryIdAtSave) return;
-        if (data.ok) {
-          setSaveStatus("saved");
-        }
-      })
-      .catch(() => {});
-  }, [entry]);
-
-  // Submit for review
-  const handleSubmitForReview = useCallback(() => {
-    // Save first, then submit
     const entryIdAtSave = currentEntryRef.current;
 
-    fetch("/api/description/save", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        entryId: entryIdAtSave,
-        action: "submit",
-      }),
-    })
-      .then((res) => res.json())
-      .then((data: any) => {
-        if (data.ok) {
-          setEntry((prev) => ({
-            ...prev,
-            descriptionStatus: "described" as DescriptionStatus,
-          }));
-          setValidationErrors({});
-          revalidator.revalidate();
-        } else if (data.validationErrors) {
-          const errors: Record<string, string> = {};
-          for (const err of data.validationErrors) {
-            errors[err.field] = err.message;
-          }
-          setValidationErrors(errors);
+    try {
+      const res = await fetch("/api/description/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entryId: entryIdAtSave,
+          action: "submit",
+        }),
+      });
+      const data: any = await res.json();
+      if (data.ok) {
+        setEntry((prev) => ({
+          ...prev,
+          descriptionStatus: "described" as DescriptionStatus,
+        }));
+        setValidationErrors({});
+        revalidator.revalidate();
+      } else if (data.validationErrors) {
+        const errors: Record<string, string> = {};
+        for (const err of data.validationErrors) {
+          errors[err.field] = err.message;
         }
-      })
-      .catch(() => {});
-  }, [revalidator]);
+        setValidationErrors(errors);
+      }
+    } catch {
+      // Network/parse failure on the submit POST itself. The
+      // preceding flush ensured the underlying description was
+      // persisted; only the workflow transition failed. The user
+      // can retry submitting.
+    }
+  }, [flush, revalidator]);
 
-  // Entry navigation
+  // Entry navigation.
+  //
+  // Both prev and next await `flush()` BEFORE `navigate(...)`, so
+  // the previous entry's pending autosave is settled (success,
+  // error, or aborted) before the route re-renders with the new
+  // `entryId`. On a non-abort `{ ok: false }` from flush we leave
+  // the user on the current entry; the SaveStatus pill is already
+  // in `error` state and the retry affordance is the exit.
   const currentIndex = allEntries.findIndex((e) => e.id === entry.id);
 
-  const handlePrev = useCallback(() => {
-    if (currentIndex > 0) {
-      const prevEntry = allEntries[currentIndex - 1];
-      navigate(`/projects/${projectId}/describe/${prevEntry.id}`);
+  const handlePrev = useCallback(async () => {
+    if (currentIndex <= 0) return;
+    const flushResult = await flush();
+    if (!flushResult.ok && flushResult.error !== "aborted") {
+      return;
     }
-  }, [currentIndex, allEntries, navigate, projectId]);
+    const prevEntry = allEntries[currentIndex - 1];
+    navigate(`/projects/${projectId}/describe/${prevEntry.id}`);
+  }, [currentIndex, allEntries, navigate, projectId, flush]);
 
-  const handleNext = useCallback(() => {
-    if (currentIndex < allEntries.length - 1) {
-      const nextEntry = allEntries[currentIndex + 1];
-      navigate(`/projects/${projectId}/describe/${nextEntry.id}`);
+  const handleNext = useCallback(async () => {
+    if (currentIndex >= allEntries.length - 1) return;
+    const flushResult = await flush();
+    if (!flushResult.ok && flushResult.error !== "aborted") {
+      return;
     }
-  }, [currentIndex, allEntries, navigate, projectId]);
+    const nextEntry = allEntries[currentIndex + 1];
+    navigate(`/projects/${projectId}/describe/${nextEntry.id}`);
+  }, [currentIndex, allEntries, navigate, projectId, flush]);
 
-  // Section TOC data
+  // Section TOC data — English column-name section IDs. Labels
+  // resolved against the cataloguing namespace shape. The TOC
+  // mirrors the form's section structure;
+  // because the cataloguing form's section structure is hardcoded
+  // (per the form-component header on the entries-vs-descriptions
+  // domain difference), the TOC's section list is hardcoded too. The
+  // standard prop isn't needed here: TOC labels are common across
+  // ISAD(G), DACS, and RAD in the cataloguing namespace; per-standard
+  // overrides are an option if a divergence ever surfaces.
   const tocSections = useMemo(
     () => [
       {
-        id: "identificacion",
-        isComplete: sectionCompletion.identificacion,
-        label: t("sections.identificacion"),
+        id: "identity",
+        isComplete: sectionCompletion.identity,
+        label: t("sections.identity"),
       },
       {
-        id: "descripcion_fisica",
-        isComplete: sectionCompletion.fisica,
-        label: t("sections.descripcion_fisica"),
+        id: "physical_description",
+        isComplete: sectionCompletion.physical_description,
+        label: t("sections.physical_description"),
       },
       {
-        id: "contenido",
-        isComplete: sectionCompletion.contenido,
-        label: t("sections.contenido"),
+        id: "content",
+        isComplete: sectionCompletion.content,
+        label: t("sections.content"),
       },
       {
-        id: "notas",
-        isComplete: sectionCompletion.notas,
-        label: t("sections.notas"),
+        id: "notes",
+        isComplete: sectionCompletion.notes,
+        label: t("sections.notes"),
       },
     ],
     [sectionCompletion, t]
@@ -464,16 +725,97 @@ export default function DescriptionEditorRoute({
     revalidator.revalidate();
   }, [revalidator]);
 
-  // Beforeunload handler for unsaved changes
+  // beforeunload handler for unsaved changes.
+  //
+  // The handler fires while the editor is in any non-`saved` state
+  // (unsaved edits, in-flight save, or settled error) — `useBlocker`
+  // covers client-side navigations, but `beforeunload` is still the
+  // only path that catches true tab-close and refresh. The handler
+  // sets `event.returnValue = ""` in addition to `preventDefault()`;
+  // modern Chrome and Firefox no longer honour `preventDefault()`
+  // alone for the unload prompt (HTML spec change ~2022). Both
+  // lines together cover every supported browser.
   useEffect(() => {
-    if (saveStatus !== "unsaved") return;
+    if (saveStatus === "saved") return;
 
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
+      e.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [saveStatus]);
+
+  // Intercepts in-app navigations (Link clicks, navigate() from
+  // prev/next, browser back via popstate) while there is work the
+  // user would lose by leaving. The
+  // `currentLocation.pathname !== nextLocation.pathname` guard
+  // prevents the blocker from firing on search-param-only changes
+  // (e.g. filter toggles inside the route).
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      shouldBlockNavigation(saveStatus, saveStatus === "unsaved") &&
+      currentLocation.pathname !== nextLocation.pathname,
+  );
+
+  // The blocker's confirmation is a Tailwind/i18n-driven
+  // `<UnsavedChangesDialog>` rendered at the bottom of the route's
+  // JSX tree, controlled by `blocker.state === "blocked"`. The
+  // handlers below close over `currentEntryRef`, `buildFieldsPayload`,
+  // and `blocker` so the sendBeacon flush semantics are preserved
+  // verbatim — only the UI of the confirmation changes.
+  const handleUnsavedStay = useCallback(() => {
+    if (blocker.state === "blocked") {
+      blocker.reset();
+    }
+  }, [blocker]);
+
+  const handleUnsavedLeave = useCallback(() => {
+    if (blocker.state !== "blocked") return;
+    // Best-effort fire-and-forget flush via sendBeacon.
+    // The Worker accepts the POST even after navigation begins; the
+    // 60 KiB strict-less-than guard protects against silent drop for
+    // unusually large payloads. typeof guard so SSR / test pools
+    // without `navigator.sendBeacon` don't blow up.
+    if (
+      typeof navigator !== "undefined" &&
+      typeof navigator.sendBeacon === "function"
+    ) {
+      const body = buildDescriptionBeaconBody(
+        currentEntryRef.current,
+        buildFieldsPayload(),
+      );
+      if (shouldSendBeacon(body.size)) {
+        navigator.sendBeacon("/api/description/save", body);
+      }
+    }
+    blocker.proceed();
+  }, [blocker, buildFieldsPayload]);
+
+  // Cmd/Ctrl+S keyboard shortcut — manual save escape hatch.
+  // Intercepts the platform save shortcut on macOS (Cmd-S) and
+  // Linux/Windows (Ctrl-S). `preventDefault()` is essential: without
+  // it the browser surfaces its native "save page" dialog over the
+  // editor, which is the opposite of what the cataloguer wants.
+  // `e.key.toLowerCase()` is defensive against Shift-S → "S" (the
+  // Cmd+Shift+S browser shortcut for save-as is left to the browser
+  // — but accepting upper/lowercase keeps the handler robust to
+  // platforms that report capitalised key names under modifier
+  // combinations). Listening on `window` rather than `document`
+  // covers focus-in-iframe edge cases.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s")) return;
+      e.preventDefault();
+      // Fire-and-forget: the returned SaveResult drives the pill
+      // via runSave's own state transitions, not this handler.
+      // `void` here keeps any aborted-result from surfacing as an
+      // unhandled promise rejection.
+      void flush();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [flush]);
 
   return (
     <div className="flex h-full flex-col">
@@ -498,7 +840,45 @@ export default function DescriptionEditorRoute({
 
         {/* Right: save status + user + logout */}
         <div className="flex items-center gap-3">
-          <DescriptionSaveStatus status={saveStatus} />
+          {/* SaveStatus pill + visible Save-now button. Both share
+              the flex wrapper convention so the button always sits
+              adjacent to the pill rather than floating elsewhere in
+              the top bar. The SaveStatus component is
+              presentation-only (labels-as-props); the Save-now
+              button lives in this wrapper directly so it can call
+              `flush()` without threading another prop through the
+              shared component. */}
+          <div className="flex items-center gap-2">
+            <SaveStatus
+              status={saveStatus}
+              labels={{
+                saved: t("editor.save_status_saved"),
+                saving: t("editor.save_status_saving"),
+                unsaved: t("editor.save_status_unsaved"),
+                error: t("editor.save_status_error"),
+              }}
+              retryLabel={t("editor.save_failed_retry")}
+              onRetry={() => {
+                // Fire-and-forget: the returned SaveResult is consumed by
+                // the pill's own state machine, not by the click handler.
+                // `void` here keeps any AbortError-shaped abort result
+                // from surfacing as an unhandled promise rejection.
+                void flush();
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                // Same fire-and-forget contract as the Cmd/Ctrl+S
+                // handler and the retry affordance — `flush()`
+                // drives the pill via runSave's state transitions.
+                void flush();
+              }}
+              className="font-sans text-xs font-medium text-stone-600 underline-offset-2 hover:text-stone-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-verdigris"
+            >
+              {t("editor.save_now")}
+            </button>
+          </div>
           <span className="font-sans text-[0.875rem] text-stone-500">
             {currentUser.email}
           </span>
@@ -578,10 +958,11 @@ export default function DescriptionEditorRoute({
               isPaused={isPaused}
               onSubmitForReview={handleSubmitForReview}
               validationErrors={validationErrors}
+              standard={descriptiveStandard}
             />
 
-            {/* Comments section (pass volumeId through the
-                legacy shim prop path; Plan 05 migrates to the
+            {/* Comments section (pass volumeId through the legacy
+                shim prop path; a future migration moves to the
                 discriminated target prop). */}
             <CommentThread
               entryId={entry.id}
@@ -628,7 +1009,23 @@ export default function DescriptionEditorRoute({
         />
       )}
 
-      {/* Re-segmentation dialog stub -- Plan 06 will provide FlagResegmentationDialog */}
+      {/* In-app unsaved-changes dialog. Renders when `useBlocker`
+          has intercepted a dirty navigation. Stay →
+          blocker.reset(); Leave → sendBeacon flush +
+          blocker.proceed(). Stay is the safe default (autoFocus +
+          Escape + backdrop + X all route through onStay). */}
+      <UnsavedChangesDialog
+        open={blocker.state === "blocked"}
+        titleLabel={t("editor.unsaved_dialog_title")}
+        bodyLabel={t("editor.unsaved_dialog_body")}
+        stayLabel={t("editor.unsaved_dialog_stay")}
+        leaveLabel={t("editor.unsaved_dialog_leave")}
+        onStay={handleUnsavedStay}
+        onLeave={handleUnsavedLeave}
+      />
+
+      {/* Re-segmentation dialog stub — to be replaced by the real
+          FlagResegmentationDialog when that component lands. */}
       {showResegDialog && (
         <ResegmentationDialogStub
           onClose={() => {
@@ -649,7 +1046,7 @@ export default function DescriptionEditorRoute({
 
 /**
  * Temporary stub for FlagResegmentationDialog.
- * Will be replaced when Plan 06 executes and creates the real component.
+ * Will be replaced when the real component lands.
  */
 function ResegmentationDialogStub({
   onClose,

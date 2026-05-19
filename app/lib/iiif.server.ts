@@ -1,10 +1,28 @@
 /**
- * IIIF Presentation API v3 manifest parsing and validation.
+ * IIIF Manifest Parser and Validator
  *
- * Zasqua manifests follow a known v3 structure:
- * - label in {"es": [title]} format
- * - homepage with reference code in URL
- * - canvases with image services
+ * This module deals with the server-side ingestion of IIIF
+ * Presentation API v3 manifests — the standard JSON documents that
+ * describe a digitised volume's pages, images, and bibliographic
+ * label. When a cataloguer pastes a manifest URL into the
+ * volume-import form, Fisqua fetches the manifest from the upstream
+ * IIIF server, parses it into the canonical `ParsedManifest` shape,
+ * and uses that shape to populate `volumes` and `volume_pages` rows
+ * without an out-of-band data-entry pass.
+ *
+ * `getAllowedManifestHosts` reads the comma-separated
+ * `ALLOWED_MANIFEST_HOSTS` env var (falling back to
+ * `manifests.zasqua.org`) so the host allowlist is configurable per
+ * deployment without recompiling. `parseManifest` and the URL
+ * validation helpers around it pin the shape we expect from
+ * Zasqua-style manifests — a Spanish-locale label, a homepage that
+ * carries the reference code in the URL, and canvases whose first
+ * `body` exposes an image service URL — and reject anything that
+ * does not match before the import can write to D1. The HTTPS check
+ * and the allowlist together close the SSRF surface that an
+ * unsanitised cataloguer-supplied URL would otherwise open.
+ *
+ * @version v0.3.0
  */
 
 export interface ParsedManifest {

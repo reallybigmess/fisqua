@@ -1,10 +1,11 @@
 /**
  * Comments API — Collection
  *
- * POST creates a new comment thread anchored to an entry or a region;
- * GET lists the threads for the requested entry. Every request is
- * behind the project-role guard so a cataloguer never sees a
- * thread on a project they do not belong to.
+ * This API endpoint owns the comment-thread collection. POST creates
+ * a new comment thread anchored to an entry or a region; GET lists
+ * the threads for the requested entry. Every request is behind the
+ * project-role guard so a cataloguer never sees a thread on a project
+ * they do not belong to.
  *
  * @version v0.3.0
  */

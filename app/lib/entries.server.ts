@@ -1,3 +1,29 @@
+/**
+ * Volume Entries Server Helpers
+ *
+ * This module deals with the read and write side of the `entries`
+ * table — the per-volume list of segmentation entries that the
+ * segmentation viewer paints over the IIIF canvas. `loadEntries`
+ * returns every entry for a volume in `position` order, falling back
+ * to a synthetic auto-entry pinned to page one when the volume has
+ * never been segmented; that fallback matches the initial-state
+ * contract documented in `CONTEXT.md` so the viewer always has a
+ * starting boundary to render.
+ *
+ * `saveEntries` implements the additive-diff save the viewer drives
+ * on autosave. It loads the existing ids, partitions the incoming
+ * payload into UPDATE / INSERT / DELETE buckets, only touches the
+ * segmentation-relevant columns on UPDATE so description data written
+ * separately is preserved, and chunks the resulting statement list
+ * into batches of 89 to stay under D1's 100-statement batch ceiling.
+ * `validateEntries` enforces the per-entry invariants (non-empty id,
+ * matching `volumeId`, `position >= 0`, `startPage >= 1`, `startY` /
+ * `endY` in `[0, 1]`, type from the closed enum) before any SQL runs,
+ * so a malformed payload fails fast with a useful message rather than
+ * surfacing as a CHECK violation deep in the batch.
+ *
+ * @version v0.4.0
+ */
 import { eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { entries } from "../db/schema";

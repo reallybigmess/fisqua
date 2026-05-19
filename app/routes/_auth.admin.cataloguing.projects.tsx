@@ -1,7 +1,7 @@
 /**
  * Cataloguing Admin — Projects
  *
- * Admin surface for creating, archiving, and restoring cataloguing
+ * This page is the admin surface for creating, archiving, and restoring cataloguing
  * projects. Lists every active and archived project, shows membership
  * counts, and exposes the new-project dialog. Destructive actions are
  * gated behind a confirm dialog and record an audit trail.

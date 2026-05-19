@@ -1,9 +1,9 @@
 /**
  * Draft Validation
  *
- * Zod schemas that validate the autosave JSON blob shape per record
- * type (description, repository, entity, place) before it lands in
- * the `drafts` table.
+ * This module deals with the Zod schemas that validate the autosave
+ * JSON blob shape per record type (description, repository, entity,
+ * place) before it lands in the `drafts` table.
  *
  * @version v0.3.0
  */

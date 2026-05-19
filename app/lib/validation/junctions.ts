@@ -1,17 +1,18 @@
 /**
  * Junction Table Validation
  *
- * Zod schemas for the description -> entity and description -> place
- * junction rows. Used by the API routes that mutate those
- * relationships and by the bulk import CLI to reject rows that would
- * violate referential integrity.
+ * This module deals with the Zod schemas for the description ->
+ * entity and description -> place junction rows. They are used by
+ * the API routes that mutate those relationships and by the bulk
+ * import CLI to reject rows that would violate referential
+ * integrity.
  *
- * @version v0.3.0
+ * @version v0.4.0
  */
 import { z } from "zod/v4";
 import { ENTITY_ROLES, PLACE_ROLES, CERTAINTY_LEVELS } from "./enums";
 
-// --- DescriptionEntity (SCHEMA-05) ---
+// --- DescriptionEntity ---
 
 export const descriptionEntitySchema = z.object({
   id: z.string().uuid(),
@@ -37,7 +38,7 @@ export const updateDescriptionEntitySchema = descriptionEntitySchema
 
 export const importDescriptionEntitySchema = descriptionEntitySchema;
 
-// --- DescriptionPlace (SCHEMA-06) ---
+// --- DescriptionPlace ---
 
 export const descriptionPlaceSchema = z.object({
   id: z.string().uuid(),

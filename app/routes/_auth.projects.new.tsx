@@ -1,3 +1,25 @@
+/**
+ * Project Create Form
+ *
+ * This page is the admin-only create-project surface reached from the
+ * sidebar's "New project" link in the cataloguing admin subsection.
+ * The loader is a thin admin guard — `requireAdmin(user)` — and the
+ * action validates the submitted form through `validateProjectForm`
+ * before delegating to `createProject` in `projects.server`, which
+ * inserts the row and seeds the project-membership table with the
+ * caller as the initial lead. On success the action throws a redirect
+ * to the new project's overview; on validation failure it returns
+ * `{errors, values}` so the form re-renders with field-level errors
+ * and the user's input preserved.
+ *
+ * The form is deliberately minimal — name and description only — so
+ * an admin can start a project in seconds; richer settings (document
+ * subtypes, conventions, JSON settings blob) live on the per-project
+ * settings page once the row exists.
+ *
+ * @version v0.3.0
+ */
+
 import { Form, redirect, useActionData, Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { userContext } from "../context";

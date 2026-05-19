@@ -1,9 +1,10 @@
 /**
  * Vocabulary Validation
  *
- * Zod schemas for vocabulary term writes: label payload keyed by
- * locale, category, status, and the merge / split payload shapes.
- * Shared by the vocabularies admin routes and the bulk import CLI.
+ * This module deals with the Zod schemas for vocabulary term writes:
+ * label payload keyed by locale, category, status, and the merge /
+ * split payload shapes. Shared by the vocabularies admin routes and
+ * the bulk import CLI.
  *
  * @version v0.3.0
  */

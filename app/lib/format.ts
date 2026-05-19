@@ -1,3 +1,24 @@
+/**
+ * Locale-Aware Formatting Helpers
+ *
+ * This module deals with the small set of locale-aware formatting
+ * primitives the UI reaches for when rendering timestamps and numbers
+ * to a Colombian Spanish audience. Everything routes through
+ * `Intl.RelativeTimeFormat`, `Intl.DateTimeFormat`, and
+ * `Intl.NumberFormat` pinned to `es-CO`, so a single `LOCALE` switch
+ * controls the entire app's locale presentation.
+ *
+ * `relativeTime` collapses a unix-ms timestamp into "hace 3 días"-
+ * style copy, picking the largest non-zero unit (day, hour, minute,
+ * or second) so the surface stays readable as values age out.
+ * `formatDate` renders a full Spanish long-form date for
+ * archival-facing surfaces, and `formatNumber` applies Colombian
+ * thousands-separator conventions (period rather than comma) for
+ * tallies on dashboards. Null and undefined inputs collapse to the
+ * em-dash glyph so empty cells render uniformly across tables.
+ *
+ * @version v0.3.0
+ */
 const LOCALE = "es-CO";
 
 /**

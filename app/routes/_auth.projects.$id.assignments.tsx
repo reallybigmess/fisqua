@@ -1,7 +1,23 @@
 /**
- * Assignments tab route (lead-only).
- * Manages volume-to-user assignments with individual and bulk operations.
- * Shows segmentation and description sub-tabs.
+ * Project Assignments Tab
+ *
+ * This page is the lead-only assignments surface inside a project,
+ * gated through `requireProjectRole(user, projectId, "lead")` in both
+ * loader and action. It pairs an `AssignmentTable` of every volume in
+ * the project — cataloguer, reviewer, status, progress — with a
+ * `BulkToolbar` for multi-row reassignment and a `TeamProgress` panel
+ * that aggregates per-member workload. A sub-tab switch lets the lead
+ * flip between segmentation and description assignments without
+ * leaving the route; the description view is rendered through the
+ * shared `DescriptionTabContent` component to keep the volume-level
+ * and entry-level pages in sync.
+ *
+ * The loader bundles every payload the page needs in a single
+ * round-trip — volumes with denormalised counts, candidate members,
+ * and the per-member stats — so the table never waterfalls when the
+ * lead opens it.
+ *
+ * @version v0.3.0
  */
 
 import { useState } from "react";
@@ -425,7 +441,8 @@ export async function action({ request, params, context }: Route.ActionArgs) {
         reviewerId === "__unassign__" ? null : reviewerId;
     }
 
-    // Chunk to stay under D1 batch limit (89 per RESEARCH.md pitfall 3)
+    // Chunk to stay under D1's 100-statement batch limit (89 leaves
+    // a safety margin for additional batch members).
     const CHUNK_SIZE = 89;
     for (let i = 0; i < volumeIds.length; i += CHUNK_SIZE) {
       const chunk = volumeIds.slice(i, i + CHUNK_SIZE);

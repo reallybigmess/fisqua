@@ -1,7 +1,7 @@
 /**
  * Repositories Admin — List
  *
- * The index page for the repositories admin surface. Renders a searchable
+ * This page is the index for the repositories admin surface. It renders a searchable
  * data table of every archival institution the app holds records for --
  * short code, full name, city, country, and enabled flag -- with a "New
  * repository" button that jumps to the create form. The data table
@@ -9,14 +9,18 @@
  * that curators working with a few dozen repositories can find a
  * specific one quickly without a round-trip.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`; the loader filters `repositories` by
+ * `tenant.id`.
+ *
+ * @version v0.4.0
  */
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { Search, Plus } from "lucide-react";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import { DataTable } from "~/components/data-table/data-table";
 import { ColumnToggle } from "~/components/data-table/column-toggle";
 import type {
@@ -54,8 +58,10 @@ export async function loader({ context }: Route.LoaderArgs) {
   const { requireAdmin } = await import("~/lib/permissions.server");
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const { drizzle } = await import("drizzle-orm/d1");
+  const { eq } = await import("drizzle-orm");
   const { repositories } = await import("~/db/schema");
 
   const env = context.cloudflare.env;
@@ -64,6 +70,7 @@ export async function loader({ context }: Route.LoaderArgs) {
   const allRepos = await db
     .select()
     .from(repositories)
+    .where(eq(repositories.tenantId, tenant.id))
     .orderBy(repositories.name)
     .all();
 

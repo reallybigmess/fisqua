@@ -1,8 +1,8 @@
 /**
  * Entities Admin — List
  *
- * The index page for the entity authority records (people and
- * corporate bodies). Renders a searchable data table across the entire
+ * This page is the index for the entity authority records (people and
+ * corporate bodies). It renders a searchable data table across the entire
  * authority set, backed by SQLite FTS5 so an accent-insensitive search
  * like `gonzalez` matches both `González` and `Gonzaléz` variants.
  * Columns cover display name, sort name, entity type, primary
@@ -10,14 +10,18 @@
  * "New entity" button jumps to the create form, and each row deep-links
  * into the edit page.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`; every read of `entities` is filtered by
+ * `tenant.id` (including the FTS5 fast path).
+ *
+ * @version v0.4.0
  */
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { Search, Plus, Check } from "lucide-react";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import { ENTITY_TYPES } from "~/lib/validation/enums";
 import { DataTable } from "~/components/data-table/data-table";
 import { ColumnToggle } from "~/components/data-table/column-toggle";
@@ -69,6 +73,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -79,7 +84,10 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     const q = url.searchParams.get("q")?.trim() || "";
     const excludeId = url.searchParams.get("exclude") || "";
     const likePattern = `%${q}%`;
-    const conditions = [like(entities.displayName, likePattern)];
+    const conditions = [
+      eq(entities.tenantId, tenant.id),
+      like(entities.displayName, likePattern),
+    ];
     if (excludeId) {
       conditions.push(sql`${entities.id} != ${excludeId}`);
     }
@@ -127,8 +135,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     advWikidataId ||
     advViafId;
 
-  // Base conditions applied to all modes
-  const baseConditions: any[] = [];
+  // Base conditions applied to all modes. Tenant predicate is always present.
+  const baseConditions: any[] = [eq(entities.tenantId, tenant.id)];
   if (!showMerged) {
     baseConditions.push(isNull(entities.mergedInto));
   }
@@ -161,6 +169,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         FROM entities e
         INNER JOIN entities_fts fts ON fts.rowid = e.rowid
         WHERE entities_fts MATCH ${ftsQuery}
+        AND e.tenant_id = ${tenant.id}
         ${sql.raw(filterClause)}
         ORDER BY rank
         LIMIT ${pageSize}

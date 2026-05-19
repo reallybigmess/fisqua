@@ -1,10 +1,10 @@
 /**
  * Reference Code Helpers
  *
- * Server-side utilities for generating and validating archival
- * reference codes: per-fonds sequence increment, duplicate detection,
- * and the format rules that keep codes legible across every surface
- * that renders them.
+ * This module deals with the server-side utilities for generating and
+ * validating archival reference codes: per-fonds sequence increment,
+ * duplicate detection, and the format rules that keep codes legible
+ * across every surface that renders them.
  *
  * @version v0.3.0
  */

@@ -1,21 +1,31 @@
 /**
  * Descriptions Admin — Create
  *
- * The create form for a new archival description. Captures the
- * minimum ISAD(G) fields needed to seed a row -- repository, parent,
- * description level, reference code, local identifier, title -- plus
- * a handful of the most commonly-entered context fields. Enforces
- * level constraints (a file cannot sit above a series, etc.) on the
- * server action before inserting. Richer editing happens on the edit
- * page.
+ * This page is the create form for a new archival description. It captures the
+ * minimum standard-neutral fields needed to seed a row — repository,
+ * parent, description level, reference code, local identifier, title
+ * — and lets the cataloguer fill in the rest on the edit page,
+ * where the full standard-aware renderer takes over. Level
+ * constraints (a file cannot sit above a series, etc.) are
+ * enforced on the server action before inserting; per-standard
+ * mandatoriness is enforced by `descriptionValidatorFor` from the
+ * standard-aware validator factory keyed by
+ * `tenant.descriptiveStandard`.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`. The loader filters repositories, descriptions,
+ * and parent lookups by `tenant.id`; the action attributes the new
+ * description row to `tenant.id` rather than a single-tenant
+ * hard-code.
+ *
+ * @version v0.4.0
  */
 
 import { Form, useActionData, useLoaderData, redirect, Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ChevronRight } from "lucide-react";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
+import { tStd } from "~/lib/i18n/standard-aware";
 import type { Route } from "./+types/_auth.admin.descriptions.new";
 
 // ---------------------------------------------------------------------------
@@ -25,7 +35,7 @@ import type { Route } from "./+types/_auth.admin.descriptions.new";
 export async function loader({ request, context }: Route.LoaderArgs) {
   const { requireAdmin } = await import("~/lib/permissions.server");
   const { drizzle } = await import("drizzle-orm/d1");
-  const { eq, sql } = await import("drizzle-orm");
+  const { and, eq, sql } = await import("drizzle-orm");
   const { descriptions, repositories } = await import("~/db/schema");
   const { getAllowedChildLevels } = await import(
     "~/lib/description-levels"
@@ -33,6 +43,14 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
+  // Schema-invariant guard — see action handler.
+  if (tenant.descriptiveStandard == null) {
+    throw new Error(
+      "Schema invariant violation: tenant.descriptiveStandard is null",
+    );
+  }
+  const descriptiveStandard = tenant.descriptiveStandard;
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -41,7 +59,9 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const repoList = await db
     .select({ id: repositories.id, name: repositories.name })
     .from(repositories)
-    .where(eq(repositories.enabled, true))
+    .where(
+      and(eq(repositories.tenantId, tenant.id), eq(repositories.enabled, true))
+    )
     .all();
 
   // Check for parentId query param
@@ -74,7 +94,9 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         pathCache: descriptions.pathCache,
       })
       .from(descriptions)
-      .where(eq(descriptions.id, parentId))
+      .where(
+        and(eq(descriptions.tenantId, tenant.id), eq(descriptions.id, parentId))
+      )
       .get();
 
     if (parentRow) {
@@ -86,15 +108,28 @@ export async function loader({ request, context }: Route.LoaderArgs) {
           maxRef: sql<string>`MAX(${descriptions.referenceCode})`,
         })
         .from(descriptions)
-        .where(eq(descriptions.parentId, parentId))
+        .where(
+          and(
+            eq(descriptions.tenantId, tenant.id),
+            eq(descriptions.parentId, parentId)
+          )
+        )
         .get();
 
       if (maxRef?.maxRef) {
-        // Parse last segment as number and increment
+        // Parse last segment as number and increment. WR-04: gate
+        // on a strict /^\d+$/ test before parseInt — `parseInt`
+        // accepts strings like "007abc" (returns 7) and "0xff"
+        // (returns 0 in base-10), so a sibling reference code
+        // ending in a non-numeric suffix would silently roll the
+        // suggestion forward as if the suffix were a counter.
+        // Falling back to the `-001` branch is the safe choice:
+        // the cataloguer sees a clean starting point rather than a
+        // confusing rollover.
         const parts = maxRef.maxRef.split("-");
         const lastSegment = parts[parts.length - 1];
-        const num = parseInt(lastSegment, 10);
-        if (!isNaN(num)) {
+        if (/^\d+$/.test(lastSegment)) {
+          const num = parseInt(lastSegment, 10);
           const next = String(num + 1).padStart(3, "0");
           parts[parts.length - 1] = next;
           suggestedRefCode = parts.join("-");
@@ -113,7 +148,13 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     allowedLevels = getAllowedChildLevels(null);
   }
 
-  return { repositories: repoList, parent, suggestedRefCode, allowedLevels };
+  return {
+    repositories: repoList,
+    parent,
+    suggestedRefCode,
+    allowedLevels,
+    descriptiveStandard,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -123,14 +164,30 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 export async function action({ request, context }: Route.ActionArgs) {
   const { requireAdmin } = await import("~/lib/permissions.server");
   const { drizzle } = await import("drizzle-orm/d1");
-  const { eq, sql } = await import("drizzle-orm");
+  const { and, eq, sql } = await import("drizzle-orm");
   const { descriptions } = await import("~/db/schema");
   const { isValidChildLevel } = await import("~/lib/description-levels");
   const { z } = await import("zod/v4");
   const { DESCRIPTION_LEVELS } = await import("~/lib/validation/enums");
+  const { descriptionValidatorFor } = await import(
+    "~/lib/standards/validator-factory"
+  );
+  type DescriptionLevel =
+    import("~/lib/standards/types").DescriptionLevel;
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
+  // `tenants.descriptive_standard` is NOT NULL when
+  // `kind = 'tenant'` per the schema CHECK in
+  // drizzle/0034_tenants_table.sql. Operators never reach description
+  // CRUD routes; the Drizzle inferred type is nullable so we narrow
+  // with an explicit invariant throw.
+  if (tenant.descriptiveStandard == null) {
+    throw new Error(
+      "Schema invariant violation: tenant.descriptiveStandard is null",
+    );
+  }
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -149,7 +206,11 @@ export async function action({ request, context }: Route.ActionArgs) {
   const parentId =
     (formData.get("parentId") as string)?.trim() || undefined;
 
-  // Validate with Zod (minimal create schema)
+  // Pre-validate the structural shape of the 6 create-form inputs
+  // (UUID format, max-length, level enum). The standard-aware
+  // validator factory below enforces per-standard required-field
+  // mandatoriness on top; the two layers cover (a) hand-coded form
+  // shape and (b) standard-driven completeness.
   const createSchema = z.object({
     title: z.string().min(1, "required"),
     descriptionLevel: z.enum(DESCRIPTION_LEVELS),
@@ -175,7 +236,33 @@ export async function action({ request, context }: Route.ActionArgs) {
     };
   }
 
-  // Validate parentId exists if provided (T-21-08)
+  // Standard-aware validation: build the payload as a column-keyed
+  // object and run it through the per-standard validator picked from
+  // `tenant.descriptiveStandard`. This is the same factory the edit
+  // action consumes; bulk import will be the third call site.
+  const formObject: Record<string, unknown> = {
+    title: parsed.data.title,
+    descriptionLevel: parsed.data.descriptionLevel,
+    referenceCode: parsed.data.referenceCode,
+    localIdentifier: parsed.data.localIdentifier,
+    repositoryId: parsed.data.repositoryId,
+  };
+  const stdValidator = descriptionValidatorFor(
+    tenant.descriptiveStandard,
+    parsed.data.descriptionLevel as DescriptionLevel,
+  );
+  const stdParsed = stdValidator.safeParse(formObject);
+  if (!stdParsed.success) {
+    return {
+      ok: false as const,
+      errors: z.flattenError(stdParsed.error).fieldErrors as Record<
+        string,
+        string[] | undefined
+      >,
+    };
+  }
+
+  // Validate parentId exists if provided.
   let parentRow: {
     id: string;
     descriptionLevel: string;
@@ -196,7 +283,12 @@ export async function action({ request, context }: Route.ActionArgs) {
         childCount: descriptions.childCount,
       })
       .from(descriptions)
-      .where(eq(descriptions.id, parsed.data.parentId))
+      .where(
+        and(
+          eq(descriptions.tenantId, tenant.id),
+          eq(descriptions.id, parsed.data.parentId)
+        )
+      )
       .get() ?? null;
 
     if (!parentRow) {
@@ -220,11 +312,18 @@ export async function action({ request, context }: Route.ActionArgs) {
     }
   }
 
-  // Check referenceCode uniqueness (T-21-06)
+  // Check referenceCode uniqueness. Reference codes are
+  // tenant-scoped: two tenants may legitimately use the same code, so
+  // the uniqueness check is scoped to the calling tenant.
   const existing = await db
     .select({ id: descriptions.id })
     .from(descriptions)
-    .where(eq(descriptions.referenceCode, parsed.data.referenceCode))
+    .where(
+      and(
+        eq(descriptions.tenantId, tenant.id),
+        eq(descriptions.referenceCode, parsed.data.referenceCode)
+      )
+    )
     .get();
 
   if (existing) {
@@ -249,12 +348,22 @@ export async function action({ request, context }: Route.ActionArgs) {
     ? await db
         .select({ count: sql<number>`count(*)` })
         .from(descriptions)
-        .where(eq(descriptions.parentId, parentRow.id))
+        .where(
+          and(
+            eq(descriptions.tenantId, tenant.id),
+            eq(descriptions.parentId, parentRow.id)
+          )
+        )
         .get()
     : await db
         .select({ count: sql<number>`count(*)` })
         .from(descriptions)
-        .where(sql`${descriptions.parentId} IS NULL`)
+        .where(
+          and(
+            eq(descriptions.tenantId, tenant.id),
+            sql`${descriptions.parentId} IS NULL`
+          )
+        )
         .get();
 
   const position = siblingCount?.count ?? 0;
@@ -262,6 +371,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   try {
     await db.insert(descriptions).values({
+      tenantId: tenant.id,
       id,
       repositoryId: parsed.data.repositoryId,
       parentId: parsed.data.parentId ?? null,
@@ -286,7 +396,12 @@ export async function action({ request, context }: Route.ActionArgs) {
       await db
         .update(descriptions)
         .set({ childCount: parentRow.childCount + 1 })
-        .where(eq(descriptions.id, parentRow.id));
+        .where(
+          and(
+            eq(descriptions.tenantId, tenant.id),
+            eq(descriptions.id, parentRow.id)
+          )
+        );
     }
   } catch (e) {
     if (String(e).includes("UNIQUE constraint failed")) {
@@ -308,7 +423,13 @@ export async function action({ request, context }: Route.ActionArgs) {
 export default function NewDescriptionPage({
   loaderData,
 }: Route.ComponentProps) {
-  const { repositories, parent, suggestedRefCode, allowedLevels } = loaderData;
+  const {
+    repositories,
+    parent,
+    suggestedRefCode,
+    allowedLevels,
+    descriptiveStandard,
+  } = loaderData;
   const actionData = useActionData<typeof action>();
   const { t } = useTranslation("descriptions_admin");
 
@@ -367,7 +488,7 @@ export default function NewDescriptionPage({
             {/* Title */}
             <FieldInput
               name="title"
-              label={t("field_title")}
+              label={tStd(t, "fields.title", descriptiveStandard)}
               required
               error={errors?.title?.[0]}
             />
@@ -378,7 +499,7 @@ export default function NewDescriptionPage({
                 htmlFor="descriptionLevel"
                 className="mb-1 block text-xs font-medium text-indigo"
               >
-                {t("field_descriptionLevel")}
+                {tStd(t, "fields.descriptionLevel", descriptiveStandard)}
                 <span className="text-madder"> *</span>
               </label>
               <select
@@ -407,7 +528,7 @@ export default function NewDescriptionPage({
             <div>
               <FieldInput
                 name="referenceCode"
-                label={t("field_referenceCode")}
+                label={tStd(t, "fields.referenceCode", descriptiveStandard)}
                 required
                 defaultValue={suggestedRefCode}
                 error={
@@ -424,7 +545,7 @@ export default function NewDescriptionPage({
             {/* Local Identifier */}
             <FieldInput
               name="localIdentifier"
-              label={t("field_localIdentifier")}
+              label={tStd(t, "fields.localIdentifier", descriptiveStandard)}
               required
               error={errors?.localIdentifier?.[0]}
             />
@@ -435,7 +556,7 @@ export default function NewDescriptionPage({
                 htmlFor="repositoryId"
                 className="mb-1 block text-xs font-medium text-indigo"
               >
-                {t("field_repositoryId")}
+                {tStd(t, "fields.repositoryId", descriptiveStandard)}
                 <span className="text-madder"> *</span>
               </label>
               <select

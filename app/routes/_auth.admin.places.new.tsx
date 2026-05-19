@@ -1,7 +1,7 @@
 /**
  * Places Admin — Create
  *
- * The create form for a new place authority record. Captures the
+ * This page is the create form for a new place authority record. It captures the
  * essential identity fields -- label, display name, place type,
  * country -- plus optional coordinates and a parent-place pointer for
  * hierarchical places (town within province within gobernación). The
@@ -9,14 +9,18 @@
  * Historical administrative divisions and external authority links
  * are editable on the edit page.
  *
- * @version v0.3.0
+ * Tenant attribution comes from request context, populated by
+ * `authMiddleware`; the new place row is attributed to `tenant.id`
+ * rather than a single-tenant hard-code.
+ *
+ * @version v0.4.0
  */
 
 import { useState } from "react";
 import { Form, useActionData, redirect, Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ChevronRight } from "lucide-react";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import { CollapsibleSection } from "~/components/admin/collapsible-section";
 import { NameVariantInput } from "~/components/forms/name-variant-input";
 import { LodLinkField } from "~/components/forms/lod-link-field";
@@ -48,6 +52,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -63,18 +68,9 @@ export async function action({ request, context }: Route.ActionArgs) {
   const nameVariantsRaw = formData.get("nameVariants") as string;
   const parentId =
     (formData.get("parentId") as string)?.trim() || undefined;
-  const historicalGobernacion =
-    (formData.get("historicalGobernacion") as string)?.trim() || undefined;
-  const historicalPartido =
-    (formData.get("historicalPartido") as string)?.trim() || undefined;
-  const historicalRegion =
-    (formData.get("historicalRegion") as string)?.trim() || undefined;
-  const countryCode =
-    (formData.get("countryCode") as string)?.trim() || undefined;
-  const adminLevel1 =
-    (formData.get("adminLevel1") as string)?.trim() || undefined;
-  const adminLevel2 =
-    (formData.get("adminLevel2") as string)?.trim() || undefined;
+  // historical_gobernacion, historical_partido, historical_region,
+  // country_code, admin_level_1, admin_level_2, wikidata_id all dropped
+  // on places in 0036 (0% populated in production audit).
   const coordinatePrecision =
     (formData.get("coordinatePrecision") as string)?.trim() || undefined;
 
@@ -91,8 +87,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     (formData.get("hgisId") as string)?.trim() || undefined;
   const whgId =
     (formData.get("whgId") as string)?.trim() || undefined;
-  const wikidataId =
-    (formData.get("wikidataId") as string)?.trim() || undefined;
+  // wikidataId dropped on places in 0036.
 
   // Auto-generate place code
   const placeCode = await generateUniqueCode(
@@ -112,16 +107,9 @@ export async function action({ request, context }: Route.ActionArgs) {
     latitude: latitude != null && !isNaN(latitude) ? latitude : null,
     longitude: longitude != null && !isNaN(longitude) ? longitude : null,
     coordinatePrecision,
-    historicalGobernacion,
-    historicalPartido,
-    historicalRegion,
-    countryCode,
-    adminLevel1,
-    adminLevel2,
     tgnId: tgnId || null,
     hgisId: hgisId || null,
     whgId: whgId || null,
-    wikidataId: wikidataId || null,
   });
 
   if (!parsed.success) {
@@ -136,6 +124,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   try {
     await db.insert(places).values({
+      tenantId: tenant.id,
       id,
       ...parsed.data,
       nameVariants: parsed.data.nameVariants ?? "[]",
@@ -145,7 +134,6 @@ export async function action({ request, context }: Route.ActionArgs) {
       tgnId: parsed.data.tgnId ?? null,
       hgisId: parsed.data.hgisId ?? null,
       whgId: parsed.data.whgId ?? null,
-      wikidataId: parsed.data.wikidataId ?? null,
       mergedInto: null,
       createdAt: now,
       updatedAt: now,
@@ -181,7 +169,7 @@ export default function NewPlacePage() {
   const [tgnId, setTgnId] = useState("");
   const [hgisId, setHgisId] = useState("");
   const [whgId, setWhgId] = useState("");
-  const [wikidataId, setWikidataId] = useState("");
+  // wikidataId dropped on places in 0036.
 
   return (
     <div className="mx-auto max-w-3xl px-8 py-12">
@@ -244,7 +232,6 @@ export default function NewPlacePage() {
           <input type="hidden" name="tgnId" value={tgnId} />
           <input type="hidden" name="hgisId" value={hgisId} />
           <input type="hidden" name="whgId" value={whgId} />
-          <input type="hidden" name="wikidataId" value={wikidataId} />
 
           {/* Identity */}
           <CollapsibleSection title={t("sectionIdentity")}>
@@ -320,45 +307,16 @@ export default function NewPlacePage() {
             </div>
           </CollapsibleSection>
 
-          {/* Historical Context */}
-          <CollapsibleSection title={t("sectionHistorical")}>
-            <div className="space-y-4">
-              <FieldInput
-                name="historicalGobernacion"
-                label={t("field.historicalGobernacion")}
-                error={errors?.historicalGobernacion?.[0]}
-              />
-              <FieldInput
-                name="historicalPartido"
-                label={t("field.historicalPartido")}
-                error={errors?.historicalPartido?.[0]}
-              />
-              <FieldInput
-                name="historicalRegion"
-                label={t("field.historicalRegion")}
-                error={errors?.historicalRegion?.[0]}
-              />
-            </div>
-          </CollapsibleSection>
+          {/* Historical Context section removed alongside the column
+              drops in drizzle/0036_union_schema.sql —
+              historicalGobernacion, historicalPartido,
+              historicalRegion all dropped (0% populated). */}
 
           {/* Modern Geography & LOD */}
           <CollapsibleSection title={t("sectionGeography")}>
             <div className="space-y-4">
-              <FieldInput
-                name="countryCode"
-                label={t("field.countryCode")}
-                error={errors?.countryCode?.[0]}
-              />
-              <FieldInput
-                name="adminLevel1"
-                label={t("field.adminLevel1")}
-                error={errors?.adminLevel1?.[0]}
-              />
-              <FieldInput
-                name="adminLevel2"
-                label={t("field.adminLevel2")}
-                error={errors?.adminLevel2?.[0]}
-              />
+              {/* countryCode, adminLevel1, adminLevel2 dropped on
+                  places in 0036 (0% populated). */}
               <CoordinateInput
                 latitude={latitude}
                 longitude={longitude}
@@ -385,12 +343,7 @@ export default function NewPlacePage() {
                 onChange={setWhgId}
                 service="whg"
               />
-              <LodLinkField
-                label={t("field.wikidataId")}
-                value={wikidataId}
-                onChange={setWikidataId}
-                service="wikidata"
-              />
+              {/* wikidataId dropped on places in 0036 (0% populated). */}
             </div>
           </CollapsibleSection>
 

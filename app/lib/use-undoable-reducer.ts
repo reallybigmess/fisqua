@@ -1,8 +1,49 @@
+/**
+ * Undoable reducer hook
+ *
+ * This module deals with undo/redo history for the segmentation
+ * viewer. `useUndoableReducer` is the React hook that wraps
+ * `boundaryReducer` with past/present/future snapshot stacks, so
+ * the `⌘Z` / `⌘⇧Z` shortcuts can rewind and replay edits without
+ * the reducer itself needing to know about history.
+ * `createUndoableDispatch` is the underlying pure transition
+ * function — exported so the hook's behaviour can be unit-tested
+ * without rendering React.
+ *
+ * Three categories of action are handled separately. Structural
+ * edits (`ADD_BOUNDARY`, `MOVE_BOUNDARY`, `DELETE_BOUNDARY`,
+ * `INDENT`, `OUTDENT`, `SET_TYPE`, `SET_SUBTYPE`, `SET_TITLE`,
+ * `SET_END_PAGE`, `SET_END_Y`) push the previous present onto
+ * `past`, set the new present, and clear the future. Non-undoable
+ * actions (`INIT`, `MARK_SAVED`, `MARK_SAVING`, `MARK_DIRTY`,
+ * `MARK_ERROR`) update the present without touching the history —
+ * these are UI state transitions and a bulk load, and folding them
+ * into the history stack would let the user "undo" a successful
+ * save back into a dirty state, or rewind past the initial volume
+ * load. No-op actions, where the reducer returns the same state
+ * reference because a validation rejected an edit, are dropped
+ * entirely. `maxHistory` caps the size of the `past` stack so a
+ * long editing session does not grow unbounded; the default is 100
+ * snapshots.
+ *
+ * @version v0.4.0
+ */
+
 import { useState, useCallback } from "react";
 import type { BoundaryState, BoundaryAction } from "./boundary-types";
 
-/** Actions that should NOT be recorded in undo history. */
-const NON_UNDOABLE = new Set(["INIT", "MARK_SAVED", "MARK_SAVING", "MARK_DIRTY"]);
+/**
+ * Actions that should NOT be recorded in undo history. `MARK_ERROR`
+ * is included: autosave failure is a UI state transition, not a data
+ * edit, so it must not push a snapshot onto the undo stack.
+ */
+const NON_UNDOABLE = new Set([
+  "INIT",
+  "MARK_SAVED",
+  "MARK_SAVING",
+  "MARK_DIRTY",
+  "MARK_ERROR",
+]);
 
 /** Undo/redo meta-actions. */
 export type UndoRedoAction = { type: "UNDO" } | { type: "REDO" };
@@ -75,8 +116,8 @@ export function createUndoableDispatch(
  * Structural actions (ADD_BOUNDARY, MOVE_BOUNDARY, DELETE_BOUNDARY, INDENT, OUTDENT,
  * SET_TYPE, SET_TITLE, SET_END_PAGE, SET_END_Y) are recorded in history.
  *
- * Non-undoable actions (INIT, MARK_SAVED, MARK_SAVING, MARK_DIRTY) update state
- * without entering history.
+ * Non-undoable actions (INIT, MARK_SAVED, MARK_SAVING, MARK_DIRTY,
+ * MARK_ERROR) update state without entering history.
  *
  * No-op actions (reducer returns same reference) are ignored entirely.
  */
