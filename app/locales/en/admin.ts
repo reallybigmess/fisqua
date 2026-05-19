@@ -1,6 +1,11 @@
 /**
  * English translations — admin namespace
  *
+ * This locale namespace carries the English strings for the shared
+ * admin chrome — the back-office heading, the top-level user and
+ * project sections, and the all/archived project pickers the admin
+ * landing page uses.
+ *
  * @version v0.3.0
  */
 export default {

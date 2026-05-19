@@ -1,7 +1,31 @@
 /**
  * Spanish translations — viewer namespace
  *
- * @version v0.3.0
+ * This locale namespace carries the Spanish strings for the
+ * segmentation viewer — the toolbar, the boundary-state save status,
+ * the unsaved-changes prompts, and the custom unsaved-changes modal
+ * that replaces the native `window.confirm` on in-app navigation.
+ *
+ * Save-status keys bajo `save_status:` — `error` ("Error al guardar",
+ * convención colombiana preferida a la calcada "Falló el guardado"),
+ * `save_failed_retry` ("No se pudo guardar — reintentar", em-dash con
+ * espacios, sin voseo), y `save_now` ("Guardar ahora").
+ *
+ * Unsaved-navigation key bajo `save_status:` — `unsaved_confirm_leave`
+ * ("Tienes cambios sin guardar. ¿Salir de todas formas?"). Forma tú
+ * (sin voseo). Mismo texto que el namespace de descripción,
+ * deliberadamente — un solo prompt en los dos editores hace que la
+ * experiencia de "salir con trabajo pendiente" sea idéntica.
+ *
+ * Modal personalizado de cambios sin guardar — cuatro claves bajo
+ * `save_status:`: `unsaved_dialog_title`, `unsaved_dialog_body`,
+ * `unsaved_dialog_stay`, `unsaved_dialog_leave` — con el texto del
+ * `<UnsavedChangesDialog>` que reemplaza el `window.confirm` nativo.
+ * Los strings replican palabra-por-palabra el namespace de
+ * descripción para que el catalogador vea el mismo diálogo en los
+ * dos editores. Forma tú (sin voseo).
+ *
+ * @version v0.4.1
  */
 export default {
   toolbar: {
@@ -25,6 +49,15 @@ export default {
     saved: "Guardado",
     saving: "Guardando...",
     unsaved: "Sin guardar",
+    error: "Error al guardar",
+    save_failed_retry: "No se pudo guardar — reintentar",
+    save_now: "Guardar ahora",
+    unsaved_confirm_leave: "Tienes cambios sin guardar. ¿Salir de todas formas?",
+    unsaved_dialog_title: "Cambios sin guardar",
+    unsaved_dialog_body:
+      "Tienes cambios sin guardar. Si sales de esta página ahora, vas a perder cualquier trabajo que no se haya guardado todavía.",
+    unsaved_dialog_stay: "Seguir en la página",
+    unsaved_dialog_leave: "Salir de todas formas",
   },
   move_tool: {
     not_author: "Solo puedes mover tus propias anotaciones.",
@@ -71,7 +104,7 @@ export default {
     reviewer_comment_label: "Comentario del revisor:",
     accepting: "Aceptando...",
     // Task 14 (CONTEXT rev 4): etiquetas de las tarjetas de comentario
-    // en el esquema y copia de advertencia al eliminar una entrada (D-26).
+    // en el esquema y copia de advertencia al eliminar una entrada.
     comment_kind_annotation: "Anotación",
     comment_kind_comment: "Comentario",
     comment_doc_prefix: "Doc {{n}}",
@@ -90,7 +123,7 @@ export default {
       not_assigned: "Solo lectura — no tienes asignación en esta unidad compuesta",
     },
   },
-  // Task 14.E (D-25): diálogo de comentario obligatorio.
+  // Diálogo de comentario obligatorio.
   comment_prompt: {
     title: "Agregar comentario",
     placeholder: "Escribe tu comentario...",
@@ -101,3 +134,5 @@ export default {
     error_server: "No se pudo guardar. Inténtalo de nuevo.",
   },
 } as const;
+
+/* @version v0.4.1 */

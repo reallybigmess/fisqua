@@ -1,10 +1,10 @@
 /**
  * English Locale Index
  *
- * Aggregates every namespace under `locales/en/*` into the
- * single resource bundle i18next loads for english users.
+ * This module aggregates every namespace under `locales/en/*` into
+ * the single resource bundle i18next loads for English users.
  *
- * @version v0.3.0
+ * @version v0.4.0
  */
 import type { ResourceLanguage } from "i18next";
 import common from "./en/common";
@@ -32,6 +32,8 @@ import vocabularies from "./en/vocabularies";
 import volume_admin from "./en/volume_admin";
 import user_admin from "./en/user_admin";
 import qc_flags from "./en/qc_flags";
+import landing from "./en/landing";
+import operator from "./en/operator";
 
 export default {
   common,
@@ -59,4 +61,6 @@ export default {
   volume_admin,
   user_admin,
   qc_flags,
+  landing,
+  operator,
 } satisfies ResourceLanguage;

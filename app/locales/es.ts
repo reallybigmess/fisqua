@@ -1,10 +1,10 @@
 /**
  * Spanish Locale Index
  *
- * Aggregates every namespace under `locales/es/*` into the
- * single resource bundle i18next loads for spanish users.
+ * This module aggregates every namespace under `locales/es/*` into
+ * the single resource bundle i18next loads for Spanish users.
  *
- * @version v0.3.0
+ * @version v0.4.0
  */
 import type { ResourceLanguage } from "i18next";
 import common from "./es/common";
@@ -32,6 +32,8 @@ import vocabularies from "./es/vocabularies";
 import volume_admin from "./es/volume_admin";
 import user_admin from "./es/user_admin";
 import qc_flags from "./es/qc_flags";
+import landing from "./es/landing";
+import operator from "./es/operator";
 
 export default {
   common,
@@ -59,4 +61,6 @@ export default {
   volume_admin,
   user_admin,
   qc_flags,
+  landing,
+  operator,
 } satisfies ResourceLanguage;

@@ -1,7 +1,19 @@
 /**
  * Spanish translations — auth namespace
  *
- * @version v0.3.0
+ * This locale namespace carries the Spanish strings for the
+ * unauthenticated sign-in surface — the email-magic-link form, the
+ * "Continue with GitHub" OAuth button, the divider, and the error
+ * messages routed through `/login`.
+ *
+ * Copia bloqueada: la etiqueta del botón
+ * "Continuar con GitHub" sigue siendo válida; sólo cambió el destino
+ * del enlace (ahora apunta al apex `/auth/github?return_to=<slug>` en
+ * lugar del subdominio del cliente). Las cadenas literales, el
+ * divisor y los mensajes de error se mantienen sin cambios. Español
+ * colombiano: tuteo, sin voseo.
+ *
+ * @version v0.4.0
  */
 export default {
   email_label: "Correo electrónico",
@@ -23,4 +35,14 @@ export default {
   page_title: "Iniciar sesión | Fisqua",
   footer_note:
     "Inicia sesión con GitHub o tu correo institucional de Neogranadina.",
+  wrong_workspace: {
+    page_title: "Espacio incorrecto | Fisqua",
+    eyebrow: "Espacio incorrecto",
+    title: "Estás en el lugar equivocado",
+    body: "Parece que iniciaste sesión desde un subdominio que no corresponde. Tu cuenta está en otro espacio de trabajo.",
+    body_fallback: "Parece que iniciaste sesión desde un subdominio que no corresponde. Tu cuenta está en otro espacio.",
+    cta: "Ir a tu espacio {{name}}",
+    cta_fallback: "Volver a iniciar sesión",
+    sign_out_link: "¿No es tu cuenta? Cerrar sesión",
+  },
 } as const;

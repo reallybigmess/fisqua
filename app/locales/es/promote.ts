@@ -1,6 +1,11 @@
 /**
  * Spanish translations — promote namespace
  *
+ * This locale namespace carries the Spanish strings for the promote
+ * surface — the volume picker and the approved-entries table that
+ * lets a superadmin lift entries out of the cataloguing tree into the
+ * published archival data model.
+ *
  * @version v0.3.0
  */
 export default {

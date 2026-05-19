@@ -1,7 +1,14 @@
 /**
  * English translations — comments namespace
  *
- * @version v0.3.0
+ * This locale namespace carries the English strings for the entry-,
+ * page-, and QC-flag comment threads attached to volumes — the new
+ * comment composer, the reply affordance, the role labels, and the
+ * empty-state copy. Keys are deliberately Spanish in shape because
+ * the comment feature was first built in Spanish and the EN values
+ * map onto the same keys.
+ *
+ * @version v0.4.0
  */
 export default {
   comentarios: "Comments",
@@ -26,7 +33,7 @@ export default {
     page_label: "On this page",
   },
   on_page: "on page {{pageLabel}}",
-  // Task 13 (D-31) kebab menu + inline edit + delete confirm + state chips.
+  // Kebab menu + inline edit + delete confirm + state chips.
   // Keys are grouped by surface (kebab, confirm, edit, status, error) so
   // the component can fetch them with a short, predictable prefix.
   comments: {
@@ -71,4 +78,4 @@ export default {
   },
 } as const;
 
-// Version: v0.3.1 -- Phase 29.3 task 13I: comment kebab / confirm / status / edit copy (2026-04-18)
+// Version: v0.3.1 (2026-04-18) — comment kebab / confirm / status / edit copy

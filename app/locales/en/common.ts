@@ -1,6 +1,12 @@
 /**
  * English translations — common namespace
  *
+ * This locale namespace carries the cross-cutting English strings
+ * every other namespace builds on top of — the app brand name and the
+ * shared button vocabulary (Save, Cancel, Create, Delete, Apply,
+ * Clear). i18next loads it as the default namespace, so bare keys
+ * like `t("button.save")` resolve here without an explicit prefix.
+ *
  * @version v0.3.0
  */
 export default {

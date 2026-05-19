@@ -1,6 +1,13 @@
 /**
  * Spanish translations — user_admin namespace
  *
+ * This locale namespace carries the Spanish strings for the
+ * `/admin/users/*` surface — the system-users breadcrumb, the
+ * role-flag labels (superadministrador, gestor de usuarios,
+ * administrador de catalogación, catalogador, administrador de
+ * registros, usuario del archivo), and the per-row project count
+ * column.
+ *
  * @version v0.3.0
  */
 export default {

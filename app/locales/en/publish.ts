@@ -1,7 +1,17 @@
 /**
  * English translations — publish namespace
  *
- * @version v0.3.0
+ * This locale namespace carries the English strings for the
+ * `/admin/publish` superadmin surface — the run trigger, the in-flight
+ * progress panel, and the history table.
+ *
+ * The `progress.stepLabels` block lets the progress
+ * panel + history table render the per-fonds step IDs (`descriptions:`,
+ * `children:`, `mets:`, `ead:`, `dc:`) with localised labels rather than
+ * raw step prefixes. EN labels are presented for review alongside the
+ * matching ES translations in the plan summary.
+ *
+ * @version v0.4.0
  */
 export default {
   title: "Publish",
@@ -55,6 +65,17 @@ export default {
     reassurance: {
       children: "Writing per-parent children files — this is the longest step for large fonds. It is safe to leave the page open.",
       index: "Writing the descriptions index — almost done.",
+    },
+    stepLabels: {
+      descriptions: "Descriptions",
+      children: "Children files",
+      mets: "METS XML",
+      ead: "EAD3 finding aid",
+      dc: "Dublin Core records",
+      repositories: "Repositories",
+      entities: "Entities",
+      places: "Places",
+      index: "Descriptions index",
     },
   },
   history: {

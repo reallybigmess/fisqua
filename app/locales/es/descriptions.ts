@@ -1,10 +1,34 @@
 /**
- * Spanish translations — descriptions namespace
+ * Traducciones al español — namespace descriptions (administración)
  *
- * @version v0.3.0
+ * This locale namespace deals with las etiquetas de la administración
+ * para el formulario de descripción archivística estándar-consciente.
+ * Un solo namespace con
+ * sobreescrituras por estándar; claves por nombre de columna; las
+ * secciones también se traducen vía i18n. Las claves planas
+ * `field_X` / `section_X` de v0.3 se normalizan a claves anidadas
+ * `fields.<columna>` / `sections.<id>`, con las sobreescrituras por
+ * estándar como claves literales hermanas en el mismo nivel (p. ej.
+ * `sections["context.dacs"]` junto a `sections.context`).
+ *
+ * Configuración keySeparator (verificada 2026-05-03 contra
+ * `app/middleware/i18next.ts`): el proyecto NO establece
+ * `keySeparator: false`, así que i18next usa el separador punto por
+ * defecto. En ese modo, el resolver de i18next busca primero una
+ * coincidencia literal de la clave antes de descender; almacenar la
+ * sobreescritura como clave literal `"context.dacs"` resuelve
+ * correctamente vía `t("sections.context.dacs")` sin romper
+ * `t("sections.context")`. Esa es la forma que consume `tStd`
+ * (`app/lib/i18n/standard-aware.ts`).
+ *
+ * Estilo: español colombiano (forma tú, sin voseo). Nunca `querés`,
+ * `preferís`, `sabés`, `tenés`, `sos`; siempre `quieres`, `prefieres`,
+ * `sabes`, `tienes`, `eres`.
+ *
+ * @version v0.4.0
  */
 export default {
-  // Page
+  // Página
   page_title: "Descripciones",
   new_description: "Nueva descripción",
   create_description: "Crear descripción",
@@ -16,7 +40,7 @@ export default {
   delete_cancel: "Volver",
   move_button: "Mover...",
   move_title: "Mover descripción",
-  move_subtitle: "Seleccione el nuevo padre para '{{title}}'.",
+  move_subtitle: "Selecciona el nuevo padre para '{{title}}'.",
   move_confirm: "Confirmar movimiento",
   move_cancel: "Cancelar",
   add_child: "Agregar hijo",
@@ -28,28 +52,144 @@ export default {
     "Agrega la primera descripción o importa registros existentes.",
   filter_placeholder: "Filtrar...",
   ref_code_helper:
-    "Sugerido a partir del registro padre. Puede editarlo.",
+    "Sugerido a partir del registro padre. Lo puedes editar.",
   parent_helper: "Padre: {{parentTitle}}",
 
-  // ISAD(G) section headings
-  section_identity: "Identificación",
-  section_context: "Contexto",
-  section_content: "Contenido y estructura",
-  section_access: "Condiciones de acceso y uso",
-  section_allied: "Materiales relacionados",
-  section_notes: "Notas",
-  section_bibliographic: "Datos bibliográficos",
-  section_digital: "Objetos digitales",
-  section_entities: "Entidades vinculadas",
-  section_places: "Lugares vinculados",
+  // Etiquetas de sección: identificadas por el id estable en
+  // inglés desde los configs de estándar
+  // (`app/lib/standards/{isadg,dacs,rad}.ts`). Las sobreescrituras
+  // por estándar viven como claves literales hermanas (p. ej.
+  // `"context.dacs"`) y se resuelven vía `tStd(t,
+  // "sections.context", standard)`.
+  sections: {
+    // Compartidas (base ISAD(G) + solapamiento con DACS/RAD)
+    identity: "Identificación",
+    context: "Contexto",
+    content: "Contenido y estructura",
+    conditions: "Condiciones de acceso y uso",
+    allied: "Materiales relacionados",
+    notes: "Notas",
+    bibliographic: "Datos bibliográficos",
+    digital: "Objetos digitales",
+    entities: "Entidades vinculadas",
+    places: "Lugares vinculados",
 
-  // Entity/place linking
+    // Sobreescritura por estándar: DACS llama al bloque de contexto
+    // "Nota biográfica/histórica" en lugar de "Contexto".
+    "context.dacs": "Nota biográfica/histórica",
+
+    // Etiquetas específicas de DACS
+    description_control: "Control de la descripción",
+    acquisition: "Información de adquisición y valoración",
+    related_materials: "Materiales relacionados",
+    conditions_access: "Condiciones de acceso y uso",
+    rights: "Declaraciones de derechos",
+
+    // Etiquetas específicas de RAD
+    edition: "Edición",
+    // La sección RAD class-specific se renderiza vacía en v0.4 (no
+    // hay columnas cartográficas/arquitectónicas/filatélicas tras
+    // ver el encabezado de `app/lib/standards/rad.ts`).
+    class_specific: "Detalles específicos por clase de material",
+    dates_creation: "Fechas de creación",
+    physical_description: "Descripción física",
+    publishers_series: "Serie del editor",
+    archival_description: "Descripción archivística",
+    standard_number: "Número estándar",
+    access_points: "Puntos de acceso",
+  },
+
+  // Etiquetas de campo: identificadas por el nombre de la
+  // columna en `descriptions`. Las sobreescrituras por estándar como
+  // claves literales hermanas en el mismo nivel.
+  fields: {
+    // Área de identificación
+    referenceCode: "Código de referencia",
+    localIdentifier: "Identificador local",
+    title: "Título",
+    translatedTitle: "Título traducido",
+    uniformTitle: "Título uniforme",
+    descriptionLevel: "Nivel de descripción",
+    resourceType: "Tipo de recurso",
+    genre: "Género",
+    repositoryId: "Repositorio",
+    parentId: "Registro padre",
+    childCount: "Sub-elementos",
+
+    // Sobreescritura por estándar: RAD distingue "Title proper" de
+    // títulos suministrados/paralelos (1.1B1 / 2.1B); ISAD(G) y DACS
+    // usan el "Título" sin matices.
+    "title.rad": "Título propio",
+
+    // Fechas / extensión
+    dateExpression: "Fecha(s)",
+    dateStart: "Fecha de inicio",
+    dateEnd: "Fecha de fin",
+    dateCertainty: "Certeza de fecha",
+    extent: "Extensión",
+    dimensions: "Dimensiones",
+    medium: "Soporte",
+
+    // Contexto
+    creatorDisplay: "Creador",
+    provenance: "Historia custodial",
+    adminBiogHistory: "Historia administrativa/biográfica",
+
+    // Contenido y estructura
+    scopeContent: "Alcance y contenido",
+    systemOfArrangement: "Sistema de organización",
+    physicalCharacteristics: "Características físicas",
+    arrangement: "Organización",
+    ocrText: "Texto OCR",
+
+    // Condiciones
+    accessConditions: "Condiciones que rigen el acceso",
+    reproductionConditions: "Condiciones que rigen la reproducción",
+    language: "Idioma del material",
+
+    // Materiales relacionados
+    locationOfOriginals: "Localización de originales",
+    locationOfCopies: "Localización de copias",
+    findingAids: "Instrumentos de descripción",
+
+    // Notas / citación
+    notes: "Notas",
+    internalNotes: "Notas internas",
+    preferredCitation: "Citación preferida",
+
+    // Adquisición (DACS)
+    acquisitionInfo: "Información de adquisición",
+
+    // Bibliográficos
+    imprint: "Pie de imprenta",
+    editionStatement: "Mención de edición",
+    seriesStatement: "Mención de serie",
+    volumeNumber: "Número de volumen",
+    issueNumber: "Número de ejemplar",
+    pages: "Páginas",
+    sectionTitle: "Título de sección",
+    publicationTitle: "Título de la publicación",
+
+    // Control de descripción (RAD `standard_number` cae aquí)
+    descriptionsArchivists: "Archivistas",
+    revisionHistory: "Historial de revisiones",
+    languageOfDescription: "Idioma de la descripción",
+
+    // Identificador DBE (referencia cruzada de autoridad RAD)
+    dbeId: "Identificador DBE",
+
+    // Sustituto digital
+    iiifManifestUrl: "URL del manifiesto IIIF",
+    hasDigital: "Tiene sustituto digital",
+  },
+
+  // Vinculación de entidades/lugares
   add_entity: "Agregar entidad",
   add_place: "Agregar lugar",
   search_entity: "Buscar entidad...",
   search_place: "Buscar lugar...",
   role_label: "Rol",
-  // Entity roles (must match ENTITY_ROLES in lib/validation/enums.ts)
+  // Roles de entidad (deben coincidir con ENTITY_ROLES en lib/validation/enums.ts)
   role_creator: "Creador",
   role_author: "Autor",
   role_editor: "Editor",
@@ -81,13 +221,15 @@ export default {
   role_mortgagee: "Acreedor hipotecario",
   role_creditor: "Acreedor",
   role_debtor: "Deudor",
-  // Place roles (must match PLACE_ROLES in lib/validation/enums.ts)
+  role_fiador: "Fiador",
+  role_apoderado: "Apoderado",
+  // Roles de lugar (deben coincidir con PLACE_ROLES en lib/validation/enums.ts)
   role_created: "Creado",
   role_sent_from: "Enviado desde",
   role_sent_to: "Recibido en",
   role_published: "Publicado",
   role_venue: "Lugar",
-  honorific_label: "Honorificencia",
+  honorific_label: "Honorífico",
   function_label: "Función",
   name_as_recorded_label: "Nombre registrado",
   link_confirm: "Confirmar",
@@ -96,18 +238,18 @@ export default {
   remove_link_button: "Eliminar",
   no_results: "No se encontraron resultados",
 
-  // Draft/changelog
+  // Borrador / changelog
   commit_note_placeholder: "Nota sobre los cambios (opcional)",
   autosave_saving: "Guardando...",
   autosave_saved: "Borrador guardado",
   conflict_banner:
     "{{name}} tiene cambios sin guardar desde {{time}}.",
   overwrite_confirm:
-    "Este registro fue modificado por {{name}} a las {{time}}. ¿Desea sobreescribir?",
-  overwrite_button: "Sobreescribir",
+    "Este registro fue modificado por {{name}} a las {{time}}. ¿Deseas sobrescribir?",
+  overwrite_button: "Sobrescribir",
   overwrite_cancel: "Cancelar",
 
-  // Publishing
+  // Publicación
   published_badge: "Publicada",
   unpublished_badge: "No publicada",
   pending_publish: "Pendiente de publicación",
@@ -116,8 +258,8 @@ export default {
   publish_action: "Publicar",
   unpublish_action: "Despublicar",
 
-  // Errors
-  error_generic: "Ocurrió un error. Intenta de nuevo.",
+  // Errores
+  error_generic: "Ocurrió un error. Inténtalo de nuevo.",
   error_required: "Este campo es obligatorio.",
   error_duplicate_ref:
     "Ya existe una descripción con ese código de referencia.",
@@ -128,11 +270,11 @@ export default {
   error_delete_cascade:
     "Al eliminar esta descripción se eliminarán {{entityCount}} vínculos con entidades y {{placeCount}} vínculos con lugares.",
   error_delete_confirm:
-    "¿Está seguro de que desea eliminar {{title}}? Esta acción no se puede deshacer.",
+    "¿Estás seguro de que deseas eliminar {{title}}? Esta acción no se puede deshacer.",
   error_move_children:
     "Esta descripción tiene {{count}} hijos que también se moverán.",
 
-  // Success
+  // Éxito
   success_created: "Descripción creada.",
   success_updated: "Descripción actualizada.",
   success_deleted: "Descripción eliminada.",
@@ -143,55 +285,13 @@ export default {
   success_place_linked: "Lugar vinculado.",
   success_link_removed: "Vínculo eliminado.",
 
-  // Field labels
-  field_referenceCode: "Código de referencia",
-  field_localIdentifier: "Identificador local",
-  field_title: "Título",
-  field_translatedTitle: "Título traducido",
-  field_uniformTitle: "Título uniforme",
-  field_descriptionLevel: "Nivel de descripción",
-  field_resourceType: "Tipo de recurso",
-  field_genre: "Género",
-  field_dateExpression: "Expresión de fecha",
-  field_childCount: "Sub-elementos",
-  field_dateStart: "Fecha inicio",
-  field_dateEnd: "Fecha fin",
-  field_dateCertainty: "Certeza de fecha",
-  field_extent: "Extensión",
-  field_dimensions: "Dimensiones",
-  field_medium: "Soporte",
-  field_provenance: "Procedencia",
-  field_scopeContent: "Alcance y contenido",
-  field_arrangement: "Organización",
-  field_ocrText: "Texto OCR",
-  field_accessConditions: "Condiciones de acceso",
-  field_reproductionConditions: "Condiciones de reproducción",
-  field_language: "Idioma",
-  field_locationOfOriginals: "Localización de originales",
-  field_locationOfCopies: "Localización de copias",
-  field_relatedMaterials: "Materiales relacionados",
-  field_findingAids: "Instrumentos de descripción",
-  field_notes: "Notas",
-  field_internalNotes: "Notas internas",
-  field_imprint: "Pie de imprenta",
-  field_editionStatement: "Mención de edición",
-  field_seriesStatement: "Mención de serie",
-  field_volumeNumber: "Número de volumen",
-  field_issueNumber: "Número de ejemplar",
-  field_pages: "Páginas",
-  field_sectionTitle: "Título de sección",
-  field_iiifManifestUrl: "URL de manifiesto IIIF",
-  field_hasDigital: "Material digitalizado",
-  field_repositoryId: "Repositorio",
-  field_parentId: "Registro padre",
-
-  // Accessibility labels
+  // Etiquetas de accesibilidad
   aria_move_up: "Mover arriba",
   aria_move_down: "Mover abajo",
   aria_edit_link: "Editar vínculo",
   aria_remove_link: "Eliminar vínculo con {{name}}",
 
-  // Description level display names
+  // Nombres de los niveles de descripción
   level_fonds: "Fondo",
   level_subfonds: "Subfondo",
   level_series: "Serie",
@@ -202,11 +302,11 @@ export default {
   level_section: "Sección",
   level_volume: "Volumen",
 
-  // View toggle
+  // Vista
   view_tree: "Árbol de archivos",
   view_columns: "Vista de columnas",
 
-  // Column view table headers
+  // Encabezados de tabla en la vista de columnas
   col_reference_code: "Código de referencia",
   col_title: "Título",
   col_level: "Nivel",
@@ -215,21 +315,21 @@ export default {
   col_parent_code: "Código padre",
   col_toggle: "Columnas",
 
-  // Column view filters
+  // Filtros de la vista de columnas
   filter_level: "Nivel de descripción",
   filter_repository: "Repositorio",
   filter_has_digital: "Tiene objeto digital",
   search_descriptions: "Buscar por título o código de referencia...",
 
-  // Tree browser
+  // Navegador del árbol
   root_column_title: "Contenido",
   loading: "Cargando...",
 
-  // No manifest placeholder
+  // Marcador de posición sin manifiesto
   no_manifest: "No hay material digitalizado",
   add_manifest: "Agregar URL de manifiesto IIIF",
 
-  // IIIF viewer
+  // Visor IIIF
   loading_manifest: "Cargando manifiesto...",
   empty_manifest: "No se encontraron páginas en el manifiesto",
   manifest_load_error: "No se pudo cargar el manifiesto",
@@ -238,3 +338,5 @@ export default {
   prev_page: "Página anterior",
   next_page: "Página siguiente",
 } as const;
+
+/* @version v0.4.0 */

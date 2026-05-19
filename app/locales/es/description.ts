@@ -1,7 +1,47 @@
 /**
- * Spanish translations — description namespace
+ * Spanish translations — description namespace (cataloguing)
  *
- * @version v0.3.0
+ * This locale namespace deals with the cataloguing-side labels for the
+ * segmentation/viewer-context description form. Mirrors the EN namespace
+ * shape one-to-one (English KEYS, Spanish VALUES). Both files share
+ * `satisfies ResourceLanguage` against the common `app/locales/en.ts`
+ * shape; one without the other would fail the `i18n-completeness.test.ts`
+ * keystone.
+ *
+ * Spanish style: Colombian Spanish, tú-form, no voseo. Never `querés`,
+ * `preferís`, `sabés`, `tenés`, `sos`; always `quieres`, `prefieres`,
+ * `sabes`, `tienes`, `eres`.
+ *
+ * Description-level keys: deprecated `expediente` and `unidad_documental`
+ * (legacy level names) replaced with the canonical `DESCRIPTION_LEVELS`
+ * enum from `app/lib/validation/enums.ts`. Spanish value rendering
+ * follows Zasqua's archival-terminology conventions — file =
+ * "Expediente", item = "Unidad documental simple", and the rest follow
+ * the canonical ISAD(G) Spanish renditions used elsewhere in the
+ * codebase.
+ *
+ * Save-status keys bajo `editor:` — `save_status_error` ("Error al
+ * guardar", convención colombiana preferida a la calcada "Falló el
+ * guardado"), `save_failed_retry` ("No se pudo guardar — reintentar",
+ * em-dash con espacios, sin voseo), y `save_now` ("Guardar ahora").
+ *
+ * Unsaved-navigation key bajo `editor:` — `unsaved_confirm_leave`
+ * ("Tienes cambios sin guardar. ¿Salir de todas formas?"). Forma tú
+ * (sin voseo). Es el prompt heredado de `window.confirm(...)` que
+ * dispara `useBlocker` antes de proceder con una navegación interna
+ * mientras hay trabajo no guardado o no resuelto.
+ *
+ * Modal personalizado de cambios sin guardar — cuatro claves bajo
+ * `editor:`: `unsaved_dialog_title`, `unsaved_dialog_body`,
+ * `unsaved_dialog_stay`, `unsaved_dialog_leave` — con el texto del
+ * `<UnsavedChangesDialog>` que reemplaza el `window.confirm` nativo.
+ * Forma tú (sin voseo); se conserva "Salir de todas formas" para
+ * mantener consistencia con la clave heredada `unsaved_confirm_leave`.
+ * El cuerpo del diálogo usa el registro impersonal "no se haya
+ * guardado" para el cierre y tú-form para la apertura ("Tienes
+ * cambios").
+ *
+ * @version v0.4.1
  */
 export default {
   status: {
@@ -14,37 +54,37 @@ export default {
     sent_back: "Devuelto",
   },
   sections: {
-    identificacion: "Identificación",
-    descripcion_fisica: "Descripción física",
-    contenido: "Contenido",
-    acceso_condiciones: "Acceso y condiciones",
-    notas: "Notas",
-    personas_lugares: "Personas y lugares",
+    identity: "Identificación",
+    physical_description: "Descripción física",
+    content: "Contenido",
+    conditions_access: "Acceso y condiciones",
+    notes: "Notas",
+    entities_places: "Personas y lugares",
   },
   fields: {
-    titulo: "Título",
-    titulo_traducido: "Título traducido",
-    titulo_traducido_hint: "English translation",
-    nivel_descripcion: "Nivel de descripción",
-    tipo_recurso: "Tipo de recurso",
-    fecha: "Fecha",
-    fecha_placeholder: "1815-1820, ca. 1823",
-    fecha_inicial: "Fecha inicial",
-    fecha_final: "Fecha final",
-    extension: "Extensión",
-    extension_placeholder: "6 folios, 1 cuaderno",
-    dimensiones: "Dimensiones",
-    dimensiones_placeholder: "21 x 15 cm",
-    medio_soporte: "Medio/Soporte",
-    medio_soporte_placeholder: "papel",
-    alcance_contenido: "Alcance y contenido",
-    idioma: "Idioma",
-    idioma_placeholder: "español, latín",
-    signatura_original: "Signatura original",
-    notas_generales: "Notas generales",
-    notas_archivero: "Notas del archivero",
-    codigo_referencia: "Código de referencia",
-    opcional: "Opcional",
+    title: "Título",
+    translatedTitle: "Título traducido",
+    translatedTitle_hint: "Traducción al inglés",
+    descriptionLevel: "Nivel de descripción",
+    resourceType: "Tipo de recurso",
+    dateExpression: "Fecha",
+    dateExpression_placeholder: "1815-1820, ca. 1823",
+    dateStart: "Fecha inicial",
+    dateEnd: "Fecha final",
+    extent: "Extensión",
+    extent_placeholder: "6 folios, 1 cuaderno",
+    dimensions: "Dimensiones",
+    dimensions_placeholder: "21 x 15 cm",
+    medium: "Medio/Soporte",
+    medium_placeholder: "papel",
+    scopeContent: "Alcance y contenido",
+    language: "Idioma",
+    language_placeholder: "español, latín",
+    originalReference: "Signatura original",
+    notes: "Notas generales",
+    internalNotes: "Notas del archivero",
+    referenceCode: "Código de referencia",
+    optional: "Opcional",
   },
   resource_types: {
     texto: "Texto",
@@ -53,9 +93,15 @@ export default {
     mixto: "Mixto",
   },
   description_levels: {
-    item: "Item",
-    expediente: "Expediente",
-    unidad_documental: "Unidad documental",
+    fonds: "Fondo",
+    subfonds: "Subfondo",
+    series: "Serie",
+    subseries: "Subserie",
+    file: "Expediente",
+    item: "Unidad documental simple",
+    collection: "Colección",
+    section: "Sección",
+    volume: "Volumen",
   },
   actions: {
     enviar_para_revision: "Enviar para revisión",
@@ -128,7 +174,7 @@ export default {
     seccion_incompleta: "Sección incompleta",
   },
   locked: {
-    personas_lugares: "La vinculación de personas y lugares estará disponible próximamente",
+    entities_places: "La vinculación de personas y lugares estará disponible próximamente",
   },
   editor: {
     subtitle: "Catalogación — Descripción",
@@ -139,6 +185,15 @@ export default {
     save_status_saved: "Guardado",
     save_status_saving: "Guardando...",
     save_status_unsaved: "Sin guardar",
+    save_status_error: "Error al guardar",
+    save_failed_retry: "No se pudo guardar — reintentar",
+    save_now: "Guardar ahora",
+    unsaved_confirm_leave: "Tienes cambios sin guardar. ¿Salir de todas formas?",
+    unsaved_dialog_title: "Cambios sin guardar",
+    unsaved_dialog_body:
+      "Tienes cambios sin guardar. Si sales de esta página ahora, vas a perder cualquier trabajo que no se haya guardado todavía.",
+    unsaved_dialog_stay: "Seguir en la página",
+    unsaved_dialog_leave: "Salir de todas formas",
     pantalla_completa: "Expandir",
     contraer_imagen: "Contraer",
     descripcion_pausada: "La descripción de este volumen está pausada por un reporte de re-segmentación",
@@ -161,4 +216,13 @@ export default {
     enviar_reporte: "Enviar reporte",
     cancelar: "Cancelar",
   },
+  // Tokens de error emitidos por el validador (CR-04). Mantener en
+  // paralelo con el namespace administrativo `descriptions` para que
+  // los códigos estables `field_required` / `invalid_level` se
+  // resuelvan a texto localizado en ambas superficies.
+  error_required: "Este campo es obligatorio para el estándar activo.",
+  error_invalid_level:
+    "Este nivel no es válido para el nivel de la descripción padre.",
 } as const;
+
+/* @version v0.4.1 */

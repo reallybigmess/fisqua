@@ -1,7 +1,13 @@
 /**
  * Spanish translations — qc_flags namespace
  *
- * @version v0.3.0
+ * This locale namespace carries the Spanish strings for the QC-flag
+ * dialog cataloguers open from the viewer to report a problem with a
+ * scanned image — the problem-type radio group (deteriorada,
+ * ilegible, mal ordenada, fuera de alcance, otra) plus their
+ * explanatory subtitles.
+ *
+ * @version v0.4.0
  */
 export default {
   dialog: {
@@ -73,4 +79,4 @@ export default {
   },
 } as const;
 
-// Version: v0.3.1 - Phase 29.3 cleanup (2026-04-18)
+// Version: v0.3.1 (2026-04-18) — cleanup

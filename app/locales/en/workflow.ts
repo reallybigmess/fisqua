@@ -1,6 +1,11 @@
 /**
  * English translations — workflow namespace
  *
+ * This locale namespace carries the English strings for the
+ * cataloguing workflow state machine — the six status labels
+ * (unstarted, in progress, segmented, sent back, reviewed, approved)
+ * and the action labels that drive transitions between them.
+ *
  * @version v0.3.0
  */
 export default {

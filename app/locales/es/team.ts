@@ -1,6 +1,11 @@
 /**
  * Spanish translations — team namespace
  *
+ * This locale namespace carries the Spanish strings for the
+ * collaborative-cataloguing team page — the cross-project member
+ * table, the project-assignment dialog, and the load indicators that
+ * surface active volumes and entries per cataloguer.
+ *
  * @version v0.3.0
  */
 export default {

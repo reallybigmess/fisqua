@@ -1,6 +1,12 @@
 /**
  * Spanish translations — pipeline namespace
  *
+ * This locale namespace carries the Spanish strings for the
+ * cross-project pipeline view — the global heading, the assign-
+ * describer affordance, the team search box, and the per-row time
+ * indicators ("hoy", "{{count}}d") that the pipeline table renders
+ * for each unit in flight.
+ *
  * @version v0.3.0
  */
 export default {

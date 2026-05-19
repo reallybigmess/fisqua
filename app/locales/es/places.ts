@@ -1,6 +1,11 @@
 /**
  * Spanish translations — places namespace
  *
+ * This locale namespace carries the Spanish strings for the places
+ * admin surface — the page heading, the create/edit form, and the
+ * primary call-to-action. Places follow the Linked Places conventions
+ * the rest of the entities surface uses.
+ *
  * @version v0.3.0
  */
 export default {

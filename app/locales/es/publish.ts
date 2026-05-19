@@ -1,7 +1,16 @@
 /**
  * Spanish translations — publish namespace
  *
- * @version v0.3.0
+ * This locale namespace carries the Spanish strings for the
+ * `/admin/publish` superadmin surface — the run trigger, the
+ * in-flight progress panel, and the history table.
+ *
+ * El bloque `progress.stepLabels` permite que el panel
+ * de progreso y la tabla de historial muestren los IDs de paso por fondo
+ * (`descriptions:`, `children:`, `mets:`, `ead:`, `dc:`) con etiquetas
+ * localizadas en español colombiano (sin voseo: tú, prefieres, sabes).
+ *
+ * @version v0.4.0
  */
 export default {
   title: "Publicar",
@@ -55,6 +64,17 @@ export default {
     reassurance: {
       children: "Escribiendo los archivos de hijos por cada elemento padre — es el paso más largo para los fondos grandes. Puede dejar la página abierta sin problema.",
       index: "Escribiendo el índice de descripciones — casi terminado.",
+    },
+    stepLabels: {
+      descriptions: "Descripciones",
+      children: "Archivos de hijos",
+      mets: "METS XML",
+      ead: "Instrumento de descripción EAD3",
+      dc: "Registros Dublin Core",
+      repositories: "Repositorios",
+      entities: "Entidades",
+      places: "Lugares",
+      index: "Índice de descripciones",
     },
   },
   history: {

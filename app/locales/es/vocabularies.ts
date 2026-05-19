@@ -1,6 +1,12 @@
 /**
  * Spanish translations — vocabularies namespace
  *
+ * This locale namespace carries the Spanish strings for the
+ * controlled-vocabulary admin surface — the page heading, the
+ * term-management affordances (add, save, approve, deprecate), and
+ * the merge/split workflow labels that authority editors use to keep
+ * the function and subject vocabularies tidy.
+ *
  * @version v0.3.0
  */
 export default {

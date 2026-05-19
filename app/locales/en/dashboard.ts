@@ -1,6 +1,11 @@
 /**
  * English translations — dashboard namespace
  *
+ * This locale namespace carries the English strings for the
+ * authenticated-tree chrome — the primary side-nav (Home, Projects,
+ * Members, My assignments, All volumes, Settings, Log out, Admin) and
+ * the per-section headings on the dashboard surface.
+ *
  * @version v0.3.0
  */
 export default {

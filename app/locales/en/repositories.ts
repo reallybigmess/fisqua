@@ -1,6 +1,12 @@
 /**
  * English translations — repositories namespace
  *
+ * This locale namespace carries the English strings for the
+ * repositories admin surface — the list page, the create/edit form,
+ * and the destructive actions. Repositories are the top-level
+ * institutional anchors the description tree hangs off, so the labels
+ * follow ISAAR(CPF)'s phrasing for archival institutions.
+ *
  * @version v0.3.0
  */
 export default {

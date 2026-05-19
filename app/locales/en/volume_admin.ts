@@ -1,6 +1,12 @@
 /**
  * English translations — volume_admin namespace
  *
+ * This locale namespace carries the English strings for the volume
+ * detail page under `/admin/volumes/$id` — the breadcrumb, the
+ * "open in viewer" affordance, the section headings (progress,
+ * assignments, workflow, metadata, danger zone) and the empty-state
+ * copy for the entries table.
+ *
  * @version v0.3.0
  */
 export default {

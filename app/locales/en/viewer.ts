@@ -1,7 +1,33 @@
 /**
  * English translations — viewer namespace
  *
- * @version v0.3.0
+ * This locale namespace carries the English strings for the
+ * segmentation viewer — the toolbar, the boundary-state save status,
+ * the unsaved-changes prompts, and the custom unsaved-changes modal
+ * that replaces the native `window.confirm` on in-app navigation.
+ *
+ * Save-status keys under `save_status:` — `error` (the four-state
+ * addition for the new madder/red state), `save_failed_retry` (the
+ * visible retry affordance label), and `save_now` (wired to the
+ * Cmd/Ctrl+S handler and the visible Save now button).
+ *
+ * Unsaved-navigation key under `save_status:` —
+ * `unsaved_confirm_leave` is the legacy `window.confirm(...)` prompt
+ * fired by `useBlocker` in the viewer route before proceeding with
+ * an outgoing in-app navigation while the boundary state is dirty,
+ * saving, or settled to error. Mirrors the description editor
+ * wording verbatim so cataloguers see the same prompt in both
+ * editors.
+ *
+ * Custom unsaved-changes modal — four keys under `save_status:`:
+ * `unsaved_dialog_title`, `unsaved_dialog_body`,
+ * `unsaved_dialog_stay`, `unsaved_dialog_leave` — carry the strings
+ * for the in-app `<UnsavedChangesDialog>` that replaces the native
+ * `window.confirm`. Strings mirror the description namespace
+ * verbatim so cataloguers see the same dialog in both editors. The
+ * legacy `unsaved_confirm_leave` key stays in place.
+ *
+ * @version v0.4.1
  */
 export default {
   toolbar: {
@@ -25,6 +51,15 @@ export default {
     saved: "Saved",
     saving: "Saving...",
     unsaved: "Unsaved",
+    error: "Save failed",
+    save_failed_retry: "Save failed — retry",
+    save_now: "Save now",
+    unsaved_confirm_leave: "You have unsaved changes. Leave anyway?",
+    unsaved_dialog_title: "Unsaved changes",
+    unsaved_dialog_body:
+      "You have unsaved changes. If you leave this page now, any work that has not been saved will be lost.",
+    unsaved_dialog_stay: "Stay on page",
+    unsaved_dialog_leave: "Leave anyway",
   },
   move_tool: {
     not_author: "You can only move your own annotations.",
@@ -70,7 +105,7 @@ export default {
     has_comments: "Has comments",
     reviewer_comment_label: "Reviewer comment:",
     accepting: "Accepting...",
-    // Task 14 (CONTEXT rev 4): outline comment-card labels and the D-26
+    // Outline comment-card labels and the
     // entry-delete warning copy.
     comment_kind_annotation: "Annotation",
     comment_kind_comment: "Comment",
@@ -90,7 +125,7 @@ export default {
       not_assigned: "Read-only -- you are not assigned to this volume",
     },
   },
-  // Task 14.E (D-25): mandatory-comment prompt dialog.
+  // Mandatory-comment prompt dialog.
   comment_prompt: {
     title: "Add a comment",
     placeholder: "Write your comment...",
@@ -101,3 +136,5 @@ export default {
     error_server: "Could not save. Please try again.",
   },
 } as const;
+
+/* @version v0.4.1 */

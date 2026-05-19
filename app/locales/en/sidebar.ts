@@ -1,6 +1,11 @@
 /**
  * English translations — sidebar namespace
  *
+ * This locale namespace carries the English strings for the staff
+ * sidebar — the top-level navigation links that anchor the
+ * `_auth` chrome (Home, My projects, Descriptions, Entities, Places,
+ * Repositories, Publish, Promote, Collaborative cataloguing).
+ *
  * @version v0.3.0
  */
 export default {

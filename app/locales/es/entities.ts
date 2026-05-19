@@ -1,6 +1,11 @@
 /**
  * Spanish translations — entities namespace
  *
+ * This locale namespace carries the Spanish strings for the entities
+ * admin surface — the page heading, the create/edit form, and the
+ * primary call-to-action. Entities follow ISAAR(CPF), so the labels
+ * stay close to the standard's preferred Spanish phrasing.
+ *
  * @version v0.3.0
  */
 export default {

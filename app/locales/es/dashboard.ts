@@ -1,7 +1,13 @@
 /**
  * Spanish translations — dashboard namespace
  *
- * @version v0.3.0
+ * This locale namespace carries the Spanish strings for the
+ * authenticated-tree chrome — the primary side-nav (Inicio, Proyectos,
+ * Miembros, Mis asignaciones, Todas las unidades compuestas,
+ * Configuración, Cerrar sesión, Administración) and the per-section
+ * headings on the dashboard surface.
+ *
+ * @version v0.4.0
  */
 export default {
   nav: {
@@ -138,4 +144,4 @@ export default {
   },
 } as const;
 
-// Version: v0.3.0 - Phase 29.2 page-level annotations (2026-04-17)
+// Version: v0.3.0 (2026-04-17) — page-level annotations

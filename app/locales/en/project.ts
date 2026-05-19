@@ -1,6 +1,11 @@
 /**
  * English translations — project namespace
  *
+ * This locale namespace carries the English strings for the
+ * project-settings surface inside the `_auth.projects.$id` tree —
+ * the general-settings form (name, manifest URL, contact email, role,
+ * description, conventions) and the surrounding section labels.
+ *
  * @version v0.3.0
  */
 export default {

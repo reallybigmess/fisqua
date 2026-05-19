@@ -1,7 +1,35 @@
 /**
- * English translations — descriptions namespace
+ * English translations — descriptions namespace (admin)
  *
- * @version v0.3.0
+ * This locale namespace deals with the admin-side labels for the
+ * standard-aware description form.
+ * Single namespace with per-standard overrides as sibling literal-string
+ * keys; column-name keys; sections are i18n-keyed too. The flat
+ * `field_X` / `section_X` keys from v0.3 normalise to nested
+ * `fields.<columnName>` / `sections.<id>` keys, with per-standard
+ * overrides as sibling literal-string keys at the same nesting level
+ * (e.g. `sections["context.dacs"]` lives next to `sections.context`).
+ *
+ * keySeparator setting (verified 2026-05-03 against
+ * `app/middleware/i18next.ts`): the project does NOT set
+ * `keySeparator: false`, so i18next uses its default dot separator.
+ * In that mode i18next's resolver checks for an exact literal-key
+ * match before drilling, so storing the override as a literal key
+ * `"context.dacs"` resolves correctly via `t("sections.context.dacs")`
+ * without breaking `t("sections.context")`. This is the shape `tStd`
+ * (`app/lib/i18n/standard-aware.ts`) consumes — `tStd(t,
+ * "sections.context", "dacs")` resolves the override; `tStd(t,
+ * "sections.context", "isadg")` falls back to the bare key.
+ *
+ * Section ID rename: `section_access` (v0.3) → `sections.conditions`
+ * — matches the `accessConditions` column area concept and aligns
+ * with `app/lib/standards/isadg.ts`'s ISAD 3.4 section id.
+ *
+ * The legacy related-materials flat key is removed: the corresponding
+ * column was dropped in migration 0036 (0% populated in the production
+ * audit); the locale entry is removed in lockstep.
+ *
+ * @version v0.4.0
  */
 export default {
   // Page
@@ -31,17 +59,131 @@ export default {
     "Suggested from parent record. You can edit it.",
   parent_helper: "Parent: {{parentTitle}}",
 
-  // ISAD(G) section headings
-  section_identity: "Identification",
-  section_context: "Context",
-  section_content: "Content and structure",
-  section_access: "Conditions of access and use",
-  section_allied: "Allied materials",
-  section_notes: "Notes",
-  section_bibliographic: "Bibliographic data",
-  section_digital: "Digital objects",
-  section_entities: "Linked entities",
-  section_places: "Linked places",
+  // Section labels: keyed by stable English section id from the
+  // standard configs (`app/lib/standards/{isadg,dacs,rad}.ts`). Per-
+  // standard overrides live as sibling literal keys (e.g.
+  // `"context.dacs"`) and resolve via `tStd(t, "sections.context",
+  // standard)` — see file header note on keySeparator semantics.
+  sections: {
+    // Shared (ISAD(G) baseline + DACS/RAD overlapping)
+    identity: "Identification",
+    context: "Context",
+    content: "Content and structure",
+    conditions: "Conditions of access and use",
+    allied: "Allied materials",
+    notes: "Notes",
+    bibliographic: "Bibliographic data",
+    digital: "Digital objects",
+    entities: "Linked entities",
+    places: "Linked places",
+
+    // Per-standard override: DACS calls the context block
+    // "Biographical/Historical Note" rather than "Context".
+    "context.dacs": "Biographical/Historical Note",
+
+    // DACS-specific section labels
+    description_control: "Description Control",
+    acquisition: "Acquisition and Appraisal Information",
+    related_materials: "Related Materials",
+    conditions_access: "Conditions of Access and Use",
+    rights: "Rights Statements",
+
+    // RAD-specific section labels
+    edition: "Edition",
+    // RAD class-specific section renders empty in v0.4 (no
+    // cartographic/architectural/philatelic columns post-Phase-30; see
+    // `app/lib/standards/rad.ts` header).
+    class_specific: "Class of Materials Specific Details",
+    dates_creation: "Dates of Creation",
+    physical_description: "Physical Description",
+    publishers_series: "Publisher's Series",
+    archival_description: "Archival Description",
+    standard_number: "Standard Number",
+    access_points: "Access Points",
+  },
+
+  // Field labels: keyed by column name on `descriptions`.
+  // Per-standard overrides as sibling literal keys at the same level.
+  fields: {
+    // Identity area
+    referenceCode: "Reference code",
+    localIdentifier: "Local identifier",
+    title: "Title",
+    translatedTitle: "Translated title",
+    uniformTitle: "Uniform title",
+    descriptionLevel: "Level of description",
+    resourceType: "Resource type",
+    genre: "Genre",
+    repositoryId: "Repository",
+    parentId: "Parent record",
+    childCount: "Child items",
+
+    // Per-standard override: RAD distinguishes "Title proper" from
+    // supplied/parallel titles (1.1B1 / 2.1B); ISAD(G) and DACS use
+    // the bare "Title".
+    "title.rad": "Title proper",
+
+    // Date / extent
+    dateExpression: "Date(s)",
+    dateStart: "Start date",
+    dateEnd: "End date",
+    dateCertainty: "Date certainty",
+    extent: "Extent",
+    dimensions: "Dimensions",
+    medium: "Medium",
+
+    // Context
+    creatorDisplay: "Creator",
+    provenance: "Custodial history",
+    adminBiogHistory: "Administrative/Biographical history",
+
+    // Content and structure
+    scopeContent: "Scope and content",
+    systemOfArrangement: "System of arrangement",
+    physicalCharacteristics: "Physical characteristics",
+    arrangement: "Arrangement",
+    ocrText: "OCR text",
+
+    // Conditions
+    accessConditions: "Conditions governing access",
+    reproductionConditions: "Conditions governing reproduction",
+    language: "Language of materials",
+
+    // Allied materials
+    locationOfOriginals: "Location of originals",
+    locationOfCopies: "Location of copies",
+    findingAids: "Finding aids",
+
+    // Notes / citation
+    notes: "Notes",
+    internalNotes: "Internal notes",
+    preferredCitation: "Preferred citation",
+
+    // Acquisition (DACS)
+    acquisitionInfo: "Acquisition information",
+
+    // Bibliographic
+    imprint: "Imprint",
+    editionStatement: "Edition statement",
+    seriesStatement: "Series statement",
+    volumeNumber: "Volume number",
+    issueNumber: "Issue number",
+    pages: "Pages",
+    sectionTitle: "Section title",
+    publicationTitle: "Publication title",
+
+    // Description control (RAD `standard_number` analogue lands here)
+    descriptionsArchivists: "Archivists",
+    revisionHistory: "Revision history",
+    languageOfDescription: "Language of description",
+
+    // DBE identifier (RAD authority cross-reference)
+    dbeId: "DBE identifier",
+
+    // Digital surrogate
+    iiifManifestUrl: "IIIF manifest URL",
+    hasDigital: "Has digital surrogate",
+  },
 
   // Entity/place linking
   add_entity: "Add entity",
@@ -81,6 +223,8 @@ export default {
   role_mortgagee: "Mortgagee",
   role_creditor: "Creditor",
   role_debtor: "Debtor",
+  role_fiador: "Surety",
+  role_apoderado: "Attorney-in-Fact",
   // Place roles (must match PLACE_ROLES in lib/validation/enums.ts)
   role_created: "Created",
   role_sent_from: "Sent from",
@@ -143,48 +287,6 @@ export default {
   success_place_linked: "Place linked.",
   success_link_removed: "Link removed.",
 
-  // Field labels
-  field_referenceCode: "Reference code",
-  field_localIdentifier: "Local identifier",
-  field_title: "Title",
-  field_translatedTitle: "Translated title",
-  field_uniformTitle: "Uniform title",
-  field_descriptionLevel: "Description level",
-  field_resourceType: "Resource type",
-  field_genre: "Genre",
-  field_dateExpression: "Date expression",
-  field_childCount: "Child items",
-  field_dateStart: "Start date",
-  field_dateEnd: "End date",
-  field_dateCertainty: "Date certainty",
-  field_extent: "Extent",
-  field_dimensions: "Dimensions",
-  field_medium: "Medium",
-  field_provenance: "Provenance",
-  field_scopeContent: "Scope and content",
-  field_arrangement: "Arrangement",
-  field_ocrText: "OCR text",
-  field_accessConditions: "Access conditions",
-  field_reproductionConditions: "Reproduction conditions",
-  field_language: "Language",
-  field_locationOfOriginals: "Location of originals",
-  field_locationOfCopies: "Location of copies",
-  field_relatedMaterials: "Related materials",
-  field_findingAids: "Finding aids",
-  field_notes: "Notes",
-  field_internalNotes: "Internal notes",
-  field_imprint: "Imprint",
-  field_editionStatement: "Edition statement",
-  field_seriesStatement: "Series statement",
-  field_volumeNumber: "Volume number",
-  field_issueNumber: "Issue number",
-  field_pages: "Pages",
-  field_sectionTitle: "Section title",
-  field_iiifManifestUrl: "IIIF manifest URL",
-  field_hasDigital: "Digitized material",
-  field_repositoryId: "Repository",
-  field_parentId: "Parent record",
-
   // Accessibility labels
   aria_move_up: "Move up",
   aria_move_down: "Move down",
@@ -238,3 +340,5 @@ export default {
   prev_page: "Previous page",
   next_page: "Next page",
 } as const;
+
+/* @version v0.4.0 */

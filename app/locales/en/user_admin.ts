@@ -1,6 +1,12 @@
 /**
  * English translations — user_admin namespace
  *
+ * This locale namespace carries the English strings for the
+ * `/admin/users/*` surface — the system-users breadcrumb, the
+ * role-flag labels (super admin, user manager, cataloguing admin,
+ * cataloguer, records admin, archive user), and the per-row project
+ * count column.
+ *
  * @version v0.3.0
  */
 export default {

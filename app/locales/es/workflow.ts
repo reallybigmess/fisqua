@@ -1,6 +1,11 @@
 /**
  * Spanish translations — workflow namespace
  *
+ * This locale namespace carries the Spanish strings for the
+ * cataloguing workflow state machine — the six status labels
+ * (sin comenzar, en curso, segmentado, necesita revisión, revisado,
+ * aprobado) and the action labels that drive transitions between them.
+ *
  * @version v0.3.0
  */
 export default {
