@@ -286,12 +286,12 @@ export async function applyMigrations() {
   await db.exec("CREATE INDEX IF NOT EXISTS place_label_idx ON places(label)");
   await db.exec("CREATE INDEX IF NOT EXISTS place_tgn_idx ON places(tgn_id)");
 
-  await db.exec("CREATE TABLE IF NOT EXISTS description_entities (id TEXT PRIMARY KEY NOT NULL, description_id TEXT NOT NULL REFERENCES descriptions(id) ON DELETE CASCADE, entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE RESTRICT, role TEXT NOT NULL, role_note TEXT, sequence INTEGER DEFAULT 0 NOT NULL, honorific TEXT, function TEXT, name_as_recorded TEXT, created_at INTEGER NOT NULL)");
+  await db.exec("CREATE TABLE IF NOT EXISTS description_entities (id TEXT PRIMARY KEY NOT NULL, description_id TEXT NOT NULL REFERENCES descriptions(id) ON DELETE CASCADE, entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE RESTRICT, role TEXT NOT NULL, role_note TEXT, role_raw TEXT, sequence INTEGER DEFAULT 0 NOT NULL, honorific TEXT, function TEXT, name_as_recorded TEXT, created_at INTEGER NOT NULL)");
   await db.exec("CREATE INDEX IF NOT EXISTS de_desc_idx ON description_entities(description_id)");
   await db.exec("CREATE INDEX IF NOT EXISTS de_entity_role_idx ON description_entities(entity_id, role)");
   await db.exec("CREATE UNIQUE INDEX IF NOT EXISTS de_unique_idx ON description_entities(description_id, entity_id, role)");
 
-  await db.exec("CREATE TABLE IF NOT EXISTS description_places (id TEXT PRIMARY KEY NOT NULL, description_id TEXT NOT NULL REFERENCES descriptions(id) ON DELETE CASCADE, place_id TEXT NOT NULL REFERENCES places(id) ON DELETE RESTRICT, role TEXT NOT NULL, role_note TEXT, created_at INTEGER NOT NULL)");
+  await db.exec("CREATE TABLE IF NOT EXISTS description_places (id TEXT PRIMARY KEY NOT NULL, description_id TEXT NOT NULL REFERENCES descriptions(id) ON DELETE CASCADE, place_id TEXT NOT NULL REFERENCES places(id) ON DELETE RESTRICT, role TEXT NOT NULL, role_note TEXT, role_raw TEXT, created_at INTEGER NOT NULL)");
   await db.exec("CREATE INDEX IF NOT EXISTS dp_desc_idx ON description_places(description_id)");
   await db.exec("CREATE INDEX IF NOT EXISTS dp_place_role_idx ON description_places(place_id, role)");
   await db.exec("CREATE UNIQUE INDEX IF NOT EXISTS dp_unique_idx ON description_places(description_id, place_id, role)");

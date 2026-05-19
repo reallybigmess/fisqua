@@ -82,6 +82,7 @@ const NAMESPACES = [
   "user_admin",
   "qc_flags",
   "landing",
+  "operator",
 ] as const;
 
 describe("translation completeness", () => {
