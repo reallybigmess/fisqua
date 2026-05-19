@@ -28,6 +28,7 @@
     "dev": "react-router dev",
     "postinstall": "npm run cf-typegen",
     "preview": "npm run build && vite preview",
+    "import:neogranadina": "npx tsx scripts/import-neogranadina.ts",
     "typecheck": "npm run cf-typegen && react-router typegen && tsc -b"
   },
   "dependencies": {
@@ -57,11 +58,13 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "drizzle-kit": "^0.31.9",
+    "mysql2": "^3.22.3",
     "tailwindcss": "^4.1.13",
     "typescript": "^5.9.2",
     "vite": "^7.1.7",
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "^3.2.4",
-    "wrangler": "^4.40.2"
+    "wrangler": "^4.40.2",
+    "xmllint-wasm": "^5.2.0"
   }
 }

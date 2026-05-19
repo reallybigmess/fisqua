@@ -18,21 +18,33 @@
  * that check `env.SESSION_SECRET` or GitHub OAuth credentials can execute
  * without leaking real production values.
  *
- * @version v0.3.0
+ * The `exclude` list spreads vitest's `configDefaults.exclude` first so the
+ * built-in `**\/node_modules/**` exclusion stays in place — without that
+ * spread, our explicit list silently replaces the defaults and vitest
+ * descends into dependency packages that ship their own `*.test.ts` files
+ * (notably `svix`, which dangles workerd isolates trying to resolve a
+ * missing `mockttp` import).
+ *
+ * @version v0.4.0
  */
 
 import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
+import { configDefaults } from "vitest/config";
 
 export default defineWorkersConfig({
   test: {
     exclude: [
-      "**/node_modules/**",
-      "**/dist/**",
+      ...configDefaults.exclude,
       "tests/schema/migrations.test.ts",
       "tests/import/**",
+      // EAD3, DACS, and DC schema-validation tests use `xmllint-wasm`
+      // (which calls `node:fs` for its WASM blob) and read vendored
+      // RNG fixtures from disk — neither works under the Workers pool
+      // sandbox. They run under `vitest.node.config.ts`.
+      "tests/export/ead/schema-*.test.ts",
+      "tests/export/ead/dacs-*.test.ts",
+      "tests/export/dc/**/*.test.ts",
     ],
-    testTimeout: 15000,
-    hookTimeout: 30000,
     poolOptions: {
       workers: {
         wrangler: {

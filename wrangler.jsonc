@@ -29,7 +29,13 @@
  * exports, manifests, and METS packages — those are written once and read
  * by both environments.
  *
- * Version: v0.3.1
+ * Workers Logs (Cloudflare's "observability" feature) is enabled on both
+ * environments so Worker invocations leave a forensic trail in the
+ * Cloudflare dashboard. The minimal `{ enabled: true }` form uses
+ * Cloudflare's default 100% head sampling rate; this can be lowered
+ * later if log volume becomes a cost concern.
+ *
+ * Version: v0.4.0
  */
 {
   "$schema": "node_modules/wrangler/config-schema.json",
@@ -37,7 +43,13 @@
   "compatibility_date": "2025-04-04",
   "compatibility_flags": ["nodejs_compat"],
   "main": "./workers/app.ts",
-  "routes": [{ "pattern": "fisqua.org", "custom_domain": true }],
+  "observability": {
+    "enabled": true
+  },
+  "routes": [
+    { "pattern": "fisqua.org", "custom_domain": true },
+    { "pattern": "*fisqua.org/*", "zone_name": "fisqua.org" }
+  ],
   // Secrets (set via `wrangler secret put` or .dev.vars):
   // SESSION_SECRET, RESEND_API_KEY, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
   "vars": {
@@ -81,7 +93,12 @@
   ],
   "env": {
     "staging": {
-      "routes": [{ "pattern": "staging.fisqua.org", "custom_domain": true }],
+      "observability": {
+        "enabled": true
+      },
+      "routes": [
+        { "pattern": "staging.fisqua.org", "custom_domain": true }
+      ],
       "vars": {
         "APP_NAME": "Fisqua [Staging]",
         "SENDER_EMAIL": "noreply@zasqua.org",
