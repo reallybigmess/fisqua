@@ -110,12 +110,13 @@ describe("multi-tenancy migrations (0034..0037)", () => {
     expect(sql!.length).toBeGreaterThan(0);
   });
 
-  it("0035 contains 'PRAGMA foreign_keys=OFF' and five table rebuilds with NEOGRANADINA_TENANT_ID literal back-fill", () => {
+  it("0035 defers FK enforcement and rebuilds five tables with NEOGRANADINA_TENANT_ID literal back-fill", () => {
     const sql = findMigration("0035_domain_table_tenant_ids.sql");
     expect(sql).toBeDefined();
-    // File-scope FK suspension wraps the entire file (one OFF, one ON).
-    expect((sql!.match(/PRAGMA foreign_keys=OFF;/g) ?? []).length).toBe(1);
-    expect((sql!.match(/PRAGMA foreign_keys=ON;/g) ?? []).length).toBe(1);
+    // FK enforcement is deferred to commit time; defer_foreign_keys
+    // resets automatically at end of transaction, so there is no
+    // explicit re-enable statement.
+    expect((sql!.match(/PRAGMA defer_foreign_keys=ON;/g) ?? []).length).toBe(1);
     // Five sequential rebuilds: one per domain table.
     expect(
       (sql!.match(/REFERENCES tenants\(id\) ON DELETE RESTRICT/g) ?? []).length,

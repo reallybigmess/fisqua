@@ -89,7 +89,10 @@ describe("platform host guard", () => {
     }
   });
 
-  it("platform.fisqua.test/login 404s under the empty allowlist", async () => {
+  it("platform.fisqua.test/login does NOT 404 — operators sign in here", async () => {
+    // /login is in OPERATOR_ROUTE_PREFIXES so operators can authenticate
+    // on the platform host. The 404 guard admits the request; the
+    // downstream route file map enforces the actual operator gate.
     const user = await createTestUser({
       tenantId: PLATFORM_TENANT_ID,
       isAdmin: true,
@@ -100,15 +103,20 @@ describe("platform host guard", () => {
     );
     const ctx = buildContext();
 
+    let thrown: unknown = null;
     try {
       await authMiddleware(
         { request, context: ctx } as any,
         async () => undefined,
       );
-      expect.fail("Should have thrown");
     } catch (e) {
-      expect(e).toBeInstanceOf(Response);
-      expect((e as Response).status).toBe(404);
+      thrown = e;
+    }
+    // Either the middleware passed (thrown === null) or it threw a
+    // non-404 Response (e.g. a redirect from a downstream check) —
+    // what must NOT happen is the platform-host 404 firing on /login.
+    if (thrown instanceof Response) {
+      expect(thrown.status).not.toBe(404);
     }
   });
 

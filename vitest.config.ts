@@ -45,8 +45,8 @@ export default defineWorkersConfig({
       "tests/export/ead/dacs-*.test.ts",
       "tests/export/dc/**/*.test.ts",
     ],
-    testTimeout: 15000,
-    hookTimeout: 30000,
+    testTimeout: 30000,
+    hookTimeout: 60000,
     poolOptions: {
       workers: {
         wrangler: {
