@@ -1,3 +1,21 @@
+/**
+ * Project Invite Helpers
+ *
+ * This module deals with the server-side helpers that resolve a
+ * project-level invite request: if the email already maps to a
+ * registered user, add them as a project member directly; otherwise
+ * create a `projectInvites` row and dispatch the appropriate
+ * transactional email.
+ *
+ * Multi-tenancy: `users.tenant_id` is NOT NULL, so newly-created users
+ * from the new-invite path must carry an explicit tenant id at INSERT
+ * time. Callers pass the request-boundary tenant via the `tenantId`
+ * argument from `context.get(tenantContext).id`, and newly-invited
+ * users inherit the tenant of the inviting workspace.
+ *
+ * @version v0.4.0
+ */
+
 import { eq, and, isNull } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import {
@@ -35,6 +53,7 @@ type InviteResult = {
  */
 export async function createInvite(
   db: DrizzleD1Database<any>,
+  tenantId: string,
   projectId: string,
   email: string,
   roles: string[],
@@ -120,6 +139,7 @@ export async function createInvite(
   const newUserId = crypto.randomUUID();
 
   await db.insert(users).values({
+    tenantId,
     id: newUserId,
     email: normalizedEmail,
     isAdmin: false,
