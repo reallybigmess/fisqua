@@ -1,22 +1,30 @@
 /**
  * Authenticated App Shell
  *
- * The parent route for everything behind login. Runs the auth guard,
- * loads the sidebar payload — projects the caller belongs to, plus
+ * This layout is the parent route for everything behind login. It
+ * runs the auth guard, loads the sidebar payload — projects the
+ * caller belongs to, plus
  * admin visibility flags — and renders the three-column shell:
  * sidebar, top bar, outlet. The shell manages the sidebar collapse
  * state and the mobile drawer, exposing both through the outlet
  * context so nested pages can react.
  *
- * @version v0.3.0
+ * The loader reads `tenantContext` (populated by `authMiddleware`
+ * after resolving the request `Host` header) and surfaces the four
+ * capability flags to the `<Sidebar>` so capability-off nav surfaces
+ * are hidden. For a tenant with all four capabilities on the
+ * rendered tree is byte-identical to v0.3.
+ *
+ * @version v0.4.0
  */
 
 import { useState, useEffect } from "react";
 import { Form, Outlet, useLocation } from "react-router";
 import { useTranslation } from "react-i18next";
-import { userContext } from "../context";
+import { impersonationContext, tenantContext, userContext } from "../context";
 import { Sidebar } from "../components/layout/sidebar";
 import { Footer } from "../components/layout/footer";
+import { ImpersonationBanner } from "../components/layout/impersonation-banner";
 import type { Route } from "./+types/_auth";
 
 export const middleware = [
@@ -33,6 +41,12 @@ export async function loader({ context }: Route.LoaderArgs) {
   const { projectMembers } = await import("../db/schema");
 
   const user = context.get(userContext);
+  const tenant = context.get(tenantContext);
+  // Read the impersonation envelope so the layout can render the
+  // persistent banner. Always populated (the middleware attaches
+  // `null` when no envelope is active) per the
+  // `impersonationContext` contract in `app/context.ts`.
+  const impersonating = context.get(impersonationContext);
   const env = context.cloudflare.env;
   const { appName } = getAppConfig(env);
 
@@ -46,7 +60,34 @@ export async function loader({ context }: Route.LoaderArgs) {
     .limit(1);
   const hasAnyProjectMembership = membershipRows.length > 0;
 
-  return { user, appName, hasAnyProjectMembership };
+  // Surface only the four capability flags the sidebar needs;
+  // structurally matches `SidebarTenant` so the prop typecheck is a
+  // simple shape match rather than a wider Tenant cast. Keeping the
+  // payload narrow also avoids accidentally serialising capability
+  // flags that future surfaces gate on but the layout itself does
+  // not consume.
+  const tenantCaps = {
+    crowdsourcingEnabled: tenant.crowdsourcingEnabled,
+    vocabularyHubEnabled: tenant.vocabularyHubEnabled,
+    publishPipelineEnabled: tenant.publishPipelineEnabled,
+    multiRepositoryEnabled: tenant.multiRepositoryEnabled,
+  };
+
+  // Surface a narrow `impersonating` payload for the banner. Empty
+  // shape (null) when no envelope is active. We deliberately do NOT
+  // expose `sessionId` or `lastActivityAt` to client-side render —
+  // role + tenant name are sufficient for the banner copy.
+  const impersonatingForBanner = impersonating
+    ? { role: impersonating.role, tenantName: tenant.name }
+    : null;
+
+  return {
+    user,
+    appName,
+    hasAnyProjectMembership,
+    tenant: tenantCaps,
+    impersonating: impersonatingForBanner,
+  };
 }
 
 export default function CatalogacionLayout({ loaderData }: Route.ComponentProps) {
@@ -107,6 +148,17 @@ export default function CatalogacionLayout({ loaderData }: Route.ComponentProps)
 
   return (
     <div className="flex h-screen flex-col bg-white">
+      {/* Persistent impersonation banner. Renders above the existing
+          chrome on every tenant subdomain page during an operator
+          impersonation envelope. Cannot be dismissed; the only exit
+          is the End-impersonation button which posts to
+          `/end-impersonation`. */}
+      {loaderData.impersonating ? (
+        <ImpersonationBanner
+          role={loaderData.impersonating.role}
+          tenantName={loaderData.impersonating.tenantName}
+        />
+      ) : null}
       {/* Header bar — wordmark in verdigris (Spectral 22px), partner
           name in stone-500 sans. Per design-system §Chrome. */}
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-stone-200 bg-stone-50 px-4">
@@ -158,6 +210,7 @@ export default function CatalogacionLayout({ loaderData }: Route.ComponentProps)
                   isCataloguer: loaderData.user.isCataloguer,
                   hasAnyProjectMembership: loaderData.hasAnyProjectMembership,
                 }}
+                tenant={loaderData.tenant}
                 collapsed={effectiveCollapsed}
                 onToggle={toggleCollapsed}
               />
@@ -174,6 +227,7 @@ export default function CatalogacionLayout({ loaderData }: Route.ComponentProps)
               isCataloguer: loaderData.user.isCataloguer,
               hasAnyProjectMembership: loaderData.hasAnyProjectMembership,
             }}
+            tenant={loaderData.tenant}
             collapsed={effectiveCollapsed}
             onToggle={toggleCollapsed}
           />

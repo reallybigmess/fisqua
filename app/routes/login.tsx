@@ -1,8 +1,31 @@
+/**
+ * Tenant /login route
+ *
+ * This route is the per-tenant sign-in surface. Two affordances:
+ *
+ *   1. "Sign in with GitHub" — primary position. The button points at
+ *      the apex init route (`https://fisqua.org/auth/github`) with
+ *      `?return_to=<slug>`; the apex completes OAuth at the one
+ *      callback URL the GitHub OAuth App is registered with and 302s
+ *      back to this tenant via a single-use handoff token. The tenant
+ *      slug is read from the loader's `getTenantFromRequest` resolution.
+ *
+ *   2. Magic-link form — secondary position. Submits an email; the
+ *      action generates a magic link with `new URL(request.url).origin`
+ *      so the verify URL stays on the tenant subdomain (host-aware by
+ *      construction).
+ *
+ * @version v0.4.1
+ */
 import { redirect, data } from "react-router";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 import { CircleCheck, CircleX, Github, Mail } from "lucide-react";
 import type { Route } from "./+types/login";
+import {
+  assertNonPlatformOrAllowlisted,
+  getTenantFromRequest,
+} from "../lib/tenant";
 
 const emailSchema = z.object({
   email: z.string().email(),
@@ -14,6 +37,7 @@ export function meta() {
 
 export async function loader({ request, context }: Route.LoaderArgs) {
   const { createSessionStorage } = await import("../sessions.server");
+  const { drizzle } = await import("drizzle-orm/d1");
 
   const env = context.cloudflare.env;
   const { getSession } = createSessionStorage(env.SESSION_SECRET);
@@ -23,7 +47,32 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     throw redirect("/");
   }
 
-  return null;
+  // Resolve the tenant from the request host so the "Sign in with
+  // GitHub" button can carry `?return_to=<slug>` to the apex. The
+  // apex init route is the single entry point for OAuth across every
+  // tenant; the tenant-side button on /login is just a convenience
+  // link.
+  //
+  // Defensive: if tenant resolution throws (unknown host, multi-level
+  // subdomain), bubble the 404 — it's the same behaviour every other
+  // tenant route gets, and a /login that 404s on a non-existent host
+  // is correct.
+  const db = drizzle(env.DB);
+  const tenant = await getTenantFromRequest(db, request);
+  // Seal platform host. /login is not in OPERATOR_ROUTE_ALLOWLIST,
+  // so platform.fisqua.org/login hard-404s here — externally
+  // identical to an unknown slug's /login.
+  assertNonPlatformOrAllowlisted(tenant, new URL(request.url).pathname);
+
+  return {
+    tenantSlug: tenant.slug,
+    // Surface the workspace name as a subtitle under the Fisqua
+    // mark/title so users know which tenant they're about to sign
+    // into. Only exposed for tenant kind; platform host returns null
+    // so the operator-login screen doesn't leak the platform tenant's
+    // display name.
+    tenantName: tenant.kind === "tenant" ? tenant.name : null,
+  };
 }
 
 export async function action({ request, context }: Route.ActionArgs) {
@@ -64,7 +113,10 @@ export async function action({ request, context }: Route.ActionArgs) {
   return data({ success: true, error: null });
 }
 
-export default function LoginPage({ actionData }: Route.ComponentProps) {
+export default function LoginPage({
+  loaderData,
+  actionData,
+}: Route.ComponentProps) {
   const { t } = useTranslation("auth");
   const searchParams =
     typeof window !== "undefined"
@@ -80,6 +132,15 @@ export default function LoginPage({ actionData }: Route.ComponentProps) {
     "no-account": t("error.no_account"),
   };
 
+  // The GitHub button targets the apex init route with
+  // ?return_to=<slug>. The apex completes OAuth at the one URL the
+  // GitHub OAuth App is registered with, then 302s back to this
+  // tenant subdomain via the single-use handoff token.
+  const tenantSlug = loaderData?.tenantSlug ?? "";
+  const githubHref = tenantSlug
+    ? `https://fisqua.org/auth/github?return_to=${encodeURIComponent(tenantSlug)}`
+    : "/auth/github";
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-white">
       <div className="mx-auto w-full max-w-md space-y-6 px-4">
@@ -92,6 +153,11 @@ export default function LoginPage({ actionData }: Route.ComponentProps) {
           <h1 className="mt-4 font-display text-[2.5rem] font-semibold text-indigo">
             Fisqua
           </h1>
+          {loaderData?.tenantName && (
+            <p className="mt-1 font-sans text-sm text-stone-500">
+              {loaderData.tenantName}
+            </p>
+          )}
         </div>
 
         {urlError && errorMessages[urlError] && (
@@ -116,9 +182,15 @@ export default function LoginPage({ actionData }: Route.ComponentProps) {
           </div>
         ) : (
           <div className="space-y-6">
-            {/* GitHub login button -- primary position (per D-03) */}
+            {/*
+              GitHub login button — primary position. The link targets
+              the apex init route with the tenant slug as
+              ?return_to=<slug>. GitHub OAuth Apps allow exactly one
+              Authorization callback URL, so the apex completes the
+              flow on behalf of every tenant.
+            */}
             <a
-              href="/auth/github"
+              href={githubHref}
               className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#24292f] font-sans text-[0.9375rem] font-semibold text-white hover:bg-[#1b1f23] focus:outline-none focus:ring-2 focus:ring-[#24292f] focus:ring-offset-2"
             >
               <Github className="h-5 w-5" />
@@ -184,3 +256,5 @@ export default function LoginPage({ actionData }: Route.ComponentProps) {
     </div>
   );
 }
+
+// @version v0.4.1
