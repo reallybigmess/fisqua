@@ -9,10 +9,10 @@
  * keeps the gap between the two clusters click-through so users can still
  * interact with anything below.
  *
- * @version v0.4.0
+ * @version v0.4.1
  */
 
-const VERSION = "0.4.0";
+const VERSION = "0.4.1";
 
 export function Footer() {
   return (
