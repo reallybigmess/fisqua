@@ -1,0 +1,46 @@
+# Tests
+#
+# Manually-dispatched CI workflow that runs Vitest and the TypeScript
+# type-check on demand. Trigger from the GitHub Actions UI
+# (Actions → Tests → Run workflow) or `gh workflow run tests.yml` after
+# pushing changes you want to verify against the full v0.4 regression
+# surface (~2520 tests across the Cloudflare Workers vitest pool).
+#
+# Manual trigger is deliberate: the test suite is too heavy to run on
+# every push during active development, and the local laptop can't
+# host it. Run this when a milestone or risky phase wants cross-cutting
+# verification, not on every commit.
+#
+# Concurrency is keyed by branch ref so a second manual dispatch on the
+# same branch cancels the in-flight run rather than queueing.
+#
+# Runner: Ubicloud (`ubicloud-standard-4`, 4 vCPU / 16 GB) — comfortable
+# headroom for the Workers vitest pool. Requires the Ubicloud GitHub
+# App installed on the account; without it, runs queue indefinitely.
+# Bump to `ubicloud-standard-8` if pool cold-starts begin pushing past
+# the timeout.
+#
+# @version v0.4.1
+
+name: Tests
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubicloud-standard-4
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx vitest --run
+      - run: npm run typecheck
