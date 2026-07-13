@@ -18,7 +18,7 @@
  * over a cataloguer's draft, a cataloguer cannot approve their own
  * entry, etc.).
  *
- * @version v0.3.0
+ * @version v0.4.1
  */
 
 import { userContext } from "../context";
@@ -31,7 +31,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
 
   const { drizzle } = await import("drizzle-orm/d1");
-  const { requireDescriptionAccess } = await import("../lib/permissions.server");
+  const { requireDescriptionAccess, highestProjectRole } = await import("../lib/permissions.server");
   const {
     saveDescription,
     submitForReview,
@@ -57,13 +57,13 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   try {
     // Check description access
-    const { member } = await requireDescriptionAccess(
+    const { memberships } = await requireDescriptionAccess(
       db,
       entryId,
       user.id,
       user.isAdmin
     );
-    const role = (member?.role as WorkflowRole) ?? "cataloguer";
+    const role: WorkflowRole = highestProjectRole(memberships) ?? "cataloguer";
 
     // Handle action types
     if (actionType === "submit") {

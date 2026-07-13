@@ -17,11 +17,11 @@
  * `fclass` column (5-value GeoNames feature class) with a CHECK
  * constraint and `legacyIds` JSON for migration provenance.
  *
- * @version v0.4.0
+ * @version v0.4.3
  */
 
 import { z } from "zod/v4";
-import { PLACE_TYPES, GEONAMES_FCLASSES } from "./enums";
+import { PLACE_TYPES, GEONAMES_FCLASSES, COORDINATE_PRECISIONS } from "./enums";
 
 export const placeSchema = z.object({
   id: z.string().uuid(),
@@ -33,8 +33,10 @@ export const placeSchema = z.object({
   parentId: z.string().uuid().nullable().optional(),
   latitude: z.number().min(-90).max(90).nullable().optional(),
   longitude: z.number().min(-180).max(180).nullable().optional(),
-  coordinatePrecision: z.string().max(20).optional(),
-  needsGeocoding: z.boolean().default(true),
+  // Controlled vocabulary (migration 0060); NULL = not recorded. The
+  // form boundary coerces the select's empty value to null before this
+  // runs, so an unset precision arrives as null, never "".
+  coordinatePrecision: z.enum(COORDINATE_PRECISIONS).nullable().optional(),
   mergedInto: z.string().uuid().nullable().optional(),
   tgnId: z.string().max(20).nullable().optional(),
   hgisId: z.string().max(50).nullable().optional(),
@@ -44,6 +46,11 @@ export const placeSchema = z.object({
   // Generic legacy id JSON column (0036). Stored as a JSON string at
   // the DB layer; full Zod shape lives in app/lib/validation/legacy-ids.ts.
   legacyIds: z.string().default("[]"),
+  // Free-text notes pair (migration 0059). `notes` may eventually
+  // publish; `internalNotes` never leaves the admin surface (excluded
+  // from the export pipeline). Both nullable — absent = no note.
+  notes: z.string().nullable().optional(),
+  internalNotes: z.string().nullable().optional(),
   createdAt: z.number().int(),
   updatedAt: z.number().int(),
 });

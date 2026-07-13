@@ -13,7 +13,7 @@
  * argument from `context.get(tenantContext).id`, and newly-invited
  * users inherit the tenant of the inviting workspace.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { eq, and, isNull } from "drizzle-orm";
@@ -65,11 +65,12 @@ export async function createInvite(
 ): Promise<InviteResult> {
   const normalizedEmail = email.toLowerCase().trim();
 
-  // Look up the project for its name (used in emails)
+  // Look up the project for its name (used in emails), scoped to the
+  // calling tenant so a projectId from another tenant cannot resolve.
   const project = await db
     .select({ name: projects.name })
     .from(projects)
-    .where(eq(projects.id, projectId))
+    .where(and(eq(projects.tenantId, tenantId), eq(projects.id, projectId)))
     .get();
 
   if (!project) {

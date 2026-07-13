@@ -23,15 +23,14 @@
  * `tests/description/autosave.test.ts` ("preserves omitted fields
  * across a partial save").
  *
- * The `title` field is in the allowlist. Earlier in development the
- * title was missing from both the client's `buildFieldsPayload`
- * allowlist AND the server's `DESCRIPTION_FIELD_KEYS` tuple, so
- * editing the description editor's "Title *" input cycled the
- * save-status pill but the value never reached `entries.title` on
- * disk. Both surfaces now lead with `"title"` and a pair of
- * regression tests in `tests/description/autosave.test.ts` pin the
- * behaviour from both angles: title persists, and the additive
- * contract still holds for the newly-allowed key.
+ * The field registry (`DESCRIPTION_FIELD_KEYS` + `DescriptionFields`)
+ * is shared with the client's `buildFieldsPayload` via the pure
+ * `description-workflow` module, precisely because the two surfaces
+ * once declared it separately and the title field, missing from both,
+ * cycled the save-status pill while `entries.title` never changed on
+ * disk. Regression tests in `tests/description/autosave.test.ts` pin
+ * the behaviour from both angles: title persists, and the additive
+ * contract still holds.
  *
  * @version v0.4.1
  */
@@ -42,12 +41,19 @@ import { z } from "zod/v4";
 import { entries, volumes, volumePages, comments } from "../db/schema";
 import {
   canDescriptionTransition,
+  DESCRIPTION_FIELD_KEYS,
+  type DescriptionFields,
   type DescriptionStatus,
 } from "./description-workflow";
 import type { WorkflowRole } from "./workflow";
 import { logActivity } from "./workflow.server";
 import { createComment } from "./comments.server";
-import { RESOURCE_TYPES_ES, type ResourceTypeEs } from "./validation/enums";
+import { RESOURCE_TYPES_ES } from "./validation/enums";
+
+// The field registry (keys + type) lives in the pure, client-safe
+// description-workflow module so the route's payload builder and this
+// writer share one declaration; re-exported here for server callers.
+export { DESCRIPTION_FIELD_KEYS, type DescriptionFields };
 
 // --- Validation schema for submit-for-review ---
 
@@ -59,41 +65,6 @@ const submitSchema = z.object({
   language: z.string().min(1, "Language is required"),
   extent: z.string().min(1, "Extent is required"),
 });
-
-export type DescriptionFields = {
-  title?: string | null;
-  translatedTitle?: string | null;
-  resourceType?: ResourceTypeEs | null;
-  dateExpression?: string | null;
-  dateStart?: string | null;
-  dateEnd?: string | null;
-  extent?: string | null;
-  scopeContent?: string | null;
-  language?: string | null;
-  descriptionNotes?: string | null;
-  internalNotes?: string | null;
-};
-
-/**
- * Description-form column keys that `saveDescription` is allowed to
- * touch. Listed explicitly (rather than derived from `Object.keys` on
- * the incoming `fields` object) so the function cannot be coaxed into
- * writing arbitrary columns by a caller that smuggles extra keys into
- * the payload. Must stay in sync with `DescriptionFields`.
- */
-const DESCRIPTION_FIELD_KEYS = [
-  "title",
-  "translatedTitle",
-  "resourceType",
-  "dateExpression",
-  "dateStart",
-  "dateEnd",
-  "extent",
-  "scopeContent",
-  "language",
-  "descriptionNotes",
-  "internalNotes",
-] as const satisfies ReadonlyArray<keyof DescriptionFields>;
 
 /**
  * Save description fields on an entry (autosave).

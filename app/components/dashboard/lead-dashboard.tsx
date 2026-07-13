@@ -15,7 +15,7 @@
  * all loaders run on the parent route, which keeps this file safe to
  * mount under SSR without round-tripping the database.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { Link } from "react-router";
@@ -226,7 +226,7 @@ function ProjectCard({ project }: { project: ProjectOverview }) {
               >
                 <div className="flex items-center gap-2">
                   {/* Avatar initials */}
-                  <div className="flex h-[1.125rem] w-[1.125rem] items-center justify-center rounded-full bg-stone-100 text-[0.5625rem] font-medium text-stone-500">
+                  <div className="flex h-[1.125rem] w-[1.125rem] items-center justify-center rounded-full bg-stone-100 text-10 font-medium text-stone-500">
                     {getInitials(member.name)}
                   </div>
                   <Link
@@ -275,8 +275,8 @@ export function LeadDashboard({
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
             </svg>
           </div>
-          <h3 className="mt-4 font-serif text-[18px] font-semibold text-indigo">{t("empty.no_projects_title")}</h3>
-          <p className="mt-2 font-serif text-[15px] text-stone-500 max-w-[36ch] mx-auto">
+          <h3 className="mt-4 font-serif text-lg font-semibold text-indigo">{t("empty.no_projects_title")}</h3>
+          <p className="mt-2 font-serif text-15 text-stone-500 max-w-measure mx-auto">
             {t("empty.no_lead_projects_body")}
           </p>
         </div>

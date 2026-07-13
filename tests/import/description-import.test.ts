@@ -16,24 +16,29 @@
  * the legacy id), and the failure surfacing — a malformed row
  * lands in the failure report rather than aborting the run.
  *
- * @version v0.3.0
+ * @version v0.4.1
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import * as os from "node:os";
 
-const OUTPUT_DIR = ".import";
-
+// Per-suite scratch dir (never the production `.import/` snapshot dir —
+// see audit item 23).
+let outputDir: string;
+async function setUpOutputDir() {
+  outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "fisqua-import-test-"));
+}
 async function cleanOutput() {
   try {
-    await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
+    await fs.rm(outputDir, { recursive: true, force: true });
   } catch {
     // ignore
   }
 }
 
 describe("importDescriptions", () => {
-  beforeEach(cleanOutput);
+  beforeEach(setUpOutputDir);
   afterEach(cleanOutput);
 
   it("returns correct row count and IdMap for all input records", async () => {
@@ -45,10 +50,10 @@ describe("importDescriptions", () => {
     );
 
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve("tests/import/fixtures/descriptions.json");
-    const { result, idMap } = await importDescriptions(fixturePath, repoIdMap);
+    const { result, idMap } = await importDescriptions(fixturePath, repoIdMap, outputDir);
 
     expect(result.table).toBe("descriptions");
     expect(result.total).toBe(6);
@@ -71,10 +76,10 @@ describe("importDescriptions", () => {
     );
 
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve("tests/import/fixtures/descriptions.json");
-    const { result } = await importDescriptions(fixturePath, repoIdMap);
+    const { result } = await importDescriptions(fixturePath, repoIdMap, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
 
@@ -97,10 +102,10 @@ describe("importDescriptions", () => {
     );
 
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve("tests/import/fixtures/descriptions.json");
-    const { result, idMap } = await importDescriptions(fixturePath, repoIdMap);
+    const { result, idMap } = await importDescriptions(fixturePath, repoIdMap, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
 
@@ -124,10 +129,10 @@ describe("importDescriptions", () => {
     );
 
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve("tests/import/fixtures/descriptions.json");
-    const { result, idMap } = await importDescriptions(fixturePath, repoIdMap);
+    const { result, idMap } = await importDescriptions(fixturePath, repoIdMap, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
 
@@ -148,10 +153,10 @@ describe("importDescriptions", () => {
     );
 
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve("tests/import/fixtures/descriptions.json");
-    const { result } = await importDescriptions(fixturePath, repoIdMap);
+    const { result } = await importDescriptions(fixturePath, repoIdMap, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
 
@@ -172,10 +177,10 @@ describe("importDescriptions", () => {
     );
 
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve("tests/import/fixtures/descriptions.json");
-    const { result } = await importDescriptions(fixturePath, repoIdMap);
+    const { result } = await importDescriptions(fixturePath, repoIdMap, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
 
@@ -196,10 +201,10 @@ describe("importDescriptions", () => {
     );
 
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve("tests/import/fixtures/descriptions.json");
-    const { result } = await importDescriptions(fixturePath, repoIdMap);
+    const { result } = await importDescriptions(fixturePath, repoIdMap, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
 
@@ -219,10 +224,10 @@ describe("importDescriptions", () => {
     );
 
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve("tests/import/fixtures/descriptions.json");
-    const { result } = await importDescriptions(fixturePath, repoIdMap);
+    const { result } = await importDescriptions(fixturePath, repoIdMap, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
 
@@ -244,10 +249,10 @@ describe("importDescriptions", () => {
     );
 
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve("tests/import/fixtures/descriptions.json");
-    const { result } = await importDescriptions(fixturePath, repoIdMap);
+    const { result } = await importDescriptions(fixturePath, repoIdMap, outputDir);
 
     expect(result.sqlFiles.length).toBeGreaterThan(0);
     for (const file of result.sqlFiles) {
@@ -265,10 +270,10 @@ describe("importDescriptions", () => {
     );
 
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve("tests/import/fixtures/descriptions.json");
-    const { result } = await importDescriptions(fixturePath, repoIdMap);
+    const { result } = await importDescriptions(fixturePath, repoIdMap, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
     // Should NOT contain ISO datetime strings

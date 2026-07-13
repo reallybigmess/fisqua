@@ -17,7 +17,7 @@
  * each other — that would turn the timeline into a surveillance
  * surface and erode the workflow's trust assumptions.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { useState } from "react";
@@ -246,7 +246,7 @@ export default function UserActivity({ loaderData }: Route.ComponentProps) {
     <div className="mx-auto max-w-5xl px-4 py-8">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <h1 className="font-sans text-[2rem] font-semibold text-stone-700">
+        <h1 className="font-sans text-4xl font-semibold text-stone-700">
           {targetUser.name || t("dashboard:activity.unnamed_user")}
         </h1>
         {targetUser.roles.map((role) => (

@@ -28,7 +28,7 @@
  * full route-action wiring (the i18n middleware in particular pulls
  * in `~/locales` which the Workers test pool does not alias).
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { useState } from "react";
@@ -82,11 +82,12 @@ export async function loader({ params, context }: Route.LoaderArgs) {
     .where(eq(projectMembers.userId, params.id))
     .all();
 
-  // Available projects for assignment
+  // Available projects for assignment (tenant-scoped: only the request
+  // tenant's projects can be offered for assignment)
   const availableProjects = await db
     .select({ id: projects.id, name: projects.name })
     .from(projects)
-    .where(isNull(projects.archivedAt))
+    .where(and(eq(projects.tenantId, tenant.id), isNull(projects.archivedAt)))
     .all();
 
   // Filter out projects the user is already in

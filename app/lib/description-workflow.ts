@@ -18,10 +18,11 @@
  * `./description.server.ts`, which calls into this module for the
  * validity decision before mutating any rows.
  *
- * @version v0.3.0
+ * @version v0.4.1
  */
 
 import type { WorkflowRole } from "./workflow";
+import type { ResourceTypeEs } from "./validation/enums";
 
 export type DescriptionStatus =
   | "unassigned"
@@ -31,6 +32,59 @@ export type DescriptionStatus =
   | "reviewed"
   | "approved"
   | "sent_back";
+
+/**
+ * The description-form fields an autosave may carry. This is the
+ * SINGLE registry for the client payload builder and the server's
+ * write allowlist — the two surfaces used to declare it separately,
+ * and a field present on one side but not the other saves silently
+ * into nowhere (the title-field incident: the editor's save pill
+ * cycled while `entries.title` never changed). Pure and client-safe;
+ * `description.server.ts` re-exports both names for server callers.
+ */
+export type DescriptionFields = {
+  title?: string | null;
+  translatedTitle?: string | null;
+  resourceType?: ResourceTypeEs | null;
+  dateExpression?: string | null;
+  dateStart?: string | null;
+  dateEnd?: string | null;
+  extent?: string | null;
+  scopeContent?: string | null;
+  language?: string | null;
+  descriptionNotes?: string | null;
+  internalNotes?: string | null;
+};
+
+/**
+ * Column keys the description autosave is allowed to touch, on both
+ * sides of the wire. Listed explicitly (rather than derived from
+ * `Object.keys` on an incoming payload) so the server writer cannot
+ * be coaxed into writing arbitrary columns by a caller that smuggles
+ * extra keys in. The `satisfies` clause pins the tuple to the type:
+ * adding a field to one without the other fails the compile.
+ */
+export const DESCRIPTION_FIELD_KEYS = [
+  "title",
+  "translatedTitle",
+  "resourceType",
+  "dateExpression",
+  "dateStart",
+  "dateEnd",
+  "extent",
+  "scopeContent",
+  "language",
+  "descriptionNotes",
+  "internalNotes",
+] as const satisfies ReadonlyArray<keyof DescriptionFields>;
+
+// The satisfies clause above only pins tuple ⊆ type. This alias pins
+// the other direction: a field added to DescriptionFields but missing
+// from the tuple makes the Exclude non-never and fails the compile.
+type _AssertNever<T extends never> = T;
+export type _AllDescriptionFieldsListed = _AssertNever<
+  Exclude<keyof DescriptionFields, (typeof DESCRIPTION_FIELD_KEYS)[number]>
+>;
 
 const DESC_TRANSITIONS: Record<
   WorkflowRole,

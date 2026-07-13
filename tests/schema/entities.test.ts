@@ -16,7 +16,7 @@
  * stable external identifier in the entity browser, so collisions
  * would silently overwrite authority work.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 import {
   describe,
@@ -29,7 +29,7 @@ import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import * as schema from "../../app/db/schema";
-import { DEFAULT_TEST_TENANT_ID, applyMigrations, cleanDatabase } from "../helpers/db";
+import { DEFAULT_TEST_FEDERATION_ID, applyMigrations, cleanDatabase } from "../helpers/db";
 
 describe("entities table", () => {
   let db: ReturnType<typeof drizzle>;
@@ -48,7 +48,7 @@ describe("entities table", () => {
     const now = Date.now();
 
     await db.insert(schema.entities).values({
-      tenantId: DEFAULT_TEST_TENANT_ID,
+      federationId: DEFAULT_TEST_FEDERATION_ID,
       id,
       entityCode: "ne-abc234",
       displayName: "Juan de Castellanos",
@@ -74,7 +74,7 @@ describe("entities table", () => {
     const now = Date.now();
 
     await db.insert(schema.entities).values({
-      tenantId: DEFAULT_TEST_TENANT_ID,
+      federationId: DEFAULT_TEST_FEDERATION_ID,
       id: crypto.randomUUID(),
       entityCode: "ne-xxxxxx",
       displayName: "First Entity",
@@ -86,7 +86,7 @@ describe("entities table", () => {
 
     await expect(
       db.insert(schema.entities).values({
-        tenantId: DEFAULT_TEST_TENANT_ID,
+        federationId: DEFAULT_TEST_FEDERATION_ID,
         id: crypto.randomUUID(),
         entityCode: "ne-xxxxxx",
         displayName: "Second Entity",
@@ -104,7 +104,7 @@ describe("entities table", () => {
     const now = Date.now();
 
     await db.insert(schema.entities).values({
-      tenantId: DEFAULT_TEST_TENANT_ID,
+      federationId: DEFAULT_TEST_FEDERATION_ID,
       id: mainId,
       entityCode: "ne-main01",
       displayName: "Main Entity",
@@ -115,7 +115,7 @@ describe("entities table", () => {
     });
 
     await db.insert(schema.entities).values({
-      tenantId: DEFAULT_TEST_TENANT_ID,
+      federationId: DEFAULT_TEST_FEDERATION_ID,
       id: mergedId,
       entityCode: "ne-mrgd01",
       displayName: "Merged Entity",
@@ -139,7 +139,7 @@ describe("entities table", () => {
     const now = Date.now();
 
     await db.insert(schema.entities).values({
-      tenantId: DEFAULT_TEST_TENANT_ID,
+      federationId: DEFAULT_TEST_FEDERATION_ID,
       id,
       entityCode: "ne-defvar",
       displayName: "Default Variants",

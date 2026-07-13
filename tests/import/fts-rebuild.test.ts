@@ -9,29 +9,36 @@
  * touches the FTS triggers. The current implementation rebuilds all
  * three FTS5 tables.
  *
- * @version v0.4.0
+ * @version v0.4.1
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import * as os from "node:os";
 
-const OUTPUT_DIR = ".import";
+// Per-suite scratch dir (never the production `.import/` snapshot dir —
+// see audit item 23).
+let outputDir: string;
+async function setUpOutputDir() {
+  outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "fisqua-import-test-"));
+}
 async function cleanOutput() {
   try {
-    await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
+    await fs.rm(outputDir, { recursive: true, force: true });
   } catch {
     // ignore
   }
 }
 
 describe("generateFtsRebuild — all three FTS tables", () => {
-  beforeEach(cleanOutput);
+  beforeEach(setUpOutputDir);
   afterEach(cleanOutput);
 
   it("emits a rebuild line for entities_fts", async () => {
     const { generateFtsRebuild } = await import(
       "../../scripts/commands/clear"
     );
-    const sqlFiles = await generateFtsRebuild();
+    const sqlFiles = await generateFtsRebuild(outputDir);
     const content = await fs.readFile(sqlFiles[0], "utf8");
     expect(content).toContain(
       "INSERT INTO entities_fts(entities_fts) VALUES('rebuild')",
@@ -42,7 +49,7 @@ describe("generateFtsRebuild — all three FTS tables", () => {
     const { generateFtsRebuild } = await import(
       "../../scripts/commands/clear"
     );
-    const sqlFiles = await generateFtsRebuild();
+    const sqlFiles = await generateFtsRebuild(outputDir);
     const content = await fs.readFile(sqlFiles[0], "utf8");
     expect(content).toContain(
       "INSERT INTO places_fts(places_fts) VALUES('rebuild')",
@@ -53,7 +60,7 @@ describe("generateFtsRebuild — all three FTS tables", () => {
     const { generateFtsRebuild } = await import(
       "../../scripts/commands/clear"
     );
-    const sqlFiles = await generateFtsRebuild();
+    const sqlFiles = await generateFtsRebuild(outputDir);
     const content = await fs.readFile(sqlFiles[0], "utf8");
     // descriptions_fts is now part of the rebuild list.
     expect(content).toContain(
@@ -62,4 +69,4 @@ describe("generateFtsRebuild — all three FTS tables", () => {
   });
 });
 
-// Version: v0.4.0
+// Version: v0.4.1

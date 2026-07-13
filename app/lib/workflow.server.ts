@@ -52,12 +52,12 @@
  * that case is a separate operator-gated step outside this code
  * path.
  *
- * @version v0.4.1
+ * @version v0.4.2
  */
 
 import { eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import { volumes, activityLog } from "../db/schema";
+import { volumes, activityLog, projects } from "../db/schema";
 import {
   canTransition,
   type VolumeStatus,
@@ -87,7 +87,14 @@ export type ActivityEvent =
  * Logs the status change as an activity event in the same atomic batch
  * as the status UPDATE (see file narrative header).
  *
- * @throws Response(400) if the transition is not valid for the given role
+ * Accepts one role or the caller's full set of held roles. The
+ * TRANSITIONS table is role-partitioned (reviewer's map contains none
+ * of the cataloguer moves), so a member holding several roles is
+ * allowed a move if ANY held role permits it — collapsing to a single
+ * "highest" role would strip cataloguer-stage transitions from a
+ * reviewer+cataloguer member.
+ *
+ * @throws Response(400) if the transition is not valid for any given role
  * @throws Response(404) if the volume does not exist
  * @throws on D1 batch failure (caller emits 5xx); either both writes
  *   committed or neither did
@@ -97,12 +104,20 @@ export async function transitionVolumeStatus(
   volumeId: string,
   targetStatus: VolumeStatus,
   userId: string,
-  role: WorkflowRole,
+  role: WorkflowRole | readonly WorkflowRole[],
   comment?: string
 ): Promise<void> {
-  // Fetch current volume status
+  const roles = Array.isArray(role) ? role : [role];
+
+  // Fetch current volume status. tenantId is read here too so the
+  // activity_log row inherits the volume's tenant explicitly (the schema
+  // has no default).
   const [volume] = await db
-    .select({ status: volumes.status, projectId: volumes.projectId })
+    .select({
+      status: volumes.status,
+      projectId: volumes.projectId,
+      tenantId: volumes.tenantId,
+    })
     .from(volumes)
     .where(eq(volumes.id, volumeId))
     .limit(1)
@@ -114,9 +129,9 @@ export async function transitionVolumeStatus(
 
   const currentStatus = volume.status as VolumeStatus;
 
-  if (!canTransition(currentStatus, targetStatus, role)) {
+  if (!roles.some((r) => canTransition(currentStatus, targetStatus, r))) {
     throw new Response(
-      `Invalid transition from ${currentStatus} to ${targetStatus} for role ${role}`,
+      `Invalid transition from ${currentStatus} to ${targetStatus} for role ${roles.join(", ")}`,
       { status: 400 }
     );
   }
@@ -144,6 +159,7 @@ export async function transitionVolumeStatus(
     db.update(volumes).set(updateData).where(eq(volumes.id, volumeId)),
     db.insert(activityLog).values({
       id: crypto.randomUUID(),
+      tenantId: volume.tenantId,
       userId,
       event: "status_changed",
       projectId: volume.projectId ?? null,
@@ -177,8 +193,36 @@ export async function logActivity(
     detail?: string;
   } = {}
 ): Promise<void> {
+  // An activity row inherits its tenant from the volume or project the
+  // event concerns (its natural parent). Resolve it so tenant_id is set
+  // explicitly -- the schema has no default. Prefer the volume (the more
+  // specific parent); fall back to the project. One of the two must be a
+  // real row, otherwise the tenant is unknowable and the write is a bug.
+  let tenantId: string | undefined;
+  if (options.volumeId) {
+    const v = await db
+      .select({ tenantId: volumes.tenantId })
+      .from(volumes)
+      .where(eq(volumes.id, options.volumeId))
+      .get();
+    tenantId = v?.tenantId;
+  } else if (options.projectId) {
+    const p = await db
+      .select({ tenantId: projects.tenantId })
+      .from(projects)
+      .where(eq(projects.id, options.projectId))
+      .get();
+    tenantId = p?.tenantId;
+  }
+  if (!tenantId) {
+    throw new Error(
+      "logActivity: cannot resolve tenant — supply a known volumeId or projectId",
+    );
+  }
+
   await db.insert(activityLog).values({
     id: crypto.randomUUID(),
+    tenantId,
     userId,
     event,
     projectId: options.projectId ?? null,
@@ -188,4 +232,4 @@ export async function logActivity(
   });
 }
 
-// @version v0.4.1
+// @version v0.4.2

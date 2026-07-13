@@ -25,7 +25,7 @@
  * descripción para que el catalogador vea el mismo diálogo en los
  * dos editores. Forma tú (sin voseo).
  *
- * @version v0.4.1
+ * @version v0.4.2
  */
 export default {
   toolbar: {
@@ -133,6 +133,11 @@ export default {
     error_empty: "El comentario no puede estar vacío.",
     error_server: "No se pudo guardar. Inténtalo de nuevo.",
   },
+  // Aviso cuando el script de OpenSeadragon no carga.
+  load_error: {
+    message: "No se pudo cargar el visor de imágenes. Revisa tu conexión e intenta de nuevo.",
+    retry: "Reintentar",
+  },
 } as const;
 
-/* @version v0.4.1 */
+/* @version v0.4.2 */

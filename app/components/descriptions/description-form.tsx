@@ -79,6 +79,12 @@ interface DescriptionFormProps {
    * which `StandardConfig` the renderer iterates.
    */
   standard: Standard;
+  /**
+   * Whether the tenant has the authorities capability. When off, the
+   * Entity/Place linker fields are omitted and cataloguers use the
+   * plain-text creator/place display fields instead.
+   */
+  authoritiesEnabled?: boolean;
 }
 
 export function DescriptionForm({
@@ -90,6 +96,7 @@ export function DescriptionForm({
   entityLinks = [],
   placeLinks = [],
   standard,
+  authoritiesEnabled = true,
 }: DescriptionFormProps) {
   const { t } = useTranslation("descriptions_admin");
   const config = getStandardConfig(standard);
@@ -105,6 +112,16 @@ export function DescriptionForm({
         >
           <div className="space-y-4">
             {section.fields.map((field) => {
+              // Off-state authority pickers: when the tenant lacks the
+              // authorities capability, the Entity/Place linker fields
+              // are omitted (the plain-text display fields remain).
+              if (
+                !authoritiesEnabled &&
+                (field.primitive === "entity-linker" ||
+                  field.primitive === "place-linker")
+              ) {
+                return null;
+              }
               // CR-04: validator-emitted errors arrive as stable
               // i18n tokens (`field_required`, `invalid_level`).
               // Resolve to localised strings here so leaf renderers

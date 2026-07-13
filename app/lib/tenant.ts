@@ -18,9 +18,9 @@
  *     spoofing via DNS games.
  *
  *   - `hasCapability(tenant, cap)` / `requireCapability(tenant, cap)`
- *     -- the route-loader gates for the four capability flags
+ *     -- the route-loader gates for the capability flags
  *     (`crowdsourcing`, `vocabulary_hub`, `publish_pipeline`,
- *     `multi_repository`). The `require` form throws a bare 404 so
+ *     `multi_repository`, `authorities`). The `require` form throws a bare 404 so
  *     a disabled-capability surface looks identical to a missing
  *     route from the outside; v0.4 capabilities are operator-set
  *     and effectively immutable (multi-tenancy.md), so the "user
@@ -68,7 +68,7 @@
  *     for operator actions touching tenant data; URL hits on
  *     disabled capabilities are not operator actions.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { eq } from "drizzle-orm";
@@ -83,6 +83,34 @@ export const NEOGRANADINA_TENANT_ID = "c50bfa92-1223-4f00-ba15-d50c39ae3c0b" as 
 // 2026-05-02 as the second institutional tenant after Neogranadina. Slug
 // 'ampl', all four capability flags ON, descriptive_standard 'isadg'.
 export const AMPL_TENANT_ID = "8d235621-ae3b-4751-a241-20341efd6d3a" as const;
+// AHR — Archivo Histórico de Rionegro. A member tenant of the
+// Neogranadina federation (federation migration sequence step 6,
+// migration 0051). Owns the co-ahr repository row and its descriptions;
+// AHR crowdsourcing belongs to the Neogranadina lead tenant, not here
+// (ruled). Slug 'ahr', descriptive_standard 'isadg'. Capability flags are
+// all OFF: crowdsourcing OFF is ruled (AHR is catalogued collaboratively
+// by the federation), the rest are conservative least-privilege
+// placeholders that step 7 provisioning replaces with AHR's real profile.
+// The literal MUST match drizzle/0051_partition_ahr_tenant.sql
+// byte-for-byte.
+export const AHR_TENANT_ID = "c82525bd-13d5-46dd-9c1b-e258507b966c" as const;
+
+// SBMAL — Santa Barbara Mission Archive-Library. First member tenant of
+// the AMPL federation (federation migration sequence step 7, migration
+// 0056). Slug 'sbmal', descriptive_standard 'dacs'. Capability profile:
+// vocabulary_hub ON (AMPL's own authority space, seeded from
+// Neogranadina's canonical terms by the steward provisioning flow — the
+// copy is deferred there, see 0056's header), crowdsourcing /
+// publish_pipeline / multi_repository OFF. The literal MUST match
+// drizzle/0056_provision_member_tenants.sql byte-for-byte.
+export const SBMAL_TENANT_ID = "a0412263-176c-45be-96c7-6421c9d2ad51" as const;
+// KOMUNI — Komuni (activist collective, Neogranadina/AMPL MEAP project).
+// A member tenant of the Neogranadina federation (federation migration
+// sequence step 7, migration 0056). Slug 'komuni', descriptive_standard
+// 'isadg'. Capability profile identical to ahr: vocabulary_hub ON (shares
+// Neogranadina's authority space), the other three OFF. The literal MUST
+// match drizzle/0056_provision_member_tenants.sql byte-for-byte.
+export const KOMUNI_TENANT_ID = "7f17a2e6-a673-454a-ad35-9e06acc02d90" as const;
 
 // DACS test tenant — fixture for standard-toggle integration tests.
 // Slug 'dacs-test', all four capability flags ON, descriptive_standard
@@ -95,6 +123,21 @@ export const DACS_TEST_TENANT_ID = "66666666-6666-4666-8666-666666666666" as con
 // RAD test tenant — same shape as DACS, descriptive_standard 'rad'.
 // Standard-toggle integration tests fixture.
 export const RAD_TEST_TENANT_ID = "77777777-7777-4777-8777-777777777777" as const;
+
+// Federation identities (federation spec §2/§3, migration 0044). Each
+// tenant belongs to exactly one federation; a standalone tenant is a
+// federation of one. These three back the current tenant set:
+//   - Neogranadina federation, lead = the neogranadina tenant.
+//   - AMPL federation, lead = the ampl tenant (SBMAL joins as a member
+//     in a later provisioning step).
+//   - Platform federation-of-one, lead = the platform tenant.
+// The literals MUST match drizzle/0044_federations.sql byte-for-byte —
+// they are the schema-level identity of these federation rows.
+// Neogranadina and AMPL ship with multiMemberEnabled ON; platform stays
+// OFF (a degenerate federation-of-one that never gains members).
+export const NEOGRANADINA_FEDERATION_ID = "b4462493-6170-44f8-ae07-24666606d1f1" as const;
+export const AMPL_FEDERATION_ID = "113c1dab-e201-46fc-9620-0642131613ae" as const;
+export const PLATFORM_FEDERATION_ID = "de8b3778-6aca-44f7-a849-f93efd27e542" as const;
 
 /**
  * Reserved slugs that the tenant-creation route must reject. These
@@ -264,7 +307,7 @@ export function assertNonPlatformOrAllowlisted(
 }
 
 /**
- * The four capability flag identifiers. Adding a fifth here forces
+ * The capability flag identifiers. Adding one here forces
  * `hasCapability`'s exhaustive switch to break compilation, which is
  * the intended fail-loud signal.
  */
@@ -272,7 +315,8 @@ export type Capability =
   | "crowdsourcing"
   | "vocabulary_hub"
   | "publish_pipeline"
-  | "multi_repository";
+  | "multi_repository"
+  | "authorities";
 
 /**
  * Returns the boolean value of the matching `*Enabled` field on
@@ -290,6 +334,8 @@ export function hasCapability(tenant: Tenant, cap: Capability): boolean {
       return tenant.publishPipelineEnabled;
     case "multi_repository":
       return tenant.multiRepositoryEnabled;
+    case "authorities":
+      return tenant.authoritiesEnabled;
   }
 }
 
@@ -325,38 +371,54 @@ export function assertOperator(tenant: Tenant): void {
 }
 
 /**
- * Asserts that the user belongs to the resolved tenant. Default-deny:
- * any mismatch -- including an operator session
- * (`user.tenantId === PLATFORM_TENANT_ID`) hitting a tenant
- * subdomain -- throws 403 unless the caller opts into the
- * `allowImpersonation` carve-out.
+ * Asserts that the user may act in the resolved tenant. Default-deny:
+ * any mismatch throws 403 unless one of the two cross-tenant carve-outs
+ * applies -- a federation grant, or the operator impersonation opt-in.
  *
- * The impersonation carve-out: the operator's user row lives in the
- * platform tenant; impersonation routes on tenant subdomains
- * legitimately accept the operator. The opt-in is per-call;
- * default-deny is preserved for every existing caller.
+ * Three admit paths, in order:
+ *   (a) HOME access: `user.tenantId === tenant.id` (unchanged).
+ *   (b) GRANT access: the caller passes a `grant` (resolved from
+ *       `federation_memberships` by `app/lib/federation.server.ts`) whose
+ *       `federationId` matches `tenant.federationId`, and the user is not
+ *       already home (`tenant.id !== user.tenantId`). This is the
+ *       federation-lead-staff-into-member-tenant path (spec §4). The
+ *       helper trusts the caller (the middleware) to have looked the
+ *       grant up FOR THIS tenant's federation and to have applied the
+ *       liveness checks; the `federationId` re-match here is the
+ *       structural belt-and-braces.
+ *   (c) IMPERSONATION: the operator's user lives in the platform tenant;
+ *       impersonation routes on tenant subdomains legitimately accept the
+ *       operator when the caller sets `allowImpersonation: true`. It
+ *       admits exactly `user.tenantId === PLATFORM_TENANT_ID &&
+ *       tenant.kind === "tenant"` -- never an ordinary tenant user
+ *       mismatching tenants.
  *
- * The carve-out admits exactly the case
- * `user.tenantId === PLATFORM_TENANT_ID && tenant.kind === "tenant"`
- * AND the caller has set `allowImpersonation: true`. It does NOT
- * admit a tenant user mismatching tenants — only the platform-tenant
- * operator can ride this carve-out.
- *
- * This helper is the SINGLE chokepoint for operator-as-tenant
- * access. Do not duplicate this check elsewhere; the impersonation
- * routes (`/handoff/impersonation` and the operator login-as action)
- * pass the option, the auth middleware decides per-request based on
- * the impersonating session payload, and every other caller receives
- * the default-deny behaviour.
+ * This helper is the SINGLE chokepoint for cross-tenant access. Do not
+ * duplicate the check elsewhere; the auth middleware resolves the grant
+ * and the impersonation envelope per-request and threads them in, and
+ * every other caller receives default-deny.
  */
 export function requireTenantUser(
   tenant: Tenant,
   user: User,
-  options?: { allowImpersonation?: boolean },
+  options?: {
+    allowImpersonation?: boolean;
+    grant?: { federationId: string } | null;
+  },
 ): void {
+  // (a) Home access.
   if (user.tenantId === tenant.id) {
     return;
   }
+  // (b) Federation grant access into a member tenant.
+  if (
+    options?.grant != null &&
+    tenant.id !== user.tenantId &&
+    options.grant.federationId === tenant.federationId
+  ) {
+    return;
+  }
+  // (c) Operator impersonation carve-out.
   if (
     options?.allowImpersonation === true &&
     user.tenantId === PLATFORM_TENANT_ID &&

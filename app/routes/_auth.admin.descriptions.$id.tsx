@@ -26,15 +26,14 @@
  * store; only the explicit save path crosses into `descriptions` and
  * only that path enforces the validator.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
 import {
   Form,
   useLoaderData,
   useActionData,
-  useFetcher,
   redirect,
   Link,
 } from "react-router";
@@ -45,6 +44,8 @@ import { DescriptionForm } from "~/components/descriptions/description-form";
 import { ResizablePane } from "~/components/descriptions/resizable-pane";
 import { AdminIiifViewer } from "~/components/descriptions/admin-iiif-viewer";
 import { DraftsBanner } from "~/components/admin/drafts-banner";
+import { ConflictDialog } from "~/components/admin/conflict-dialog";
+import { useAutosaveDraft } from "~/components/admin/use-autosave-draft";
 import { PublishToggle } from "~/components/descriptions/publish-toggle";
 import type { Route } from "./+types/_auth.admin.descriptions.$id";
 
@@ -202,6 +203,7 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   const { users } = await import("~/db/schema");
   const conflictRaw = await getConflictDraft(
     db,
+    tenant.id,
     id,
     "description",
     user.id
@@ -235,6 +237,9 @@ export async function loader({ params, context }: Route.LoaderArgs) {
     // Hand the active standard down to <DescriptionForm> so the
     // renderer picks the correct StandardConfig.
     descriptiveStandard,
+    // Gates the Entity/Place linker fields; off tenants catalogue with
+    // the plain-text creator/place display fields.
+    authoritiesEnabled: tenant.authoritiesEnabled,
   };
 }
 
@@ -273,6 +278,24 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   const formData = await request.formData();
   const intent = formData.get("_action") as string;
 
+  // Off-state authority link/unlink intents: reject hand-crafted POSTs
+  // to the Entity/Place junction ops when the tenant lacks the
+  // authorities capability. The pickers are hidden client-side; this is
+  // the server-side backstop. Core description edits are unaffected.
+  const AUTHORITY_LINK_INTENTS = new Set([
+    "link_entity",
+    "update_entity_link",
+    "remove_entity_link",
+    "reorder_entity_link",
+    "link_place",
+    "update_place_link",
+    "remove_place_link",
+  ]);
+  if (AUTHORITY_LINK_INTENTS.has(intent)) {
+    const { requireCapability } = await import("~/lib/tenant");
+    requireCapability(tenant, "authorities");
+  }
+
   switch (intent) {
     case "toggle_publish": {
       const desc = await db
@@ -300,7 +323,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const { saveDraft } = await import("~/lib/drafts.server");
       const snapshot = formData.get("snapshot") as string;
       if (snapshot) {
-        await saveDraft(db, id, "description", user.id, snapshot);
+        await saveDraft(db, tenant.id, id, "description", user.id, snapshot);
       }
       return { ok: true as const, autosaved: true };
     }
@@ -310,56 +333,64 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const getField = (name: string) =>
         ((formData.get(name) as string)?.trim() || null) as string | null;
 
-      const title = getField("title");
+      // The SINGLE registry of description columns the edit form
+      // carries. The validator payload and the DB write are both
+      // derived from this tuple, so a column cannot reach one and
+      // silently miss the other — previously the field list was
+      // declared three times in parallel (a getField const block,
+      // formObject, updatedFields) with nothing but inspection
+      // keeping them aligned. descriptionLevel (enum-parsed),
+      // hasDigital (checkbox), and referenceCode (read-only, taken
+      // from the record) are handled explicitly below.
+      const UPDATE_FORM_FIELDS = [
+        "title",
+        "localIdentifier",
+        "repositoryId",
+        "translatedTitle",
+        "uniformTitle",
+        "resourceType",
+        "genre",
+        "dateExpression",
+        "dateStart",
+        "dateEnd",
+        "dateCertainty",
+        "extent",
+        "dimensions",
+        "medium",
+        "provenance",
+        "scopeContent",
+        "ocrText",
+        "arrangement",
+        "accessConditions",
+        "reproductionConditions",
+        "language",
+        "locationOfOriginals",
+        "locationOfCopies",
+        "findingAids",
+        "notes",
+        "internalNotes",
+        "imprint",
+        "editionStatement",
+        "seriesStatement",
+        "volumeNumber",
+        "issueNumber",
+        "pages",
+        "sectionTitle",
+        "publicationTitle",
+        "adminBiogHistory",
+        "acquisitionInfo",
+        "preferredCitation",
+        "systemOfArrangement",
+        "physicalCharacteristics",
+        "creatorDisplay",
+        "iiifManifestUrl",
+      ] as const;
+
+      const raw = Object.fromEntries(
+        UPDATE_FORM_FIELDS.map((name) => [name, getField(name)]),
+      ) as Record<(typeof UPDATE_FORM_FIELDS)[number], string | null>;
+
       const descriptionLevel = getField("descriptionLevel");
-      const localIdentifier = getField("localIdentifier");
-      const repositoryId = getField("repositoryId");
-      const translatedTitle = getField("translatedTitle");
-      const uniformTitle = getField("uniformTitle");
-      const resourceType = getField("resourceType");
-      const genre = getField("genre");
-      const dateExpression = getField("dateExpression");
-      const dateStart = getField("dateStart");
-      const dateEnd = getField("dateEnd");
-      const dateCertainty = getField("dateCertainty");
-      const extent = getField("extent");
-      const dimensions = getField("dimensions");
-      const medium = getField("medium");
-      const provenance = getField("provenance");
-      const scopeContent = getField("scopeContent");
-      const ocrText = getField("ocrText");
-      const arrangement = getField("arrangement");
-      const accessConditions = getField("accessConditions");
-      const reproductionConditions = getField("reproductionConditions");
-      const language = getField("language");
-      const locationOfOriginals = getField("locationOfOriginals");
-      const locationOfCopies = getField("locationOfCopies");
-      // relatedMaterials dropped in 0036 (0% populated).
-      const findingAids = getField("findingAids");
-      const notes = getField("notes");
-      const internalNotes = getField("internalNotes");
-      const imprint = getField("imprint");
-      const editionStatement = getField("editionStatement");
-      const seriesStatement = getField("seriesStatement");
-      const volumeNumber = getField("volumeNumber");
-      const issueNumber = getField("issueNumber");
-      const pages = getField("pages");
-      const sectionTitle = getField("sectionTitle");
-      // Standard-aware columns surfaced through the validator. These
-      // MUST also flow into `updatedFields` below — reading them
-      // inline into `formObject` only would silently drop the values
-      // on save (the validator would pass but the DB write would
-      // omit them). Hoisting through `getField` matches the pattern
-      // of every other field above so the formObject / updatedFields
-      // pair stays parallel by inspection.
-      const publicationTitle = getField("publicationTitle");
-      const adminBiogHistory = getField("adminBiogHistory");
-      const acquisitionInfo = getField("acquisitionInfo");
-      const preferredCitation = getField("preferredCitation");
-      const systemOfArrangement = getField("systemOfArrangement");
-      const physicalCharacteristics = getField("physicalCharacteristics");
-      const creatorDisplay = getField("creatorDisplay");
-      const iiifManifestUrl = getField("iiifManifestUrl");
       const hasDigital = formData.get("hasDigital") === "on";
 
       // Pre-validate the descriptionLevel against the closed enum.
@@ -420,50 +451,26 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       // required-field issues in a single pass so the form surfaces
       // them together.
       const formObject: Record<string, unknown> = {
-        title,
+        // referenceCode is read-only in edit mode and never travels in
+        // the form, but every standard requires it — the validator must
+        // see the record's own value or NO update can ever pass
+        // validation (field_required on a field the form cannot carry).
+        // The null arm is unreachable in practice (the column is NOT
+        // NULL at creation); it exists to satisfy the missing-record
+        // narrowing, and would surface as a type error, not a crash.
+        referenceCode: desc?.referenceCode ?? null,
         descriptionLevel: levelParse.data,
-        localIdentifier,
-        repositoryId,
-        translatedTitle,
-        uniformTitle,
-        resourceType,
-        genre,
-        dateExpression,
-        dateStart,
-        dateEnd,
-        dateCertainty,
-        extent,
-        dimensions,
-        medium,
-        provenance,
-        scopeContent,
-        ocrText,
-        arrangement,
-        accessConditions,
-        reproductionConditions,
-        language,
-        locationOfOriginals,
-        locationOfCopies,
-        findingAids,
-        notes,
-        internalNotes,
-        imprint,
-        editionStatement,
-        seriesStatement,
-        volumeNumber,
-        issueNumber,
-        pages,
-        sectionTitle,
-        publicationTitle,
-        adminBiogHistory,
-        acquisitionInfo,
-        preferredCitation,
-        systemOfArrangement,
-        physicalCharacteristics,
-        creatorDisplay,
-        iiifManifestUrl,
         hasDigital,
       };
+      for (const name of UPDATE_FORM_FIELDS) {
+        // Empty inputs arrive as null from getField, but the base
+        // schema's optional fields are optional, NOT nullable — a null
+        // fails them with a type error. The validator must see empty
+        // as absent; the mandatory-field check still fires on absent
+        // values (its test is `value == null`), and the DB write below
+        // keeps the null so clearing a field clears the column.
+        formObject[name] = raw[name] ?? undefined;
+      }
 
       // `tenants.descriptive_standard` is NOT NULL when
       // `kind = 'tenant'` per the schema CHECK in
@@ -530,61 +537,26 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         };
       }
 
+      // The DB write derives from the same registry as the validator
+      // payload. The named overrides after the spread are the ONLY
+      // deliberate divergences from raw passthrough: NOT NULL columns
+      // coalesce to their column defaults, resourceType is enum-gated
+      // (belt-and-braces — the validator already rejects invalid
+      // values), and descriptionLevel carries the parsed enum.
       const updatedFields = {
-        title: title ?? "",
+        ...raw,
+        title: raw.title ?? "",
         descriptionLevel: levelParse.data,
-        localIdentifier,
-        repositoryId: repositoryId ?? "",
-        translatedTitle,
-        uniformTitle,
+        repositoryId: raw.repositoryId ?? "",
         resourceType:
-          resourceType &&
+          raw.resourceType &&
           RESOURCE_TYPES.includes(
-            resourceType as (typeof RESOURCE_TYPES)[number]
+            raw.resourceType as (typeof RESOURCE_TYPES)[number]
           )
-            ? (resourceType as (typeof RESOURCE_TYPES)[number])
+            ? (raw.resourceType as (typeof RESOURCE_TYPES)[number])
             : null,
-        genre: genre ?? "[]",
-        dateExpression,
-        dateStart,
-        dateEnd,
-        dateCertainty,
-        extent,
-        dimensions,
-        medium,
-        provenance,
-        scopeContent,
-        ocrText: ocrText ?? "",
-        arrangement,
-        accessConditions,
-        reproductionConditions,
-        language,
-        locationOfOriginals,
-        locationOfCopies,
-        findingAids,
-        notes,
-        internalNotes,
-        imprint,
-        editionStatement,
-        seriesStatement,
-        volumeNumber,
-        issueNumber,
-        pages,
-        sectionTitle,
-        // Standard-aware columns. These MUST stay in lockstep with
-        // the `formObject` constructor above and with `getField`
-        // reads higher in this action — see the parallel-by-
-        // inspection note. Adding a new standard-aware column
-        // requires three touch-points: the `getField` block,
-        // `formObject`, and this object.
-        publicationTitle,
-        adminBiogHistory,
-        acquisitionInfo,
-        preferredCitation,
-        systemOfArrangement,
-        physicalCharacteristics,
-        creatorDisplay,
-        iiifManifestUrl,
+        genre: raw.genre ?? "[]",
+        ocrText: raw.ocrText ?? "",
         hasDigital,
       };
 
@@ -626,7 +598,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 
       // Delete draft after successful save
       const { deleteDraft } = await import("~/lib/drafts.server");
-      await deleteDraft(db, id, "description");
+      await deleteDraft(db, tenant.id, id, "description");
 
       return { ok: true as const, message: "updated" };
     }
@@ -903,6 +875,7 @@ export default function DescriptionDetailPage({
     placeLinks,
     conflictDraft,
     descriptiveStandard,
+    authoritiesEnabled,
   } = loaderData;
   const actionData = useActionData<typeof action>();
   const { t } = useTranslation("descriptions_admin");
@@ -929,45 +902,8 @@ export default function DescriptionDetailPage({
     }
   }, [actionData]);
 
-  // Autosave via useFetcher
-  const draftFetcher = useFetcher();
-  const formRef = useRef<HTMLFormElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
-
-  const triggerAutosave = useCallback(() => {
-    if (!formRef.current || !isEditing) return;
-    const fd = new FormData(formRef.current);
-    const snapshot: Record<string, string> = {};
-    for (const [key, value] of fd.entries()) {
-      if (!key.startsWith("_")) {
-        snapshot[key] = value as string;
-      }
-    }
-    draftFetcher.submit(
-      { _action: "autosave", snapshot: JSON.stringify(snapshot) },
-      { method: "post" }
-    );
-  }, [isEditing, draftFetcher]);
-
-  const handleFormChange = useCallback(() => {
-    if (!isEditing) return;
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(triggerAutosave, 2000);
-  }, [isEditing, triggerAutosave]);
-
-  // Clean up debounce on unmount or mode change
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [isEditing]);
-
-  const draftStatus =
-    draftFetcher.state === "submitting"
-      ? "saving"
-      : draftFetcher.data && "autosaved" in draftFetcher.data
-        ? "saved"
-        : null;
+  // Autosave via shared debounced-draft hook
+  const { formRef, handleFormChange, draftStatus } = useAutosaveDraft(isEditing);
 
   // Collapse middle breadcrumb ancestors if > 4
   const showAllAncestors = ancestors.length <= 4;
@@ -1162,6 +1098,7 @@ export default function DescriptionDetailPage({
                 entityLinks={entityLinks}
                 placeLinks={placeLinks}
                 standard={descriptiveStandard}
+                authoritiesEnabled={authoritiesEnabled}
               />
             </Form>
           }
@@ -1176,7 +1113,7 @@ export default function DescriptionDetailPage({
             <h2 className="text-lg font-semibold text-stone-700">
               {t("delete_description")}
             </h2>
-            <p className="mt-2 font-serif text-[15px] text-stone-500 max-w-[36ch] mx-auto">
+            <p className="mt-2 font-serif text-15 text-stone-500 max-w-measure mx-auto">
               {t("error_delete_confirm", { title: description.title })}
             </p>
             {(entityLinkCount > 0 || placeLinkCount > 0) && (
@@ -1213,45 +1150,19 @@ export default function DescriptionDetailPage({
         actionData &&
         "error" in actionData &&
         actionData.error === "conflict" && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-lg">
-              <h2 className="text-lg font-semibold text-stone-700">
-                {t("overwrite_confirm", {
-                  name: "modifiedBy" in actionData ? actionData.modifiedBy : "",
-                  time:
-                    "modifiedAt" in actionData
-                      ? new Date(
-                          actionData.modifiedAt as number
-                        ).toLocaleString()
-                      : "",
-                })}
-              </h2>
-              <div className="mt-4 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowConflictDialog(false)}
-                  className="rounded-md border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50"
-                >
-                  {t("overwrite_cancel")}
-                </button>
-                <Form method="post">
-                  <input type="hidden" name="_action" value="update" />
-                  <input type="hidden" name="_force" value="true" />
-                  <input
-                    type="hidden"
-                    name="_updatedAt"
-                    value={String(description.updatedAt)}
-                  />
-                  <button
-                    type="submit"
-                    className="rounded-md bg-indigo px-4 py-2 text-sm font-semibold text-parchment hover:bg-indigo-deep"
-                  >
-                    {t("overwrite_button")}
-                  </button>
-                </Form>
-              </div>
-            </div>
-          </div>
+          <ConflictDialog
+            modifiedByName={
+              ("modifiedBy" in actionData ? actionData.modifiedBy : "") ?? ""
+            }
+            modifiedAt={
+              "modifiedAt" in actionData
+                ? (actionData.modifiedAt as number)
+                : null
+            }
+            recordUpdatedAt={description.updatedAt}
+            onCancel={() => setShowConflictDialog(false)}
+            t={t}
+          />
         )}
     </div>
   );

@@ -11,7 +11,7 @@
  * `colors_and_type.css`; do not introduce values that aren't in that
  * file.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 @import "tailwindcss" source(".");
 
@@ -59,11 +59,31 @@
   --font-serif: "Spectral", ui-serif, Georgia, "Times New Roman", serif;
   --font-display: "Spectral", ui-serif, Georgia, serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* ── Font-size steps below/between the default scale ─────────────
+     Tailwind ships xs(12px)/sm(14px)/base(16px)/lg(18px)/...; these four
+     fill the badge, caption, and in-between sizes it doesn't. Line-heights
+     interpolate the neighbouring default steps' px values (16/20/24/28 for
+     xs/sm/base/lg) on a 2px grid — keep any further additions on that grid. */
+  --text-10: 0.625rem;
+  --text-10--line-height: calc(0.875 / 0.625); /* 14px */
+  --text-11: 0.6875rem;
+  --text-11--line-height: calc(1 / 0.6875); /* 16px, matches text-xs */
+  --text-13: 0.8125rem;
+  --text-13--line-height: calc(1.125 / 0.8125); /* 18px */
+  --text-15: 0.9375rem;
+  --text-15--line-height: calc(1.375 / 0.9375); /* 22px */
+
+  /* ── Measure ───────────────────────────────────────────────────────
+     Line-length constraint for narrow centred body copy (empty states,
+     descriptive captions); `ch`-based because it bounds character count,
+     not layout width. */
+  --container-measure: 36ch;
 }
 
 /* CSS custom properties exposed at :root so non-utility consumers
-   (component-level `style`, the `.fs-*` semantic type tokens, status
-   pair lookups) can reach them without going through Tailwind. */
+   (component-level `style`, status pair lookups) can reach them
+   without going through Tailwind. */
 :root {
   --indigo: #1f2e4d;
   --indigo-deep: #14203a;
@@ -165,8 +185,8 @@
 }
 
 /* Body defaults: Bricolage at opsz 14 for chrome, indigo body text on
-   white. Headings and prose pick up Spectral via the `.fs-*` tokens
-   below or `font-serif` Tailwind utility. */
+   white. Headings and prose pick up Spectral via the `font-serif` /
+   `font-display` Tailwind utilities. */
 html,
 body {
   background: var(--bg);
@@ -176,134 +196,6 @@ body {
 body {
   font-family: var(--font-sans);
   font-variation-settings: "opsz" 14;
-}
-
-/* ── Semantic type tokens ─────────────────────────────────────── */
-.fs-display-xxl {
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: 5rem;
-  line-height: 1;
-  letter-spacing: -0.02em;
-  font-variant-numeric: lining-nums tabular-nums;
-}
-.fs-display-xl {
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: 3.5rem;
-  line-height: 1.1;
-  letter-spacing: -0.015em;
-  font-variant-numeric: lining-nums tabular-nums;
-}
-.fs-display {
-  font-family: var(--font-serif);
-  font-weight: 600;
-  font-size: 2.5rem;
-  line-height: 1.15;
-  letter-spacing: -0.01em;
-  font-variant-numeric: lining-nums tabular-nums;
-}
-.fs-stat {
-  font-family: var(--font-serif);
-  font-weight: 600;
-  font-size: 1.5rem;
-  line-height: 1;
-  color: var(--verdigris);
-  font-variant-numeric: lining-nums tabular-nums;
-}
-.fs-h1 {
-  font-family: var(--font-serif);
-  font-weight: 600;
-  font-size: 2rem;
-  line-height: 1.2;
-  color: var(--fg-1);
-}
-.fs-h2 {
-  font-family: var(--font-serif);
-  font-weight: 600;
-  font-size: 1.5rem;
-  line-height: 1.25;
-  color: var(--fg-1);
-}
-.fs-h3 {
-  font-family: var(--font-serif);
-  font-weight: 600;
-  font-size: 1.125rem;
-  line-height: 1.35;
-  color: var(--fg-1);
-}
-.fs-h4 {
-  font-family: var(--font-sans);
-  font-weight: 600;
-  font-size: 0.875rem;
-  line-height: 1.4;
-  color: var(--fg-1);
-  letter-spacing: 0.02em;
-}
-.fs-eyebrow {
-  font-family: var(--font-sans);
-  font-weight: 600;
-  font-size: 0.75rem;
-  line-height: 1.4;
-  color: var(--fg-3);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
-.fs-body {
-  font-family: var(--font-serif);
-  font-weight: 400;
-  font-size: 1rem;
-  line-height: 1.6;
-  color: var(--fg-1);
-}
-.fs-body-sans {
-  font-family: var(--font-sans);
-  font-weight: 400;
-  font-size: 0.9375rem;
-  line-height: 1.55;
-  color: var(--fg-1);
-}
-.fs-meta {
-  font-family: var(--font-sans);
-  font-weight: 400;
-  font-size: 0.75rem;
-  line-height: 1.4;
-  color: var(--fg-2);
-}
-.fs-micro {
-  font-family: var(--font-sans);
-  font-weight: 500;
-  font-size: 0.6875rem;
-  line-height: 1.3;
-  color: var(--fg-3);
-}
-.fs-quote {
-  font-family: var(--font-serif);
-  font-weight: 400;
-  font-style: italic;
-  font-size: 0.9375rem;
-  line-height: 1.6;
-  color: var(--fg-1);
-}
-.fs-code {
-  font-family: var(--font-mono);
-  font-weight: 400;
-  font-size: 0.8125rem;
-  line-height: 1.5;
-  color: var(--fg-2);
-}
-.fs-btn {
-  font-family: var(--font-sans);
-  font-weight: 600;
-  font-size: 0.9375rem;
-  line-height: 1.2;
-}
-.fs-label {
-  font-family: var(--font-sans);
-  font-weight: 500;
-  font-size: 0.875rem;
-  line-height: 1.4;
-  color: var(--fg-1);
 }
 
 /* The system's one custom transition: comments collapse/expand on a

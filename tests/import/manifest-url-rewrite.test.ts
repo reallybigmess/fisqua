@@ -15,11 +15,12 @@
  * an already-canonical URL through the helper returns it unchanged
  * so re-running the importer doesn't corrupt the URL).
  *
- * @version v0.3.0
+ * @version v0.4.1
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import * as os from "node:os";
 
 describe("rewriteManifestUrl", () => {
   it("rewrites a manifest URL to canonical pattern using reference code", async () => {
@@ -76,17 +77,23 @@ describe("rewriteManifestUrl", () => {
 });
 
 describe("PK-to-UUID mapping output", () => {
-  const OUTPUT_DIR = ".import";
+  // Per-suite scratch dir (never the production `.import/` snapshot dir —
+  // see audit item 23).
+  let outputDir: string;
+
+  async function setUpOutputDir() {
+    outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "fisqua-import-test-"));
+  }
 
   async function cleanOutput() {
     try {
-      await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
+      await fs.rm(outputDir, { recursive: true, force: true });
     } catch {
       // ignore
     }
   }
 
-  beforeEach(cleanOutput);
+  beforeEach(setUpOutputDir);
   afterEach(cleanOutput);
 
   it("writes pk-uuid-mapping.json after import", async () => {
@@ -98,12 +105,12 @@ describe("PK-to-UUID mapping output", () => {
     );
 
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve("tests/import/fixtures/descriptions.json");
-    const { idMap } = await importDescriptions(fixturePath, repoIdMap);
+    const { idMap } = await importDescriptions(fixturePath, repoIdMap, outputDir);
 
-    const mappingPath = path.join(OUTPUT_DIR, "pk-uuid-mapping.json");
+    const mappingPath = path.join(outputDir, "pk-uuid-mapping.json");
     const raw = await fs.readFile(mappingPath, "utf8");
     const mapping = JSON.parse(raw);
 

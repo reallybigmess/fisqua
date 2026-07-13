@@ -81,7 +81,7 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   const { drizzle } = await import("drizzle-orm/d1");
   const { eq, and } = await import("drizzle-orm");
   const { inArray } = await import("drizzle-orm");
-  const { requireProjectRole, requireVolumeAccess } = await import("../lib/permissions.server");
+  const { requireProjectRole, requireVolumeAccess, highestProjectRole } = await import("../lib/permissions.server");
   const { loadEntries } = await import("../lib/entries.server");
   const { getCommentsForVolume } = await import("../lib/comments.server");
   const { getOpenQcFlags } = await import("../lib/qc-flags.server");
@@ -126,11 +126,10 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   const { getDocumentSubtypes } = await import("../lib/project-settings");
   const documentSubtypes = getDocumentSubtypes(projectRow?.settings ?? null);
 
-  // Determine user's role on this project (highest privilege: lead > reviewer > cataloguer)
-  const roleOrder = ["lead", "reviewer", "cataloguer"] as const;
-  const userRole = memberships.length > 0
- ? roleOrder.find((r) => memberships.some((m) => m.role === r)) ?? "cataloguer"
- : "cataloguer";
+  // Highest role on this project; admins can arrive with no membership
+  // rows (requireProjectRole bypass), in which case cataloguer is the
+  // access-level floor and isAdmin grants edit anyway.
+  const userRole = highestProjectRole(memberships) ?? "cataloguer";
 
   // Determine access level (edit, review, readonly)
   const accessLevel = requireVolumeAccess(user.id, volume, userRole, user.isAdmin);
@@ -416,12 +415,11 @@ export default function ViewerRoute({ loaderData }: Route.ComponentProps) {
  flagId: string | null;
   }>({ open: false, flagId: null });
 
-  // cleanup: resegmentation dialog
-  // state. The ResegmentationCard inside each OutlineEntry invokes
-  // `onOpenResegDialog(flagId)`; we reverse-look the flag id in
-  // `openResegFlagsByEntry` to find the owning entry, then render
-  // `FlagResegmentationDialog` at the route level with the entry's
-  // title/refCode and a neighbour list derived from its siblings.
+  // Resegmentation dialog state. The ResegmentationCard inside each
+  // OutlineEntry invokes `onOpenResegDialog(flagId)`; we reverse-look
+  // the flag id in `openResegFlagsByEntry` to find the owning entry,
+  // then render `FlagResegmentationDialog` at the route level with the
+  // entry's title/refCode and a neighbour list derived from its siblings.
   const [resegDialogFlagId, setResegDialogFlagId] = useState<string | null>(
  null,
   );
@@ -441,11 +439,10 @@ export default function ViewerRoute({ loaderData }: Route.ComponentProps) {
  region: { x: number; y: number; w: number; h: number };
   } | null>(null);
 
-  // follow-up (2026-04-18): the active inline draft comment.
-  // Replaces the earlier modal promptState — every comment-creation
-  // surface (entry-level Add comment, pin drop, reply) now renders as
-  // an inline composer inside the outline. Cancel clears the amber pin
-  // in lockstep so no region ever commits without its comment.
+  // The active inline draft comment. Every comment-creation surface
+  // (entry-level Add comment, pin drop, reply) renders as an inline
+  // composer inside the outline. Cancel clears the amber pin in
+  // lockstep so no region ever commits without its comment.
   const [draftCommentState, setDraftCommentState] = useState<
  import("../lib/outline-items").DraftCommentState | null
   >(null);
@@ -645,9 +642,7 @@ export default function ViewerRoute({ loaderData }: Route.ComponentProps) {
  * findCurrentEntry, set draftRegion, and write ?comments=entry:<id>
  * so the outline panel () can auto-expand the card.
  *
- * 2026-04-18 cleanup: the flag-dialog draw-new branch was
- * removed alongside "Vincular a región" -- this handler now has a
- * single role (entry-card draft region flow).
+ * This handler has a single role: the entry-card draft region flow.
  */
   const handleRegionPlace = useCallback(
  ({
@@ -678,9 +673,8 @@ export default function ViewerRoute({ loaderData }: Route.ComponentProps) {
  );
  return;
  }
- // follow-up: hold the draft pin amber AND surface an
- // inline draft-comment row under the owning entry. Cancel clears
- // both pieces of state together.
+ // Hold the draft pin amber and surface an inline draft-comment row
+ // under the owning entry. Cancel clears both pieces of state together.
  setDraftRegion({ entryId: owningEntryId, pageId, region });
  setDraftCommentState({
  entryId: owningEntryId,
@@ -750,10 +744,8 @@ export default function ViewerRoute({ loaderData }: Route.ComponentProps) {
  }
   }, []);
 
-  // Cleanup 2026-04-18: `handleOpenRaiseFlagFromToolbar` was removed
-  // alongside the toolbar "Marcar problema" button. The per-image
-  // `onFlagClick` callback on IIIFViewer is now the single entry
-  // point into the RaiseFlagDialog.
+  // The per-image `onFlagClick` callback on IIIFViewer is the single
+  // entry point into the RaiseFlagDialog.
 
   // RegionChip click handler. Look
   // up the comment's pageId in the inverted regionsByPage map, scroll
@@ -1008,9 +1000,8 @@ export default function ViewerRoute({ loaderData }: Route.ComponentProps) {
  * shared by all pages. `handleCommentAdded` is reused as the
  * revalidation callback -- both a new comment and a new QC
  * flag require the loader to re-run so the outline panel and
- * per-page badges stay in sync. 2026-04-18 cleanup:
- * "Vincular a región" props removed -- QC flags are image-level
- * by definition (see app/components/qc-flags/flag-qc-dialog.tsx
+ * per-page badges stay in sync. QC flags are image-level by
+ * definition (see app/components/qc-flags/flag-qc-dialog.tsx
  * header note).
  */}
  {flagDialog.open &&
@@ -1118,14 +1109,14 @@ export default function ViewerRoute({ loaderData }: Route.ComponentProps) {
  />
  )}
  {/*
- * cleanup: resegmentation
- * dialog. Opens when a ResegmentationCard's CTA fires
+ * Resegmentation dialog. Opens when a ResegmentationCard's CTA fires
  * `handleOpenResegDialog(flagId)`. We reverse-look the flag id
  * in `openResegFlagsByEntry` to find the owning entry, compute
  * refCodes so the dialog can label the entry in the user's own
  * language, and pass the entry's siblings as neighbours so the
  * cataloguer can tick the adjacent entries that should also be
- * considered affected. Uses the existing * FlagResegmentationDialog unchanged.
+ * considered affected. Uses the existing FlagResegmentationDialog
+ * unchanged.
  */}
  {resegDialogFlagId && (() => {
  // Reverse-lookup: find the entry whose open flag has this id.

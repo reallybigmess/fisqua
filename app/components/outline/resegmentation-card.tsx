@@ -6,7 +6,7 @@
  * the reason, and the lead-only affordance to accept or reject the
  * request.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 import { useTranslation } from "react-i18next";
 import { formatIsoDateTime } from "../../lib/format-date";
@@ -49,7 +49,7 @@ export function ResegmentationCard({
  <div className="mb-3 flex flex-col gap-2 rounded-lg border border-violet-100 bg-violet-50 p-4 font-sans">
  {/* badge */}
  <div>
- <span className="inline-block rounded bg-violet-600 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
+ <span className="inline-block rounded bg-violet-600 px-2 py-0.5 text-10 font-bold uppercase tracking-wide text-white">
  {t("resegmentation:proposed", {
  defaultValue: "Resegmentación propuesta",
  })}

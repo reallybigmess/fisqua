@@ -8,7 +8,7 @@
  * link. Never rendered through normal navigation — only reached
  * via a redirect from role-aware loaders.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { useTranslation } from "react-i18next";
@@ -34,10 +34,10 @@ export default function NoAccessPage() {
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-indigo-tint">
             <ShieldAlert className="h-8 w-8 text-indigo" strokeWidth={1.5} />
           </div>
-          <h1 className="mt-4 font-serif text-[18px] font-semibold text-indigo">
+          <h1 className="mt-4 font-serif text-lg font-semibold text-indigo">
             {t("title")}
           </h1>
-          <p className="mt-2 font-serif text-[15px] text-stone-500 max-w-[36ch] mx-auto">{t("description")}</p>
+          <p className="mt-2 font-serif text-15 text-stone-500 max-w-measure mx-auto">{t("description")}</p>
         </div>
       </div>
     </div>

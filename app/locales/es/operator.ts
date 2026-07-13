@@ -42,6 +42,7 @@ export default {
       vocabulary_hub: "Centro de vocabularios",
       publish_pipeline: "Canal de publicación",
       multi_repository: "Multi-repositorio",
+      authorities: "Autoridades",
     },
     view_link: "Ver",
     empty_state: "Aún no hay inquilinos.",

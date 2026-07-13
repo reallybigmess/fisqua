@@ -26,7 +26,7 @@
  * no FKs to other domain tables and the human-readable code (e.g.
  * `AHRB`, `AGN`) ships verbatim from Django.
  *
- * @version v0.4.0
+ * @version v0.4.1
  */
 import * as fs from "node:fs/promises";
 import * as crypto from "node:crypto";
@@ -46,10 +46,13 @@ const COLUMNS = [
 
 /**
  * Import repositories from a JSON export file.
- * Generates UUIDs for each record and produces chunked SQL INSERT files.
+ * Generates UUIDs for each record and produces chunked SQL INSERT files
+ * under `outputDir` (default `.import/`, the production CLI's
+ * unchanged root; tests pass a per-suite temp dir).
  */
 export async function importRepositories(
-  inputPath: string
+  inputPath: string,
+  outputDir = ".import"
 ): Promise<{ result: ImportResult; idMap: IdMap }> {
   const raw = await fs.readFile(inputPath, "utf8");
   const records = JSON.parse(raw) as Record<string, unknown>[];
@@ -105,7 +108,7 @@ export async function importRepositories(
   }
 
   const statements = generateInserts("repositories", COLUMNS, rows, 100);
-  const sqlFiles = await writeSqlFiles("repositories", statements);
+  const sqlFiles = await writeSqlFiles("repositories", statements, 50, outputDir);
 
   return {
     result: {
@@ -120,4 +123,4 @@ export async function importRepositories(
   };
 }
 
-// Version: v0.4.0
+// Version: v0.4.1

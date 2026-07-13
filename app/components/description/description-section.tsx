@@ -12,7 +12,7 @@
  * through one site (`tStd(t, "sections.<id>", standard)`) rather than
  * being split between parent and child.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 type DescriptionSectionProps = {
@@ -120,7 +120,7 @@ export function DescriptionSection({
           {isExpanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
         </span>
         <span
-          className={`flex-1 font-display text-[1.125rem] font-semibold ${
+          className={`flex-1 font-display text-lg font-semibold ${
             isExpanded ? "text-indigo" : "text-stone-700"
           }`}
         >
@@ -146,4 +146,4 @@ export function DescriptionSection({
 
 export { CompletionDot };
 
-/* @version v0.4.0 */
+/* @version v0.4.2 */

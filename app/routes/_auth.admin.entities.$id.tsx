@@ -1,51 +1,61 @@
 /**
- * Entities Admin — Edit
+ * Entities Admin — record detail (two-column redesign)
  *
- * This page is the edit form for a single entity authority record. It surfaces every
- * ISAAR(CPF)-adjacent field -- dates of existence, history, legal
- * status, functions over time, name variants, Wikidata / VIAF IDs,
- * merge pointer -- alongside the linked-descriptions panel that shows
- * every archival record this entity appears in and lets curators
- * unlink or retarget links without leaving the page. Autosaves to
- * `drafts` on a debounce; a conflict banner appears if another user
- * has an open draft on the same entity.
+ * The authority record page for a single entity (spec §5 redesign,
+ * mockup 2026-07-11): a ~420px left column carries the record itself —
+ * Identity, Description, Control, and Linked open data
+ * (Wikidata/VIAF/DBE; no map) — while the right column serves the
+ * linked descriptions as a WORKLIST: server-side search over
+ * title/reference code (`?dq=`), role pills with real GROUP BY counts
+ * (spec §11's per-record role filter), sort by date/title/reference
+ * code, and honest offset pagination with a user-selectable page size
+ * (25/50/100). The loader ships ONE filtered page, never the whole
+ * link set. Narrow screens stack record-first. Edit swaps the left
+ * column to the existing inline form in place (autosave drafts +
+ * optimistic lock untouched) without remounting the right column.
  *
- * The merge workflow is two-step: the curator picks a canonical
- * target, confirms the direction of the merge, and the server moves
- * every `description_entities` row onto the canonical entity while
- * leaving the superseded row in place with a `merged_into` pointer so
- * external references do not break.
+ * Merge and split live on their own full-page workbench routes
+ * (`entities.$id.merge`, `entities.$id.split`) — this action handles
+ * only update/delete/autosave and the description-link intents. The
+ * header's Merge/Split buttons navigate to the workbenches, which
+ * enforce the required-reason ledger invariant this action does not
+ * carry.
  *
- * Tenant attribution comes from request context, populated by
- * `authMiddleware`. Every read/update/delete of `entities` and the
- * description-search subquery is filtered by `tenant.id`; the
- * split-action insert attributes the new entity to `tenant.id`
- * rather than a single-tenant hard-code.
+ * Authority scope is the federation (migrations 0045-0048). Every
+ * read/update/delete of `entities` and every vocabulary-term lookup is
+ * filtered by `tenant.federationId`. The description-search subquery
+ * stays `tenant.id`-scoped (descriptions remain tenant-scoped).
  *
- * @version v0.4.0
+ * @version v0.4.3
  */
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import {
-  Form,
-  useLoaderData,
-  useActionData,
-  useFetcher,
-  redirect,
-  Link,
-} from "react-router";
+import { useState, useEffect } from "react";
+import { Form, useActionData, redirect } from "react-router";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, Pencil, Trash2, Merge, Split, Plus } from "lucide-react";
 import { tenantContext, userContext } from "../context";
+import { requireCapability } from "../lib/tenant";
 import { CollapsibleSection } from "~/components/admin/collapsible-section";
-import { MergeDialog } from "~/components/admin/merge-dialog";
-import { SplitDialog } from "~/components/admin/split-dialog";
+import { StatusBand } from "~/components/admin/status-band";
 import { NameVariantInput } from "~/components/forms/name-variant-input";
-import { LodLinkField } from "~/components/forms/lod-link-field";
+import { LodLinkField, SERVICE_URLS } from "~/components/forms/lod-link-field";
 import { DraftsBanner } from "~/components/admin/drafts-banner";
-import { LinkedDescriptionsCard } from "~/components/admin/linked-descriptions-card";
-import { LinkDescriptionDialog } from "~/components/admin/link-description-dialog";
-import { EditDescriptionLinkDialog } from "~/components/admin/edit-description-link-dialog";
+import {
+  AdminBreadcrumb,
+  AuthorityDetailHeader,
+} from "~/components/admin/authority-detail-header";
+import { ConflictDialog } from "~/components/admin/conflict-dialog";
+import { useAutosaveDraft } from "~/components/admin/use-autosave-draft";
+import { FieldDisplay } from "~/components/admin/field-display";
+import { EditField, EditTextarea } from "~/components/admin/edit-field";
+import {
+  TwoColumnDetail,
+  DetailCard,
+  VariantChips,
+  NotesCards,
+  NotesEditFields,
+} from "~/components/admin/authority-detail-layout";
+import { LinkedDescriptionsWorklist } from "~/components/admin/linked-descriptions-worklist";
+import { parseWorklistParams } from "~/lib/worklist-params";
 import { ENTITY_ROLES } from "~/lib/validation/enums";
 import { TypeaheadInput } from "~/components/admin/typeahead-input";
 import type { Route } from "./+types/_auth.admin.entities.$id";
@@ -54,17 +64,18 @@ import type { Route } from "./+types/_auth.admin.entities.$id";
 // Loader
 // ---------------------------------------------------------------------------
 
-export async function loader({ params, context }: Route.LoaderArgs) {
+export async function loader({ params, request, context }: Route.LoaderArgs) {
   const { requireAdmin } = await import("~/lib/permissions.server");
   const { drizzle } = await import("drizzle-orm/d1");
-  const { and, eq, sql } = await import("drizzle-orm");
-  const { entities, descriptionEntities, descriptions, vocabularyTerms } = await import(
+  const { and, eq, or, like, asc, sql } = await import("drizzle-orm");
+  const { entities, descriptionEntities, descriptions, vocabularyTerms, repositories } = await import(
     "~/db/schema"
   );
 
   const user = context.get(userContext);
   requireAdmin(user);
   const tenant = context.get(tenantContext);
+  requireCapability(tenant, "authorities");
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -73,11 +84,45 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   const entity = await db
     .select()
     .from(entities)
-    .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, id)))
+    .where(and(eq(entities.federationId, tenant.federationId), eq(entities.id, id)))
     .get();
 
   if (!entity) {
     throw new Response("Not found", { status: 404 });
+  }
+
+  // Click-to-unfold context card (spec §5 worklist enhancement):
+  // fetched on demand by junction id, never eager-loaded for the page.
+  // Ownership is enforced in the helper — a junction id belonging to
+  // another entity resolves to null (an IDOR surface), so the response
+  // carries `card: null` rather than a foreign record's scope text.
+  const cardUrl = new URL(request.url);
+  const cardJunctionId = cardUrl.searchParams.get("card");
+  if (cardJunctionId) {
+    // "Show all" (`&full=1`): the full OCR transcript for that junction,
+    // fetched only on that click — never eager-shipped (transcripts reach
+    // 89 KB). Ownership is enforced in the helper identically to the card.
+    if (cardUrl.searchParams.get("full") === "1") {
+      const { loadJunctionOcrText } = await import(
+        "~/lib/authority-linked-context.server"
+      );
+      const ocrFull = await loadJunctionOcrText(db, {
+        recordType: "entity",
+        ownerId: id,
+        junctionId: cardJunctionId,
+      });
+      return Response.json({ ocrFull });
+    }
+    const { loadLinkedDescriptionCard } = await import(
+      "~/lib/authority-linked-context.server"
+    );
+    const card = await loadLinkedDescriptionCard(db, {
+      recordType: "entity",
+      ownerId: id,
+      displayName: entity.displayName,
+      junctionId: cardJunctionId,
+    });
+    return Response.json({ card });
   }
 
   // Fetch linked vocabulary term for primaryFunction display
@@ -91,7 +136,12 @@ export async function loader({ params, context }: Route.LoaderArgs) {
         category: vocabularyTerms.category,
       })
       .from(vocabularyTerms)
-      .where(eq(vocabularyTerms.id, entity.primaryFunctionId))
+      .where(
+        and(
+          eq(vocabularyTerms.id, entity.primaryFunctionId),
+          eq(vocabularyTerms.federationId, tenant.federationId)
+        )
+      )
       .get();
     if (term) {
       functionTerm = term;
@@ -105,38 +155,118 @@ export async function loader({ params, context }: Route.LoaderArgs) {
     .where(eq(descriptionEntities.entityId, id))
     .all();
 
-  // Fetch first 5 description titles if any exist
-  let descExamples: { title: string }[] = [];
-  if (descLinkCount > 0) {
-    descExamples = await db
-      .select({ title: descriptions.title })
-      .from(descriptionEntities)
-      .innerJoin(
-        descriptions,
-        eq(descriptionEntities.descriptionId, descriptions.id)
-      )
-      .where(eq(descriptionEntities.entityId, id))
-      .limit(5)
-      .all();
+  // ---- Linked-descriptions worklist (spec §5 redesign; round-3 filters) ----
+  const sp = new URL(request.url).searchParams;
+  const wl = parseWorklistParams(sp);
+  // An off-vocabulary role param is ignored, never an empty worklist.
+  const role =
+    wl.role && (ENTITY_ROLES as readonly string[]).includes(wl.role)
+      ? (wl.role as (typeof ENTITY_ROLES)[number])
+      : null;
+
+  // The record's OWN repository ids (unfiltered): drives repo-pill
+  // progressive disclosure (shown only when the links span > 1 repo) and
+  // validates the `?repo=` param — an id that is not one of the record's
+  // is ignored, never an empty worklist. Keyed by id, not label.
+  const recordRepoRows = await db
+    .select({ repositoryId: descriptions.repositoryId })
+    .from(descriptionEntities)
+    .innerJoin(
+      descriptions,
+      eq(descriptionEntities.descriptionId, descriptions.id),
+    )
+    .where(eq(descriptionEntities.entityId, id))
+    .groupBy(descriptions.repositoryId)
+    .all();
+  const recordRepoIds = new Set(recordRepoRows.map((r) => r.repositoryId));
+  const repoSpan = recordRepoIds.size;
+  const repo = wl.repo && recordRepoIds.has(wl.repo) ? wl.repo : null;
+
+  // Search predicate over the joined description (title + reference
+  // code), shared by the counts, the filtered total, and the page.
+  const dqConditions: any[] = [eq(descriptionEntities.entityId, id)];
+  if (wl.dq) {
+    const pat = `%${wl.dq}%`;
+    dqConditions.push(
+      or(
+        like(descriptions.title, pat),
+        like(descriptions.referenceCode, pat),
+      )!,
+    );
   }
 
-  // If merged, fetch target entity's displayName
-  let mergeTarget: { id: string; displayName: string } | null = null;
-  if (entity.mergedInto) {
-    const target = await db
-      .select({ id: entities.id, displayName: entities.displayName })
-      .from(entities)
-      .where(
-        and(eq(entities.tenantId, tenant.id), eq(entities.id, entity.mergedInto))
-      )
-      .get();
-    if (target) {
-      mergeTarget = target;
-    }
-  }
+  // Cross-honest counts (spec §3): role counts under the search AND the
+  // repository filter; repo counts under the search AND the role filter.
+  const roleCountConditions = repo
+    ? [...dqConditions, eq(descriptions.repositoryId, repo)]
+    : dqConditions;
+  const roleCounts = await db
+    .select({
+      role: descriptionEntities.role,
+      count: sql<number>`count(*)`,
+    })
+    .from(descriptionEntities)
+    .innerJoin(
+      descriptions,
+      eq(descriptionEntities.descriptionId, descriptions.id),
+    )
+    .where(and(...roleCountConditions))
+    .groupBy(descriptionEntities.role)
+    .orderBy(sql`count(*) DESC`)
+    .all();
+  const allCount = roleCounts.reduce((sum, rc) => sum + rc.count, 0);
 
-  // Fetch all description links for display and merge/split dialogs
-  const descLinks = await db
+  // Repo pills: GROUP BY repository id, labelled short_name → code → name
+  // (COALESCE(NULLIF(...)) — the AHRB repository's short_name is empty at
+  // 13k-link scale), under the search + role filter.
+  const repoCountConditions = role
+    ? [...dqConditions, eq(descriptionEntities.role, role)]
+    : dqConditions;
+  const repoCounts = await db
+    .select({
+      repositoryId: descriptions.repositoryId,
+      label: sql<string>`COALESCE(NULLIF(${repositories.shortName}, ''), NULLIF(${repositories.code}, ''), ${repositories.name})`,
+      count: sql<number>`count(*)`,
+    })
+    .from(descriptionEntities)
+    .innerJoin(
+      descriptions,
+      eq(descriptionEntities.descriptionId, descriptions.id),
+    )
+    .innerJoin(repositories, eq(descriptions.repositoryId, repositories.id))
+    .where(and(...repoCountConditions))
+    .groupBy(descriptions.repositoryId)
+    .orderBy(sql`count(*) DESC`)
+    .all();
+
+  // Honest filtered total (search + role + repo) from a real COUNT.
+  const filterConditions: any[] = [...dqConditions];
+  if (role) filterConditions.push(eq(descriptionEntities.role, role));
+  if (repo) filterConditions.push(eq(descriptions.repositoryId, repo));
+  const [{ count: total }] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(descriptionEntities)
+    .innerJoin(
+      descriptions,
+      eq(descriptionEntities.descriptionId, descriptions.id),
+    )
+    .where(and(...filterConditions))
+    .all();
+
+  // One page, sorted server-side. Date sorts newest-first with undated
+  // rows last; title and reference code sort ascending. The junction id
+  // breaks ties so paging is stable.
+  const orderBy =
+    wl.sort === "title"
+      ? [asc(descriptions.title), asc(descriptionEntities.id)]
+      : wl.sort === "code"
+        ? [asc(descriptions.referenceCode), asc(descriptionEntities.id)]
+        : [
+            sql`${descriptions.dateStart} IS NULL`,
+            sql`${descriptions.dateStart} DESC`,
+            asc(descriptionEntities.id),
+          ];
+  const links = await db
     .select({
       id: descriptionEntities.id,
       descriptionId: descriptionEntities.descriptionId,
@@ -149,26 +279,146 @@ export async function loader({ params, context }: Route.LoaderArgs) {
       descriptionTitle: descriptions.title,
       referenceCode: descriptions.referenceCode,
       descriptionLevel: descriptions.descriptionLevel,
+      dateExpression: descriptions.dateExpression,
+      dateStart: descriptions.dateStart,
+      dateEnd: descriptions.dateEnd,
+      creatorDisplay: descriptions.creatorDisplay,
+      placeDisplay: descriptions.placeDisplay,
     })
     .from(descriptionEntities)
     .innerJoin(
       descriptions,
-      eq(descriptionEntities.descriptionId, descriptions.id)
+      eq(descriptionEntities.descriptionId, descriptions.id),
     )
-    .where(eq(descriptionEntities.entityId, id))
-    .orderBy(descriptionEntities.sequence)
+    .where(and(...filterConditions))
+    .orderBy(...orderBy)
+    .limit(wl.size)
+    .offset((wl.page - 1) * wl.size)
     .all();
 
-  // Check for another user's draft on this record
+  // If merged, fetch target entity's displayName + the ledger-derived
+  // band actor (who merged it, when). Superseded status is derived from
+  // the ledger — no schema column.
+  let mergeTarget: { id: string; displayName: string } | null = null;
+  let mergeBand: { date: string; user: string } | null = null;
+  if (entity.mergedInto) {
+    const target = await db
+      .select({ id: entities.id, displayName: entities.displayName })
+      .from(entities)
+      .where(
+        and(eq(entities.federationId, tenant.federationId), eq(entities.id, entity.mergedInto))
+      )
+      .get();
+    if (target) {
+      mergeTarget = target;
+    }
+    const { getOperationActor, bandDate } = await import(
+      "~/lib/authority-workbench.server"
+    );
+    const actor = await getOperationActor(db, {
+      recordType: "entity",
+      operation: "merge",
+      sourceId: id,
+      targetId: entity.mergedInto,
+    });
+    if (actor) {
+      mergeBand = { date: bandDate(actor.createdAt), user: actor.userName ?? "" };
+    }
+  }
+
+  // Informational split bands (spec §4 — both halves stay live and
+  // editable): "Split into…" on a split parent, "Split from…" on a
+  // record a split created. The merged band takes precedence when the
+  // record was later merged away.
+  let splitIntoBand: {
+    date: string;
+    user: string;
+    targets: { id: string; displayName: string }[];
+  } | null = null;
+  let splitFromBand: {
+    date: string;
+    user: string;
+    parent: { id: string; displayName: string };
+  } | null = null;
+  if (!entity.mergedInto) {
+    const { getOperationActor, getSplitTargets, bandDate } = await import(
+      "~/lib/authority-workbench.server"
+    );
+    const { inArray } = await import("drizzle-orm");
+
+    const targetIds = await getSplitTargets(db, "entity", id);
+    if (targetIds.length > 0) {
+      const targets = await db
+        .select({ id: entities.id, displayName: entities.displayName })
+        .from(entities)
+        .where(
+          and(
+            eq(entities.federationId, tenant.federationId),
+            inArray(entities.id, targetIds),
+          ),
+        )
+        .all();
+      const actor = await getOperationActor(db, {
+        recordType: "entity",
+        operation: "split",
+        sourceId: id,
+      });
+      if (targets.length > 0 && actor) {
+        splitIntoBand = {
+          date: bandDate(actor.createdAt),
+          user: actor.userName ?? "",
+          targets,
+        };
+      }
+    }
+
+    const fromActor = await getOperationActor(db, {
+      recordType: "entity",
+      operation: "split",
+      targetId: id,
+    });
+    if (fromActor) {
+      const parent = await db
+        .select({ id: entities.id, displayName: entities.displayName })
+        .from(entities)
+        .where(
+          and(
+            eq(entities.federationId, tenant.federationId),
+            eq(entities.id, fromActor.sourceId),
+          ),
+        )
+        .get();
+      if (parent) {
+        splitFromBand = {
+          date: bandDate(fromActor.createdAt),
+          user: fromActor.userName ?? "",
+          parent,
+        };
+      }
+    }
+  }
+
+  // Check for another user's draft on this record. Entities are
+  // federation-shared (migrations 0045-0048), so the conflicting editor may
+  // legitimately live in ANY tenant of the session tenant's federation —
+  // resolve their name through the tenants join scoped to the
+  // federation, not to the session tenant alone (a same-federation
+  // cross-tenant editor must not render as "Unknown").
   const { getConflictDraft } = await import("~/lib/drafts.server");
-  const { users } = await import("~/db/schema");
-  const conflictRaw = await getConflictDraft(db, id, "entity", user.id);
+  const { users, tenants } = await import("~/db/schema");
+  const conflictRaw = await getConflictDraft(db, tenant.id, id, "entity", user.id);
   let conflictDraft: { userName: string; updatedAt: number } | null = null;
   if (conflictRaw) {
     const conflictUser = await db
       .select({ name: users.name })
       .from(users)
-      .where(and(eq(users.tenantId, tenant.id), eq(users.id, conflictRaw.userId)))
+      .innerJoin(tenants, eq(users.tenantId, tenants.id))
+      .where(
+        and(
+          eq(tenants.federationId, tenant.federationId),
+          eq(users.id, conflictRaw.userId)
+        )
+      )
       .get();
     conflictDraft = {
       userName: conflictUser?.name || "Unknown",
@@ -179,9 +429,24 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   return {
     entity,
     descLinkCount,
-    descExamples,
     mergeTarget,
-    descLinks,
+    mergeBand,
+    splitIntoBand,
+    splitFromBand,
+    links,
+    total,
+    allCount,
+    roleCounts,
+    repoCounts,
+    repoSpan,
+    wl: {
+      dq: wl.dq,
+      role,
+      repo,
+      sort: wl.sort,
+      size: wl.size,
+      page: wl.page,
+    },
     conflictDraft,
     functionTerm,
   };
@@ -199,15 +464,25 @@ export async function action({ params, request, context }: Route.ActionArgs) {
     "~/db/schema"
   );
   const { updateEntitySchema } = await import("~/lib/validation/entity");
-  const { generateUniqueCode } = await import("~/lib/codes.server");
+  const { logAuthorityOperation } = await import(
+    "~/lib/authority-operations.server"
+  );
 
   const user = context.get(userContext);
   requireAdmin(user);
   const tenant = context.get(tenantContext);
+  requireCapability(tenant, "authorities");
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
   const id = params.id;
+
+  // Authority mutation gate helper (ruled 2026-07-08). Applied per-intent
+  // below to the canonical entity mutations (update, delete, merge,
+  // split) — each requires a federation steward. NOT applied to autosave
+  // (drafts), the read searches, or the description-link intents, which
+  // stay open to member-tenant admins (READ + member-side junction ops).
+  const { requireFederationSteward } = await import("~/lib/federation.server");
 
   const formData = await request.formData();
   const intent = formData.get("_action") as string;
@@ -217,12 +492,13 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const { saveDraft } = await import("~/lib/drafts.server");
       const snapshot = formData.get("snapshot") as string;
       if (snapshot) {
-        await saveDraft(db, id, "entity", user.id, snapshot);
+        await saveDraft(db, tenant.id, id, "entity", user.id, snapshot);
       }
       return { ok: true as const, autosaved: true };
     }
 
     case "update": {
+      await requireFederationSteward(db, user, tenant);
       // Parse name variants from hidden field
       let nameVariants: string[] = [];
       try {
@@ -265,6 +541,9 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         (formData.get("wikidataId") as string)?.trim() || undefined;
       const viafId =
         (formData.get("viafId") as string)?.trim() || undefined;
+      const notes = (formData.get("notes") as string)?.trim() || null;
+      const internalNotes =
+        (formData.get("internalNotes") as string)?.trim() || null;
 
       const parsed = updateEntitySchema.safeParse({
         id,
@@ -284,6 +563,8 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         sources,
         wikidataId: wikidataId || null,
         viafId: viafId || null,
+        notes,
+        internalNotes,
       });
 
       if (!parsed.success) {
@@ -297,7 +578,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const original = await db
         .select()
         .from(entities)
-        .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, id)))
+        .where(and(eq(entities.federationId, tenant.federationId), eq(entities.id, id)))
         .get();
 
       // Optimistic lock check
@@ -324,8 +605,34 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const primaryFunctionText = updates.primaryFunction ?? null;
 
       if (primaryFunctionIdRaw) {
-        // User selected an existing term
-        resolvedFunctionId = primaryFunctionIdRaw;
+        // User selected an existing term. The hidden typeahead field
+        // bypasses the Zod schema, and entities.primaryFunctionId is an
+        // FK — an unverified stale id (term merged or deleted since
+        // page load, or a tampered field) would fail the whole UPDATE
+        // atomically and surface only the generic error, losing every
+        // other edit in the submission. Verify existence first and
+        // fail field-scoped instead.
+        const selectedTerm = await db
+          .select({ id: vocabularyTerms.id })
+          .from(vocabularyTerms)
+          .where(
+            and(
+              eq(vocabularyTerms.id, primaryFunctionIdRaw),
+              eq(vocabularyTerms.federationId, tenant.federationId)
+            )
+          )
+          .get();
+        if (!selectedTerm) {
+          return {
+            ok: false as const,
+            errors: {
+              primaryFunction: [
+                "Selected function no longer exists; reselect or retype it",
+              ],
+            },
+          };
+        }
+        resolvedFunctionId = selectedTerm.id;
       } else if (primaryFunctionText) {
         // User typed a value -- check if it matches an existing term (case-insensitive)
         const { like: likeFn, isNull: isNullFn } = await import("drizzle-orm");
@@ -334,6 +641,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
           .from(vocabularyTerms)
           .where(
             and(
+              eq(vocabularyTerms.federationId, tenant.federationId),
               sql`LOWER(${vocabularyTerms.canonical}) = LOWER(${primaryFunctionText})`,
               isNullFn(vocabularyTerms.mergedInto)
             )
@@ -348,6 +656,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
           const now = Date.now();
           await db.insert(vocabularyTerms).values({
             id: newTermId,
+            federationId: tenant.federationId,
             canonical: primaryFunctionText,
             category: null,
             status: "proposed",
@@ -375,6 +684,8 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         sources: updates.sources ?? null,
         wikidataId: updates.wikidataId ?? null,
         viafId: updates.viafId ?? null,
+        notes: updates.notes ?? null,
+        internalNotes: updates.internalNotes ?? null,
       };
 
       try {
@@ -384,7 +695,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
             ...updatedFields,
             updatedAt: Date.now(),
           })
-          .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, id)));
+          .where(and(eq(entities.federationId, tenant.federationId), eq(entities.id, id)));
 
         // Update entity count on the vocabulary term
         if (resolvedFunctionId) {
@@ -393,7 +704,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
             .from(entities)
             .where(
               and(
-                eq(entities.tenantId, tenant.id),
+                eq(entities.federationId, tenant.federationId),
                 eq(entities.primaryFunctionId, resolvedFunctionId)
               )
             )
@@ -403,7 +714,21 @@ export async function action({ params, request, context }: Route.ActionArgs) {
             .set({ entityCount: entityCountForTerm, updatedAt: Date.now() })
             .where(eq(vocabularyTerms.id, resolvedFunctionId));
         }
-      } catch {
+      } catch (e) {
+        // Residual race: the term can still vanish between the
+        // existence check above and the UPDATE. Surface it on the
+        // field rather than as the generic failure.
+        const msg = e instanceof Error ? e.message : "";
+        if (msg.includes("FOREIGN KEY constraint failed")) {
+          return {
+            ok: false as const,
+            errors: {
+              primaryFunction: [
+                "Selected function no longer exists; reselect or retype it",
+              ],
+            },
+          };
+        }
         return { ok: false as const, error: "generic" };
       }
 
@@ -425,12 +750,13 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 
       // Delete draft after successful save
       const { deleteDraft } = await import("~/lib/drafts.server");
-      await deleteDraft(db, id, "entity");
+      await deleteDraft(db, tenant.id, id, "entity");
 
       return { ok: true as const, message: "updated" };
     }
 
     case "delete": {
+      await requireFederationSteward(db, user, tenant);
       // Server-side cascade check
       const [{ count }] = await db
         .select({ count: sql<number>`count(*)` })
@@ -442,182 +768,34 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         return { ok: false as const, error: "has_descriptions" };
       }
 
-      await db
-        .delete(entities)
-        .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, id)));
+      // Snapshot the full row before deletion so the ledger row makes the
+      // hard delete reconstructible (delete is unrecorded and unrecoverable
+      // today). The delete + ledger insert share one batch: source_id is
+      // the gone record's id and carries no FK, so ordering is free.
+      const original = await db
+        .select()
+        .from(entities)
+        .where(and(eq(entities.federationId, tenant.federationId), eq(entities.id, id)))
+        .get();
+      if (!original) {
+        return redirect("/admin/entities");
+      }
+
+      await db.batch([
+        db
+          .delete(entities)
+          .where(and(eq(entities.federationId, tenant.federationId), eq(entities.id, id))),
+        logAuthorityOperation(db, {
+          federationId: tenant.federationId,
+          recordType: "entity",
+          operation: "delete",
+          sourceId: id,
+          targetId: null,
+          userId: user.id,
+          detail: { snapshot: original },
+        }),
+      ] as any);
       return redirect("/admin/entities");
-    }
-
-    case "merge": {
-      const targetId = formData.get("targetId") as string;
-      let linkIds: string[] = [];
-      try {
-        linkIds = JSON.parse((formData.get("linkIds") as string) || "[]");
-      } catch {
-        linkIds = [];
-      }
-
-      // Validate target exists
-      const target = await db
-        .select()
-        .from(entities)
-        .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, targetId)))
-        .get();
-      if (!target) {
-        return { ok: false as const, error: "generic" };
-      }
-
-      // Reassign each selected link
-      for (const linkId of linkIds) {
-        const link = await db
-          .select()
-          .from(descriptionEntities)
-          .where(eq(descriptionEntities.id, linkId))
-          .get();
-        if (!link) continue;
-
-        // Check for unique constraint conflict
-        const conflict = await db
-          .select({ id: descriptionEntities.id })
-          .from(descriptionEntities)
-          .where(
-            and(
-              eq(descriptionEntities.descriptionId, link.descriptionId),
-              eq(descriptionEntities.entityId, targetId),
-              eq(descriptionEntities.role, link.role)
-            )
-          )
-          .get();
-
-        if (conflict) {
-          // Delete redundant link
-          await db
-            .delete(descriptionEntities)
-            .where(eq(descriptionEntities.id, linkId));
-        } else {
-          // Reassign to target
-          await db
-            .update(descriptionEntities)
-            .set({ entityId: targetId })
-            .where(eq(descriptionEntities.id, linkId));
-        }
-      }
-
-      // Fetch source entity for audit notes
-      const source = await db
-        .select()
-        .from(entities)
-        .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, id)))
-        .get();
-
-      const now = new Date().toISOString().slice(0, 10);
-
-      // Set mergedInto on source + audit note
-      const sourceNote = `Merged into ${target.displayName} (${target.entityCode}) on ${now}`;
-      await db
-        .update(entities)
-        .set({
-          mergedInto: targetId,
-          sources: source?.sources
-            ? `${source.sources}\n${sourceNote}`
-            : sourceNote,
-          updatedAt: Date.now(),
-        })
-        .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, id)));
-
-      // Audit note on target
-      const targetNote = `Merged from ${source?.displayName} (${source?.entityCode}) on ${now}`;
-      await db
-        .update(entities)
-        .set({
-          sources: target.sources
-            ? `${target.sources}\n${targetNote}`
-            : targetNote,
-          updatedAt: Date.now(),
-        })
-        .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, targetId)));
-
-      return redirect(`/admin/entities/${targetId}`);
-    }
-
-    case "split": {
-      let linkIds: string[] = [];
-      try {
-        linkIds = JSON.parse((formData.get("linkIds") as string) || "[]");
-      } catch {
-        linkIds = [];
-      }
-
-      // Fetch source entity
-      const source = await db
-        .select()
-        .from(entities)
-        .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, id)))
-        .get();
-      if (!source) {
-        return { ok: false as const, error: "generic" };
-      }
-
-      // Generate fresh code
-      const newCode = await generateUniqueCode(
-        db,
-        "ne",
-        entities,
-        entities.entityCode
-      );
-
-      const newId = crypto.randomUUID();
-      const now = new Date().toISOString().slice(0, 10);
-      const timestamp = Date.now();
-
-      // Create new entity (copy all fields from source)
-      const splitFromNote = `Split from ${source.displayName} (${source.entityCode}) on ${now}`;
-      await db.insert(entities).values({
-        tenantId: tenant.id,
-        id: newId,
-        entityCode: newCode,
-        displayName: source.displayName,
-        sortName: source.sortName,
-        surname: source.surname,
-        givenName: source.givenName,
-        entityType: source.entityType,
-        honorific: source.honorific,
-        primaryFunction: source.primaryFunction,
-        nameVariants: source.nameVariants,
-        datesOfExistence: source.datesOfExistence,
-        dateStart: source.dateStart,
-        dateEnd: source.dateEnd,
-        history: source.history,
-        functions: source.functions,
-        sources: splitFromNote,
-        mergedInto: null,
-        wikidataId: null,
-        viafId: null,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      });
-
-      // Move selected links to new entity
-      for (const linkId of linkIds) {
-        await db
-          .update(descriptionEntities)
-          .set({ entityId: newId })
-          .where(eq(descriptionEntities.id, linkId));
-      }
-
-      // Audit note on source
-      const splitIntoNote = `Split into ${source.displayName} (${newCode}) on ${now}`;
-      await db
-        .update(entities)
-        .set({
-          sources: source.sources
-            ? `${source.sources}\n${splitIntoNote}`
-            : splitIntoNote,
-          updatedAt: timestamp,
-        })
-        .where(and(eq(entities.tenantId, tenant.id), eq(entities.id, id)));
-
-      return redirect(`/admin/entities/${newId}`);
     }
 
     case "search-functions": {
@@ -633,6 +811,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         .from(vocabularyTerms)
         .where(
           and(
+            eq(vocabularyTerms.federationId, tenant.federationId),
             like(vocabularyTerms.canonical, `%${q}%`),
             isNull(vocabularyTerms.mergedInto),
             eq(vocabularyTerms.status, "approved")
@@ -744,25 +923,31 @@ export default function EntityDetailPage({
   const {
     entity,
     descLinkCount,
-    descExamples,
     mergeTarget,
-    descLinks,
+    mergeBand,
+    splitIntoBand,
+    splitFromBand,
+    links,
+    total,
+    allCount,
+    roleCounts,
+    repoCounts,
+    repoSpan,
+    wl,
     conflictDraft,
     functionTerm,
   } = loaderData;
   const actionData = useActionData<typeof action>();
   const { t } = useTranslation("entities");
+  const { t: ta } = useTranslation("authorities");
+  // Place-role labels for the context card's metadata strip live in the
+  // places namespace (an entity's linked description can carry places).
+  const { t: tp } = useTranslation("places");
 
   const [isEditing, setIsEditing] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
-  const [showMergeDialog, setShowMergeDialog] = useState(false);
-  const [showSplitDialog, setShowSplitDialog] = useState(false);
   const [showConflictDialog, setShowConflictDialog] = useState(false);
-  const [showLinkDialog, setShowLinkDialog] = useState(false);
-  const [editingLinkId, setEditingLinkId] = useState<string | null>(null);
-  const [confirmRemoveLinkId, setConfirmRemoveLinkId] = useState<string | null>(null);
-  const unlinkFetcher = useFetcher();
 
   const hasDescriptions = descLinkCount > 0;
   const isMerged = !!entity.mergedInto;
@@ -774,44 +959,8 @@ export default function EntityDetailPage({
     }
   }, [actionData]);
 
-  // Autosave via useFetcher
-  const draftFetcher = useFetcher();
-  const formRef = useRef<HTMLFormElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
-
-  const triggerAutosave = useCallback(() => {
-    if (!formRef.current || !isEditing) return;
-    const fd = new FormData(formRef.current);
-    const snapshot: Record<string, string> = {};
-    for (const [key, value] of fd.entries()) {
-      if (!key.startsWith("_")) {
-        snapshot[key] = value as string;
-      }
-    }
-    draftFetcher.submit(
-      { _action: "autosave", snapshot: JSON.stringify(snapshot) },
-      { method: "post" }
-    );
-  }, [isEditing, draftFetcher]);
-
-  const handleFormChange = useCallback(() => {
-    if (!isEditing) return;
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(triggerAutosave, 2000);
-  }, [isEditing, triggerAutosave]);
-
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [isEditing]);
-
-  const draftStatus =
-    draftFetcher.state === "submitting"
-      ? "saving"
-      : draftFetcher.data && "autosaved" in draftFetcher.data
-        ? "saved"
-        : null;
+  // Autosave via shared debounced-draft hook
+  const { formRef, handleFormChange, draftStatus } = useAutosaveDraft(isEditing);
 
   const globalError =
     actionData && "error" in actionData ? actionData.error : undefined;
@@ -831,79 +980,39 @@ export default function EntityDetailPage({
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-8 py-12">
+    <div className="mx-auto max-w-7xl px-8 py-12">
       {/* Breadcrumb */}
-      <nav aria-label="Breadcrumb" className="mb-4 text-sm">
-        <ol className="flex items-center gap-1">
-          <li>
-            <Link
-              to="/admin/entities"
-              className="text-stone-500 hover:text-stone-700"
-            >
-              {t("title")}
-            </Link>
-          </li>
-          <li>
-            <ChevronRight className="h-4 w-4 text-stone-400" />
-          </li>
-          <li className="text-stone-700">{entity.displayName}</li>
-        </ol>
-      </nav>
+      <AdminBreadcrumb
+        rootTo="/admin/entities"
+        rootLabel={t("title")}
+        current={entity.displayName}
+      />
 
-      {/* Title row */}
-      <div className="flex items-center justify-between">
-        <h1 className="font-serif text-2xl font-semibold text-stone-700">
-          {entity.displayName}
-        </h1>
-
-        {!isEditing && !isMerged && (
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setShowMergeDialog(true)}
-              className="inline-flex items-center gap-2 rounded-md border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50"
-            >
-              <Merge className="h-4 w-4" />
-              {t("mergeButton")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowSplitDialog(true)}
-              className="inline-flex items-center gap-2 rounded-md border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50"
-            >
-              <Split className="h-4 w-4" />
-              {t("splitButton")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsEditing(true)}
-              className="inline-flex items-center gap-2 rounded-md border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50"
-            >
-              <Pencil className="h-4 w-4" />
-              {t("editButton")}
-            </button>
-            <button
-              type="button"
-              onClick={() => !hasDescriptions && setShowDeleteModal(true)}
-              disabled={hasDescriptions}
-              aria-disabled={hasDescriptions ? "true" : undefined}
-              title={
-                hasDescriptions
-                  ? t("deleteBlocked", { count: descLinkCount })
-                  : undefined
-              }
-              className={
-                hasDescriptions
-                  ? "inline-flex cursor-not-allowed items-center gap-2 rounded-lg bg-madder px-4 py-2 text-sm font-semibold text-parchment opacity-50"
-                  : "inline-flex items-center gap-2 rounded-lg bg-madder px-4 py-2 text-sm font-semibold text-parchment hover:bg-madder-deep"
-              }
-            >
-              <Trash2 className="h-4 w-4" />
-              {t("deleteButton")}
-            </button>
-          </div>
-        )}
-      </div>
+      {/* Title row: name + code + type, and the record actions */}
+      <AuthorityDetailHeader
+        title={entity.displayName}
+        isEditing={isEditing}
+        isMerged={isMerged}
+        hasDescriptions={hasDescriptions}
+        descLinkCount={descLinkCount}
+        mergeTo={`/admin/entities/${entity.id}/merge`}
+        splitTo={`/admin/entities/${entity.id}/split`}
+        onEdit={() => setIsEditing(true)}
+        onDelete={() => setShowDeleteModal(true)}
+        t={t}
+      />
+      <p className="mt-0.5 font-mono text-12 text-stone-500">
+        {[
+          entity.entityCode,
+          entity.entityType === "person"
+            ? t("person")
+            : entity.entityType === "family"
+              ? t("family")
+              : t("corporate"),
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      </p>
 
       {/* Draft conflict banner */}
       {conflictDraft && (
@@ -925,16 +1034,55 @@ export default function EntityDetailPage({
         </p>
       )}
 
-      {/* Merge banner */}
+      {/* Superseded status band (ledger-derived) */}
       {isMerged && mergeTarget && (
-        <div className="mt-4 rounded-md border border-indigo bg-indigo-tint px-4 py-3 text-sm text-stone-700">
-          {t("mergedBanner", { target: mergeTarget.displayName })}{" "}
-          <Link
-            to={`/admin/entities/${mergeTarget.id}`}
-            className="font-semibold text-indigo-deep hover:underline"
-          >
-            {t("mergedBannerLink")}
-          </Link>
+        <div className="mt-4 overflow-hidden rounded-md">
+          <StatusBand
+            variant="merged"
+            date={mergeBand?.date ?? ""}
+            user={mergeBand?.user || ta("bandUnknownUser")}
+            survivor={{
+              id: mergeTarget.id,
+              name: mergeTarget.displayName,
+              href: `/admin/entities/${mergeTarget.id}`,
+            }}
+            ledgerHref={`/admin/entities/${entity.id}/history`}
+            t={ta}
+          />
+        </div>
+      )}
+
+      {/* Informational split bands — the record stays live and editable */}
+      {splitIntoBand && (
+        <div className="mt-4 overflow-hidden rounded-md">
+          <StatusBand
+            variant="split"
+            date={splitIntoBand.date}
+            user={splitIntoBand.user || ta("bandUnknownUser")}
+            records={splitIntoBand.targets.map((r) => ({
+              id: r.id,
+              name: r.displayName,
+              href: `/admin/entities/${r.id}`,
+            }))}
+            ledgerHref={`/admin/entities/${entity.id}/history`}
+            t={ta}
+          />
+        </div>
+      )}
+      {splitFromBand && (
+        <div className="mt-4 overflow-hidden rounded-md">
+          <StatusBand
+            variant="splitFrom"
+            date={splitFromBand.date}
+            user={splitFromBand.user || ta("bandUnknownUser")}
+            parent={{
+              id: splitFromBand.parent.id,
+              name: splitFromBand.parent.displayName,
+              href: `/admin/entities/${splitFromBand.parent.id}`,
+            }}
+            ledgerHref={`/admin/entities/${entity.id}/history`}
+            t={ta}
+          />
         </div>
       )}
 
@@ -954,133 +1102,62 @@ export default function EntityDetailPage({
         </div>
       )}
 
-      {/* Linked descriptions section */}
-      <div className="mt-6">
-        <div className="flex items-center justify-between">
-          <h2 className="font-sans text-sm font-semibold uppercase tracking-wide text-stone-500">
-            {t("linked_descriptions")}
-          </h2>
-          <button
-            type="button"
-            onClick={() => setShowLinkDialog(true)}
-            className="inline-flex items-center gap-1 text-sm font-semibold text-indigo-deep hover:text-indigo"
-          >
-            <Plus className="h-4 w-4" />
-            {t("add_description_link")}
-          </button>
-        </div>
-        {descLinks.length === 0 ? (
-          <p className="mt-3 text-sm text-stone-400">
-            {t("no_linked_descriptions")}
-          </p>
-        ) : (
-          <div className="mt-3 space-y-2">
-            {descLinks.map((link) => (
-              <div key={link.id}>
-                {confirmRemoveLinkId === link.id ? (
-                  <div className="flex items-center gap-3 rounded-md border border-madder bg-madder-tint px-4 py-3 text-sm">
-                    <span className="text-stone-700">{t("remove_link_confirm")}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        unlinkFetcher.submit(
-                          { _action: "unlink_description", linkId: link.id },
-                          { method: "post" }
-                        );
-                        setConfirmRemoveLinkId(null);
-                      }}
-                      className="font-semibold text-madder hover:underline"
-                    >
-                      {t("remove_link")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmRemoveLinkId(null)}
-                      className="text-stone-500 hover:text-stone-700"
-                    >
-                      {t("mergeCancel")}
-                    </button>
-                  </div>
-                ) : (
-                  <LinkedDescriptionsCard
-                    linkId={link.id}
-                    descriptionId={link.descriptionId}
-                    descriptionTitle={link.descriptionTitle}
-                    referenceCode={link.referenceCode}
-                    descriptionLevel={link.descriptionLevel}
-                    role={link.role}
-                    roleNote={link.roleNote}
-                    sequence={link.sequence}
-                    honorific={link.honorific}
-                    function={link.function}
-                    nameAsRecorded={link.nameAsRecorded}
-                    onEdit={(id) => setEditingLinkId(id)}
-                    onRemove={(id) => setConfirmRemoveLinkId(id)}
-                    t={t}
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Link description dialog */}
-      <LinkDescriptionDialog
-        isOpen={showLinkDialog}
-        onClose={() => setShowLinkDialog(false)}
-        roles={ENTITY_ROLES}
-        entityOrPlaceId={entity.id}
-        recordType="entity"
-        t={t}
-      />
-
-      {/* Edit description link dialog */}
-      {editingLinkId && (() => {
-        const editLink = descLinks.find((l) => l.id === editingLinkId);
-        if (!editLink) return null;
-        return (
-          <EditDescriptionLinkDialog
-            isOpen={true}
-            onClose={() => setEditingLinkId(null)}
-            linkId={editingLinkId}
-            currentValues={{
-              role: editLink.role,
-              roleNote: editLink.roleNote,
-              sequence: editLink.sequence,
-              honorific: editLink.honorific,
-              function: editLink.function,
-              nameAsRecorded: editLink.nameAsRecorded,
-            }}
+      {/* Two columns: the record on the left (always visible), the
+          linked-descriptions worklist on the right. Toggling edit swaps
+          only the left column's content — the worklist keeps its
+          position in the tree and never remounts. */}
+      <TwoColumnDetail
+        left={
+          isEditing ? (
+            <div className="rounded-lg border border-stone-200 bg-white p-4">
+              <EditMode
+                entity={entity}
+                nameVariantsList={nameVariantsList}
+                functionTerm={functionTerm}
+                errors={errors}
+                t={t}
+                onDiscard={() => setIsEditing(false)}
+                formRef={formRef}
+                onFormChange={handleFormChange}
+              />
+            </div>
+          ) : (
+            <ViewCards
+              entity={entity}
+              nameVariantsList={nameVariantsList}
+              functionTerm={functionTerm}
+              isMerged={isMerged}
+              t={t}
+            />
+          )
+        }
+        right={
+          <LinkedDescriptionsWorklist
+            links={links}
+            total={total}
+            allCount={allCount}
+            recordTotal={descLinkCount}
+            roleCounts={roleCounts}
+            repoCounts={repoCounts}
+            repoSpan={repoSpan}
+            dq={wl.dq}
+            role={wl.role}
+            repo={wl.repo}
+            sort={wl.sort}
+            size={wl.size}
+            page={wl.page}
+            isMerged={isMerged}
             roles={ENTITY_ROLES}
+            recordId={entity.id}
+            recordType="entity"
             showEntityFields={true}
+            roleLabel={(r) => t(`role_${r}`)}
+            placeRoleLabel={(r) => tp(`role_${r}`)}
             t={t}
+            ta={ta}
           />
-        );
-      })()}
-
-      {/* Detail card */}
-      <div className="mt-6 rounded-lg border border-stone-200 bg-white p-6">
-        {isEditing ? (
-          <EditMode
-            entity={entity}
-            nameVariantsList={nameVariantsList}
-            functionTerm={functionTerm}
-            errors={errors}
-            t={t}
-            onDiscard={() => setIsEditing(false)}
-            formRef={formRef}
-            onFormChange={handleFormChange}
-          />
-        ) : (
-          <ViewMode
-            entity={entity}
-            nameVariantsList={nameVariantsList}
-            functionTerm={functionTerm}
-            t={t}
-          />
-        )}
-      </div>
+        }
+      />
 
       {/* Delete confirmation modal */}
       {showDeleteModal && (
@@ -1103,7 +1180,7 @@ export default function EntityDetailPage({
             </h2>
             <p
               id="delete-modal-body"
-              className="mt-2 font-serif text-[15px] text-stone-500 max-w-[36ch] mx-auto"
+              className="mt-2 font-serif text-15 text-stone-500 max-w-measure mx-auto"
             >
               {t("deleteBody", { name: entity.displayName })}
             </p>
@@ -1149,111 +1226,71 @@ export default function EntityDetailPage({
         </div>
       )}
 
-      {/* Merge dialog */}
-      <MergeDialog
-        isOpen={showMergeDialog}
-        onClose={() => setShowMergeDialog(false)}
-        sourceId={entity.id}
-        sourceName={entity.displayName}
-        entityType="entity"
-        links={descLinks}
-        searchEndpoint="/admin/entities"
-        i18nNamespace="entities"
-      />
-
-      {/* Split dialog */}
-      <SplitDialog
-        isOpen={showSplitDialog}
-        onClose={() => setShowSplitDialog(false)}
-        sourceId={entity.id}
-        sourceName={entity.displayName}
-        entityType="entity"
-        links={descLinks}
-        i18nNamespace="entities"
-      />
-
       {/* Optimistic lock conflict dialog */}
       {showConflictDialog &&
         actionData &&
         "error" in actionData &&
         actionData.error === "conflict" && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-lg">
-              <h2 className="text-lg font-semibold text-stone-700">
-                {t("overwrite_confirm", {
-                  name: "",
-                  time:
-                    "modifiedAt" in actionData
-                      ? new Date(
-                          actionData.modifiedAt as number
-                        ).toLocaleString()
-                      : "",
-                })}
-              </h2>
-              <div className="mt-4 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowConflictDialog(false)}
-                  className="rounded-md border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50"
-                >
-                  {t("overwrite_cancel")}
-                </button>
-                <Form method="post">
-                  <input type="hidden" name="_action" value="update" />
-                  <input type="hidden" name="_force" value="true" />
-                  <input
-                    type="hidden"
-                    name="_updatedAt"
-                    value={String(entity.updatedAt)}
-                  />
-                  <button
-                    type="submit"
-                    className="rounded-md bg-indigo px-4 py-2 text-sm font-semibold text-parchment hover:bg-indigo-deep"
-                  >
-                    {t("overwrite_button")}
-                  </button>
-                </Form>
-              </div>
-            </div>
-          </div>
+          <ConflictDialog
+            modifiedByName=""
+            modifiedAt={
+              "modifiedAt" in actionData
+                ? (actionData.modifiedAt as number)
+                : null
+            }
+            recordUpdatedAt={entity.updatedAt}
+            onCancel={() => setShowConflictDialog(false)}
+            t={t}
+          />
         )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// View mode
+// View mode — always-visible cards with real values
 // ---------------------------------------------------------------------------
 
-function ViewMode({
+function ViewCards({
   entity,
   nameVariantsList,
   functionTerm,
+  isMerged,
   t,
 }: {
   entity: any;
   nameVariantsList: string[];
   functionTerm: { id: string; canonical: string; status: string; category: string | null } | null;
+  isMerged: boolean;
   t: (key: string, opts?: Record<string, unknown>) => string;
 }) {
+  // DBE has no stable public URL scheme on record — rendered as a
+  // value, never an invented link.
+  const lodLinks: Array<{
+    label: string;
+    value: string | null;
+    href: ((id: string) => string) | null;
+  }> = [
+    {
+      label: t("field.wikidataId"),
+      value: entity.wikidataId,
+      href: SERVICE_URLS.wikidata,
+    },
+    { label: t("field.viafId"), value: entity.viafId, href: SERVICE_URLS.viaf },
+    { label: t("field.dbeId"), value: entity.dbeId, href: null },
+  ];
   return (
     <div>
-      {/* Identity area */}
-      <CollapsibleSection title={t("sectionIdentity")}>
-        <div className="space-y-3">
+      {/* Identity */}
+      <DetailCard title={t("sectionIdentity")} dimmed={isMerged}>
+        <div className="space-y-2.5">
           <FieldDisplay
             label={t("field.displayName")}
             value={entity.displayName}
           />
-          <FieldDisplay
-            label={t("field.sortName")}
-            value={entity.sortName}
-          />
+          <FieldDisplay label={t("field.sortName")} value={entity.sortName} />
           <div className="grid grid-cols-3 gap-4">
-            <FieldDisplay
-              label={t("field.surname")}
-              value={entity.surname}
-            />
+            <FieldDisplay label={t("field.surname")} value={entity.surname} />
             <FieldDisplay
               label={t("field.givenName")}
               value={entity.givenName}
@@ -1273,33 +1310,16 @@ function ViewMode({
                   : t("corporate")
             }
           />
-          <FieldDisplay
-            label={t("field.entityCode")}
-            value={entity.entityCode}
-          />
-          {nameVariantsList.length > 0 && (
-            <div>
-              <p className="text-xs text-stone-500">
-                {t("field.nameVariants")}
-              </p>
-              <div className="mt-1 flex flex-wrap gap-2">
-                {nameVariantsList.map((v, i) => (
-                  <span
-                    key={i}
-                    className="inline-block rounded bg-stone-100 px-2 py-1 text-xs text-stone-700"
-                  >
-                    {v}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
+          <div>
+            <p className="text-xs text-stone-500">{t("field.nameVariants")}</p>
+            <VariantChips variants={nameVariantsList} />
+          </div>
         </div>
-      </CollapsibleSection>
+      </DetailCard>
 
-      {/* Description area */}
-      <CollapsibleSection title={t("sectionDescription")}>
-        <div className="space-y-3">
+      {/* Description */}
+      <DetailCard title={t("sectionDescription")} dimmed={isMerged}>
+        <div className="space-y-2.5">
           <FieldDisplay
             label={t("field.datesOfExistence")}
             value={entity.datesOfExistence}
@@ -1309,17 +1329,16 @@ function ViewMode({
               label={t("field.dateStart")}
               value={entity.dateStart}
             />
-            <FieldDisplay
-              label={t("field.dateEnd")}
-              value={entity.dateEnd}
-            />
+            <FieldDisplay label={t("field.dateEnd")} value={entity.dateEnd} />
           </div>
           <FieldDisplay label={t("field.history")} value={entity.history} />
           <div>
-            <p className="text-xs text-stone-500">{t("field.primaryFunction")}</p>
+            <p className="text-xs text-stone-500">
+              {t("field.primaryFunction")}
+            </p>
             <div className="flex items-center gap-2">
               <p className="text-sm text-stone-700">
-                {functionTerm?.canonical ?? entity.primaryFunction ?? "\u2014"}
+                {functionTerm?.canonical ?? entity.primaryFunction ?? "—"}
               </p>
               {functionTerm?.status === "proposed" && (
                 <span className="rounded-full bg-saffron-tint px-2 py-0.5 text-xs font-semibold text-saffron-deep">
@@ -1329,54 +1348,50 @@ function ViewMode({
             </div>
           </div>
           {/* legalStatus dropped in 0036 (0% populated). */}
-          <FieldDisplay
-            label={t("field.functions")}
-            value={entity.functions}
-          />
+          <FieldDisplay label={t("field.functions")} value={entity.functions} />
         </div>
-      </CollapsibleSection>
+      </DetailCard>
 
-      {/* Relationships area */}
-      {entity.mergedInto && (
-        <CollapsibleSection title={t("sectionRelationships")}>
-          <div className="space-y-3">
-            <FieldDisplay
-              label={t("field.mergedInto")}
-              value={entity.mergedInto}
-            />
-          </div>
-        </CollapsibleSection>
-      )}
+      {/* Control */}
+      <DetailCard title={t("sectionControl")} dimmed={isMerged}>
+        <FieldDisplay label={t("field.sources")} value={entity.sources} />
+      </DetailCard>
 
-      {/* Control area */}
-      <CollapsibleSection title={t("sectionControl")}>
-        <div className="space-y-3">
-          <FieldDisplay label={t("field.sources")} value={entity.sources} />
-          <FieldDisplay
-            label={t("field.wikidataId")}
-            value={entity.wikidataId}
-          />
-          <FieldDisplay
-            label={t("field.viafId")}
-            value={entity.viafId}
-          />
+      {/* Linked open data */}
+      <DetailCard title={t("sectionLod")} dimmed={isMerged}>
+        <div className="space-y-2.5">
+          {lodLinks.map(({ label, value, href }) => (
+            <div key={label}>
+              <p className="text-xs text-stone-500">{label}</p>
+              {value ? (
+                href ? (
+                  <a
+                    href={href(value)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-13 font-semibold text-verdigris-deep hover:underline"
+                  >
+                    {value}
+                  </a>
+                ) : (
+                  <p className="font-mono text-13 text-stone-700">{value}</p>
+                )
+              ) : (
+                <p className="text-sm text-stone-700">{"—"}</p>
+              )}
+            </div>
+          ))}
         </div>
-      </CollapsibleSection>
-    </div>
-  );
-}
+      </DetailCard>
 
-function FieldDisplay({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | null | undefined;
-}) {
-  return (
-    <div>
-      <p className="text-xs text-stone-500">{label}</p>
-      <p className="text-sm text-stone-700">{value || "\u2014"}</p>
+      {/* Notes — each card shows only when its value is non-empty. */}
+      <NotesCards
+        notes={entity.notes}
+        internalNotes={entity.internalNotes}
+        notesLabel={t("sectionNotes")}
+        internalNotesLabel={t("sectionInternalNotes")}
+        internalBadge={t("internalBadge")}
+      />
     </div>
   );
 }
@@ -1584,6 +1599,17 @@ function EditMode({
         </div>
       </CollapsibleSection>
 
+      {/* Notes area */}
+      <CollapsibleSection title={t("sectionNotes")}>
+        <NotesEditFields
+          notes={entity.notes}
+          internalNotes={entity.internalNotes}
+          notesLabel={t("field.notes")}
+          internalNotesLabel={t("field.internalNotes")}
+          internalBadge={t("internalBadge")}
+        />
+      </CollapsibleSection>
+
       {/* Actions */}
       <div className="mt-6 space-y-3 border-t border-stone-200 pt-4">
         <input
@@ -1609,77 +1635,5 @@ function EditMode({
         </div>
       </div>
     </Form>
-  );
-}
-
-function EditField({
-  name,
-  label,
-  defaultValue,
-  required,
-  error,
-}: {
-  name: string;
-  label: string;
-  defaultValue: string;
-  required?: boolean;
-  error?: string;
-}) {
-  const errorId = error ? `${name}-error` : undefined;
-  return (
-    <div>
-      <label htmlFor={name} className="mb-1 block text-xs font-medium text-indigo">
-        {label}
-        {required && <span className="text-madder"> *</span>}
-      </label>
-      <input
-        type="text"
-        id={name}
-        name={name}
-        defaultValue={defaultValue}
-        aria-required={required ? "true" : undefined}
-        aria-describedby={errorId}
-        className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
-      />
-      {error && (
-        <p id={errorId} className="mt-1 text-xs text-madder">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function EditTextarea({
-  name,
-  label,
-  defaultValue,
-  error,
-}: {
-  name: string;
-  label: string;
-  defaultValue: string;
-  error?: string;
-}) {
-  const errorId = error ? `${name}-error` : undefined;
-  return (
-    <div>
-      <label htmlFor={name} className="mb-1 block text-xs font-medium text-indigo">
-        {label}
-      </label>
-      <textarea
-        id={name}
-        name={name}
-        rows={3}
-        defaultValue={defaultValue}
-        aria-describedby={errorId}
-        className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
-      />
-      {error && (
-        <p id={errorId} className="mt-1 text-xs text-madder">
-          {error}
-        </p>
-      )}
-    </div>
   );
 }

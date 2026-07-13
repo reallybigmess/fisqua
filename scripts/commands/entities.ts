@@ -5,8 +5,10 @@
  * `entities` from the Django catalogue dump. The COLUMNS array tracks
  * the v0.4 union schema:
  *
- *   - tenant_id is mandatory at column position 2
- *     (NEOGRANADINA_TENANT_ID)
+ *   - federation_id is mandatory at column position 2
+ *     (NEOGRANADINA_FEDERATION_ID) — entities are federation-scoped
+ *     after migrations 0045-0048; the Neogranadina import files under the
+ *     Neogranadina federation
  *   - primary_function_id (vocabulary FK) imports as NULL — the
  *     Django dump does not carry vocabulary-term IDs
  *   - legal_status is dropped (0% populated in audit; gone in
@@ -21,7 +23,7 @@
  *     inside a single batch fall back to `generateUniqueCodes` — at
  *     production row counts (~78K) the fallback rate is ~0.4%.
  *
- * @version v0.4.0
+ * @version v0.4.3
  */
 import * as fs from "node:fs/promises";
 import * as crypto from "node:crypto";
@@ -29,16 +31,17 @@ import type { IdMap, ImportResult } from "../lib/types";
 import { escapeSql, generateInserts, writeSqlFiles } from "../lib/sql";
 import { generateUniqueCodes, deterministicCode } from "../lib/codes";
 import { toEpochSeconds, stringifyJsonArray, buildLegacyIdsForEntity } from "../lib/transform";
-import { NEOGRANADINA_TENANT_ID } from "../../app/lib/tenant";
+import { NEOGRANADINA_FEDERATION_ID } from "../../app/lib/tenant";
 
 const COLUMNS = [
-  "id", "tenant_id",
+  "id", "federation_id",
   "entity_code", "display_name", "sort_name", "surname", "given_name",
   "entity_type", "honorific", "primary_function", "primary_function_id",
   "name_variants", "dates_of_existence", "date_start", "date_end",
   "history", "functions", "sources", "merged_into",
   "wikidata_id", "viaf_id",
   "dbe_id", "legacy_ids",
+  "notes", "internal_notes",
   "created_at", "updated_at",
 ];
 
@@ -46,10 +49,13 @@ const COLUMNS = [
  * Import entities from a JSON export file.
  * Generates UUIDs and deterministic ne-xxxxxx codes (with collision
  * fallback) for each record, resolves merged_into FKs, and produces
- * chunked SQL INSERT files.
+ * chunked SQL INSERT files under `outputDir` (default `.import/`,
+ * the production CLI's unchanged root; tests pass a per-suite temp
+ * dir so parallel runs don't share scratch space).
  */
 export async function importEntities(
-  inputPath: string
+  inputPath: string,
+  outputDir = ".import"
 ): Promise<{ result: ImportResult; idMap: IdMap; skippedPks: Set<number> }> {
   const raw = await fs.readFile(inputPath, "utf8");
   const records = JSON.parse(raw) as Record<string, unknown>[];
@@ -159,7 +165,7 @@ export async function importEntities(
 
     rows.push([
       escapeSql(newId),
-      escapeSql(NEOGRANADINA_TENANT_ID),
+      escapeSql(NEOGRANADINA_FEDERATION_ID),
       escapeSql(code),
       escapeSql(record.display_name),
       escapeSql(record.sort_name),
@@ -183,13 +189,15 @@ export async function importEntities(
       escapeSql(record.viaf_id ?? null),
       escapeSql((record.dbe_id as string | null) ?? null),
       escapeSql(legacyIdsJson),
+      escapeSql((record.notes as string | null) ?? null),
+      escapeSql((record.internal_notes as string | null) ?? null),
       escapeSql(createdAt),
       escapeSql(updatedAt),
     ]);
   }
 
   const statements = generateInserts("entities", COLUMNS, rows, 100);
-  const sqlFiles = await writeSqlFiles("entities", statements);
+  const sqlFiles = await writeSqlFiles("entities", statements, 50, outputDir);
 
   return {
     result: {
@@ -205,4 +213,4 @@ export async function importEntities(
   };
 }
 
-// Version: v0.4.0
+// Version: v0.4.2

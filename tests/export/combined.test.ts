@@ -6,7 +6,7 @@
  * the index file itself are slug-prefixed to match the per-fonds R2
  * layout that `exportFondsDescriptions` writes.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
@@ -19,6 +19,7 @@ import type { ExportTenant } from "../../app/lib/export/types";
 
 const TEST_TENANT: ExportTenant = {
   id: "test-tenant-id",
+  federationId: "b4462493-6170-44f8-ae07-24666606d1f1", // NEOGRANADINA_FEDERATION_ID
   slug: "neogranadina",
   descriptiveStandard: "isadg",
 };

@@ -84,6 +84,7 @@ async function seedFixture(db: Db) {
 
   await db.insert(schema.projects).values({
     id: projectId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     name: "QC Lifecycle P1",
     createdBy: leadRow.id,
     createdAt: now,
@@ -109,6 +110,7 @@ async function seedFixture(db: Db) {
 
   await db.insert(schema.volumes).values({
     id: volumeId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     projectId,
     name: "V1",
     referenceCode: "co-lifecycle-v1",
@@ -122,6 +124,7 @@ async function seedFixture(db: Db) {
   await db.insert(schema.volumePages).values([
     {
       id: pageG1,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       volumeId,
       position: 1,
       imageUrl: "https://example.com/g1.jpg",
@@ -132,6 +135,7 @@ async function seedFixture(db: Db) {
     },
     {
       id: pageG2,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       volumeId,
       position: 2,
       imageUrl: "https://example.com/g2.jpg",

@@ -7,12 +7,12 @@
  * ones, and merge duplicates; every mutation writes an audit row so
  * the change trail is recoverable.
  *
- * Tenant attribution comes from request context, populated by
- * `authMiddleware`. Usage counts on `entities` and `places` are
- * scoped to `tenant.id`; descriptionEntities and descriptionPlaces
- * inherit tenant scope via FK chain.
+ * Authority scope is the federation (migrations 0045-0048). Usage counts on
+ * `entities` and `places` are scoped to `tenant.federationId`;
+ * descriptionEntities and descriptionPlaces inherit tenant scope via
+ * FK chain.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { useState } from "react";
@@ -114,7 +114,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       .from(entities)
       .where(
         and(
-          eq(entities.tenantId, tenant.id),
+          eq(entities.federationId, tenant.federationId),
           sql`${entities.mergedInto} IS NULL`
         )
       )
@@ -128,7 +128,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         count: sql<number>`count(*)`,
       })
       .from(places)
-      .where(eq(places.tenantId, tenant.id))
+      .where(eq(places.federationId, tenant.federationId))
       .groupBy(places.placeType)
       .all();
     for (const row of rows) usageMap.set(row.type ?? "", row.count);

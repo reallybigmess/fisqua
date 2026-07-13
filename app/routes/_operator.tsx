@@ -36,7 +36,7 @@
  *     migration wants to surface impersonation status in operator
  *     chrome.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { Form, Outlet, NavLink } from "react-router";
@@ -88,7 +88,7 @@ export default function OperatorLayout({
             className="h-7 w-7"
             aria-hidden="true"
           />
-          <span className="ml-2 font-display text-[22px] font-semibold leading-none text-verdigris">
+          <span className="ml-2 font-display text-2xl font-semibold leading-none text-verdigris">
             {t("brand")}
           </span>
           <div
@@ -140,4 +140,4 @@ export default function OperatorLayout({
   );
 }
 
-// @version v0.4.0
+// @version v0.4.2

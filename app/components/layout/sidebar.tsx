@@ -10,9 +10,10 @@
  * mobile drawer.
  *
  * `getSidebarSections(user, tenant)` takes a second argument carrying
- * the request tenant's four capability booleans
+ * the request tenant's five capability booleans
  * (`crowdsourcingEnabled`, `vocabularyHubEnabled`,
- * `publishPipelineEnabled`, `multiRepositoryEnabled`). When a
+ * `publishPipelineEnabled`, `multiRepositoryEnabled`,
+ * `authoritiesEnabled`). When a
  * capability is off, the corresponding nav surface is omitted
  * entirely — no greyed-out, no "coming soon", no tooltip — matching
  * the platform's immutable-capability posture. The gate map is:
@@ -23,13 +24,16 @@
  *   - `publishPipelineEnabled` → `/admin/publish` and
  *     `/admin/cataloguing/promote`
  *   - `multiRepositoryEnabled` → `/admin/repositories`
+ *   - `authoritiesEnabled` → the entire `Authorities` section
+ *     (`/admin/entities` and `/admin/places`), its own grouped
+ *     section as of the 2026-07-10 module-section ruling
  *
- * For Neogranadina (all four capabilities ON) the rendered tree is
+ * For Neogranadina (all five capabilities ON) the rendered tree is
  * byte-identical to v0.3 — the gating is invisible to existing
  * users. The `<Sidebar>` component grew a matching `tenant` prop
  * which the `_auth` layout populates from `tenantContext`.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { NavLink } from "react-router";
@@ -46,6 +50,7 @@ import {
   Upload,
   ArrowUpFromLine,
   BookOpen,
+  GitCompare,
   Kanban,
   Settings,
   ChevronLeft,
@@ -58,6 +63,8 @@ export interface NavItem {
   icon: LucideIcon;
   labelKey: string;
   end?: boolean;
+  /** Right-aligned madder pill count (duplicate candidates). */
+  badge?: number;
 }
 
 export interface NavSection {
@@ -87,6 +94,7 @@ export interface SidebarTenant {
   vocabularyHubEnabled: boolean;
   publishPipelineEnabled: boolean;
   multiRepositoryEnabled: boolean;
+  authoritiesEnabled: boolean;
 }
 
 /**
@@ -99,6 +107,7 @@ export interface SidebarTenant {
 export function getSidebarSections(
   user: SidebarUser,
   tenant: SidebarTenant,
+  counts?: { duplicates?: number },
 ): NavSection[] {
   const sections: NavSection[] = [
     {
@@ -162,14 +171,13 @@ export function getSidebarSections(
   }
 
   // Records management — archive admin side. Per-item gating for
-  // the three capability-bound entries (repositories, vocabularies,
-  // publish); descriptions / entities / places are always available
-  // when the user has the role.
+  // the capability-bound entries (repositories, vocabularies,
+  // publish); descriptions is always available when the user has the
+  // role. Entities and places moved to their own Authorities section
+  // (ruled 2026-07-10) — each module gets its own sidebar section.
   if (user.isAdmin || user.isSuperAdmin) {
     const items: NavItem[] = [
       { path: "/admin/descriptions", icon: FileText, labelKey: "sidebar:descriptions" },
-      { path: "/admin/entities", icon: Users, labelKey: "sidebar:entities" },
-      { path: "/admin/places", icon: MapPin, labelKey: "sidebar:places" },
     ];
     if (tenant.multiRepositoryEnabled) {
       items.push({
@@ -193,6 +201,27 @@ export function getSidebarSections(
       });
     }
     sections.push({ labelKey: "sidebar:records_management", items });
+
+    // Authorities — the module's own section, gated on the
+    // authorities capability. When off the whole section is omitted
+    // (the phase-2 route gate 404s any direct hit). The Possible
+    // duplicates entry carries the candidate-count badge computed by
+    // the layout loader.
+    if (tenant.authoritiesEnabled) {
+      sections.push({
+        labelKey: "sidebar:authorities",
+        items: [
+          { path: "/admin/entities", icon: Users, labelKey: "sidebar:entities" },
+          { path: "/admin/places", icon: MapPin, labelKey: "sidebar:places" },
+          {
+            path: "/admin/entities/duplicates",
+            icon: GitCompare,
+            labelKey: "sidebar:possible_duplicates",
+            badge: counts?.duplicates,
+          },
+        ],
+      });
+    }
   }
 
   return sections;
@@ -207,12 +236,22 @@ interface SidebarProps {
   tenant: SidebarTenant;
   collapsed: boolean;
   onToggle: () => void;
+  /** Possible-duplicates badge count from the layout loader. */
+  duplicateCount?: number;
 }
 
-export function Sidebar({ user, tenant, collapsed, onToggle }: SidebarProps) {
+export function Sidebar({
+  user,
+  tenant,
+  collapsed,
+  onToggle,
+  duplicateCount,
+}: SidebarProps) {
   const { t } = useTranslation("sidebar");
 
-  const sections = getSidebarSections(user, tenant);
+  const sections = getSidebarSections(user, tenant, {
+    duplicates: duplicateCount,
+  });
 
   return (
     <nav
@@ -226,7 +265,7 @@ export function Sidebar({ user, tenant, collapsed, onToggle }: SidebarProps) {
           <div key={section.labelKey ?? si}>
             {si > 0 && <div className="mx-4 my-2 border-t border-stone-200" />}
             {section.labelKey && !collapsed && (
-              <p className="mx-6 mb-1 font-sans text-[11px] font-semibold uppercase tracking-[0.1em] text-stone-400">
+              <p className="mx-6 mb-1 font-sans text-11 font-semibold uppercase tracking-[0.1em] text-stone-400">
                 {t(section.labelKey.replace("sidebar:", ""))}
               </p>
             )}
@@ -313,8 +352,13 @@ function SidebarNavItem({
             }`}
           />
           {!collapsed && (
-            <span className="font-sans text-sm">
+            <span className="flex-1 font-sans text-sm">
               {t(item.labelKey.replace("sidebar:", ""))}
+            </span>
+          )}
+          {!collapsed && item.badge != null && item.badge > 0 && (
+            <span className="rounded-full bg-madder-tint px-2 py-0.5 font-sans text-11 nums font-semibold text-madder-deep">
+              {item.badge}
             </span>
           )}
         </>

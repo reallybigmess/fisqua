@@ -19,20 +19,20 @@
  *
  * ## Domain tables in scope
  *
- * The five tables that carry a `tenant_id` NOT NULL FK in the
- * production schema (verified by
- * `grep -B1 'tenantId: text' app/db/schema.ts`; child tables are
- * scoped via FK chain to a parent that always carries `tenant_id`):
+ * The scoped tables in the production schema:
  *
- *   - `users`
- *   - `repositories`
- *   - `descriptions`
- *   - `entities`
- *   - `places`
+ *   - `users`, `repositories`, `descriptions` — tenant-scoped
+ *     (`tenant_id` NOT NULL FK)
+ *   - `projects`, `volumes`, `volumePages`, `entries`, `qcFlags`,
+ *     `comments`, `resegmentationFlags`, `activityLog`, `drafts` — the
+ *     crowdsourcing subtree, tenant-scoped since migration 0042; their
+ *     loader predicates landed in federation step 4 alongside the writer
+ *     plumbing, so the guard holds them against regression too.
+ *   - `entities`, `places`, `vocabulary_terms` — federation-scoped
+ *     (`federation_id`, migrations 0045-0048)
  *
- * If a future schema change adds `tenant_id` to a sixth table (e.g.
- * `vocabulary_terms`, `comments`, `qc_flags`), update
- * `DOMAIN_TABLES` below in lockstep with the migration.
+ * If a future schema change adds a scope column to another table, update
+ * TENANT_TABLES / FEDERATION_TABLES below in lockstep with the migration.
  *
  * ## Scope
  *
@@ -45,6 +45,14 @@
  *   - `app/lib/invites.server.ts`, `app/lib/promote/**` — the lib
  *     touchpoints that take `tenantId` as an argument and pass it
  *     through to their D1 queries.
+ *
+ *   - The eight crowdsourcing writer libs (projects, drafts, volumes,
+ *     entries, comments, qc-flags, resegmentation, workflow `.server.ts`
+ *     modules) — added in federation step 4 so writer regressions fail
+ *     CI. Six of them are allowlisted for their parent-FK-scoped
+ *     reads/deletes (each with a justification below); their inserts
+ *     remain compile-guarded because tenantId is required in every
+ *     crowdsourcing insert type.
  *
  *   - `app/middleware/**` — middleware is structurally bounded; the
  *     allowlist documents the legitimate exceptions there.
@@ -133,7 +141,13 @@
  * structurally by this test failing CI. Allowlist abuse is
  * mitigated by review-time scrutiny on each new entry.
  *
- * @version v0.4.0
+ * Migration 0045 lifted entities/places (and vocabulary_terms) to
+ * federation scope, so this keystone now requires a `federationId`
+ * predicate on entities/places queries and a `tenantId` predicate on the
+ * tenant-scoped tables (users/repositories/descriptions). See the
+ * TENANT_TABLES / FEDERATION_TABLES split below.
+ *
+ * @version v0.4.2
  */
 import { describe, it, expect } from "vitest";
 
@@ -163,23 +177,70 @@ const promoteFiles = import.meta.glob("../../app/lib/promote/**/*.ts", {
   eager: true,
 }) as Record<string, string>;
 
+// Crowdsourcing writer libs (federation step 4): the eight app/lib
+// modules that write the nine tenant-scoped crowdsourcing tables.
+// Scanned so a writer regression (an insert dropping its explicit
+// tenantId, or a scoped query losing its predicate) fails CI.
+// Enumerated explicitly rather than `app/lib/*.server.ts` so the
+// allowlist stays small and each inclusion is deliberate.
+const crowdsourcingWriterFiles = import.meta.glob(
+  [
+    "../../app/lib/projects.server.ts",
+    "../../app/lib/drafts.server.ts",
+    "../../app/lib/volumes.server.ts",
+    "../../app/lib/entries.server.ts",
+    "../../app/lib/comments.server.ts",
+    "../../app/lib/qc-flags.server.ts",
+    "../../app/lib/resegmentation.server.ts",
+    "../../app/lib/workflow.server.ts",
+  ],
+  { query: "?raw", import: "default", eager: true },
+) as Record<string, string>;
+
 const middlewareFiles = import.meta.glob(
   "../../app/middleware/**/*.{ts,tsx}",
   { query: "?raw", import: "default", eager: true },
 ) as Record<string, string>;
 
 /**
- * The five tenanted domain tables. MUST stay in lockstep with the
- * schema: a schema migration that adds `tenant_id` to a new table
- * adds the table here in the same commit.
+ * The six scoped domain tables the keystone guards. MUST stay in
+ * lockstep with the schema. Split by scoping level after migrations
+ * 0045-0048 lifted entities/places from tenant to federation scope:
+ *
+ *   - TENANT_TABLES: queries must carry a `tenantId` predicate.
+ *   - FEDERATION_TABLES (authorities): queries must carry a
+ *     `federationId` predicate (resolved from the session tenant's
+ *     federation). vocabularyTerms joined this set with the lift — it
+ *     gained a federation_id NOT NULL column in 0045 and every vocab
+ *     surface now filters by it, so the guard holds those predicates
+ *     against regression too. authorityOperations joined with migration
+ *     0057 (federation_id NOT NULL FK): the ledger is federation-scoped,
+ *     so any future admin read surface over it must carry the predicate.
  */
-const DOMAIN_TABLES = [
+const TENANT_TABLES = [
   "users",
   "repositories",
   "descriptions",
+  // Crowdsourcing subtree — gained a NOT NULL tenant_id in migration 0042;
+  // their loader predicates land alongside the writer plumbing in
+  // federation sequence step 4, so the guard now holds them too.
+  "projects",
+  "volumes",
+  "volumePages",
+  "entries",
+  "qcFlags",
+  "comments",
+  "resegmentationFlags",
+  "activityLog",
+  "drafts",
+] as const;
+const FEDERATION_TABLES = [
   "entities",
   "places",
+  "vocabularyTerms",
+  "authorityOperations",
 ] as const;
+const DOMAIN_TABLES = [...TENANT_TABLES, ...FEDERATION_TABLES] as const;
 
 /**
  * Files whose domain-table queries are legitimately exempt. Each
@@ -200,6 +261,38 @@ const ALLOWLIST_FILES: ReadonlyArray<string> = [
   // GLOBAL by design. The actual
   // UPDATE that follows is tenant-scoped.
   "../../app/routes/_auth.admin.users.$id.tsx",
+  //
+  // Crowdsourcing writer libs whose READS/DELETES legitimately scope by
+  // PK or parent FK (projectId/volumeId/entryId resolved under
+  // route-level project-membership guards) rather than by a direct
+  // tenantId predicate. Their INSERTS are all guarded by the type
+  // system regardless of this allowlist: tenantId is REQUIRED in each
+  // table's insert type (no Drizzle default since step 4), so a writer
+  // dropping it is a compile error, not a scan miss. drafts.server.ts
+  // and workflow.server.ts are deliberately NOT listed -- every one of
+  // their statements carries a tenant reference, so they stay fully
+  // scanned.
+  //
+  // Project reads are projectMembers-joined or PK lookups after a
+  // membership check; createProject's INSERT takes tenantId explicitly.
+  "../../app/lib/projects.server.ts",
+  // Volume-tree reads and the (force)delete cascade scope by volume PK /
+  // parent FK; createVolume resolves its tenant from the parent project.
+  "../../app/lib/volumes.server.ts",
+  // loadEntries/saveEntries scope by parent volumeId (route access
+  // guards); saveEntries resolves its tenant from the parent volume.
+  "../../app/lib/entries.server.ts",
+  // Comment reads/updates scope by comment PK or parent anchor
+  // (entry/page/qcFlag/volume); createComment resolves its tenant from
+  // the parent volume.
+  "../../app/lib/comments.server.ts",
+  // QC-flag reads/updates scope by flag PK or parent volumeId;
+  // createQcFlag resolves its tenant from the parent volume.
+  "../../app/lib/qc-flags.server.ts",
+  // Resegmentation-flag reads/updates scope by flag PK or parent
+  // volumeId; createResegmentationFlag resolves its tenant from the
+  // parent volume.
+  "../../app/lib/resegmentation.server.ts",
 ];
 
 interface Violation {
@@ -362,6 +455,14 @@ function scanFiles(
       const match = verbRegex.exec(visible);
       if (!match) continue;
 
+      // match[2] is the captured table name; federation-scoped
+      // authorities (entities/places) must carry a `federationId`
+      // predicate, every other guarded table a `tenantId` predicate.
+      const matchedTable = match[2];
+      const isFederationScoped = (FEDERATION_TABLES as readonly string[]).includes(
+        matchedTable,
+      );
+
       const statement = captureStatement(lines, i);
       // The captured statement (forward window + enclosing-scope
       // backward context) must reference a tenantId column predicate
@@ -384,15 +485,36 @@ function scanFiles(
       //
       // The check is intentionally strict; widening it dilutes the
       // test's signal.
-      const QUALIFIED_REF = /\b\w+\.tenantId\b/;
-      const FIELD_LITERAL = /\btenantId\s*[:,]/;
-      const SHORTHAND_TRAIL = /\btenantId\s*\n\s*[},]/;
-      const RAW_SQL_REF = /\b\w+\.tenant_id\b/;
+      const col = isFederationScoped ? "federationId" : "tenantId";
+      const rawCol = isFederationScoped ? "federation_id" : "tenant_id";
+
+      // Neutralise TypeScript TYPE ANNOTATIONS before the predicate
+      // check. `tenantId: string` in a function signature, interface, or
+      // return-type literal is a DECLARATION, not a value use -- and the
+      // backward context window routinely includes the enclosing
+      // function's signature, so without this step a helper that TAKES a
+      // tenantId parameter would satisfy `FIELD_LITERAL` even after its
+      // query dropped the actual predicate (empirically demonstrated by
+      // the 2026-07-08 adversarial review: deleting
+      // `eq(entries.tenantId, tenantId)` from a tenantId-parameterised
+      // promote query passed the scan). Stripping `tenantId: string`
+      // (also `?:`, number, boolean) leaves only genuine value contexts
+      // (`tenantId: tenant.id`, `{ tenantId, ... }`, `x.tenantId`) able
+      // to satisfy the check.
+      const sanitized = statement.replace(
+        new RegExp(`\\b${col}\\??\\s*:\\s*(string|number|boolean)\\b`, "g"),
+        "__TYPE_ANNOTATION__",
+      );
+
+      const QUALIFIED_REF = new RegExp(`\\b\\w+\\.${col}\\b`);
+      const FIELD_LITERAL = new RegExp(`\\b${col}\\s*[:,]`);
+      const SHORTHAND_TRAIL = new RegExp(`\\b${col}\\s*\\n\\s*[},]`);
+      const RAW_SQL_REF = new RegExp(`\\b\\w+\\.${rawCol}\\b`);
       if (
-        QUALIFIED_REF.test(statement) ||
-        FIELD_LITERAL.test(statement) ||
-        SHORTHAND_TRAIL.test(statement) ||
-        RAW_SQL_REF.test(statement)
+        QUALIFIED_REF.test(sanitized) ||
+        FIELD_LITERAL.test(sanitized) ||
+        SHORTHAND_TRAIL.test(sanitized) ||
+        RAW_SQL_REF.test(sanitized)
       ) {
         continue;
       }
@@ -418,11 +540,12 @@ function scanFiles(
 }
 
 describe("cross-tenant coverage", () => {
-  it("every domain-table query in app/routes/_auth.admin.**, app/lib/invites + promote, app/middleware/** references tenantId", () => {
+  it("every domain-table query in app/routes/_auth.admin.**, app/lib/invites + promote, app/middleware/** references its scoping predicate (tenantId, or federationId for authorities)", () => {
     const allFiles = {
       ...adminRouteFiles,
       ...invitesFile,
       ...promoteFiles,
+      ...crowdsourcingWriterFiles,
       ...middlewareFiles,
     };
     const violations = scanFiles(allFiles, ALLOWLIST_FILES);
@@ -433,8 +556,9 @@ describe("cross-tenant coverage", () => {
 
     expect(
       violations,
-      `Domain-table queries missing tenantId predicate:\n${formatted}\n\n` +
-        `If a violation is on a query that legitimately cannot or should not be tenant-scoped, ` +
+      `Domain-table queries missing their scoping predicate ` +
+        `(tenantId for tenant tables; federationId for entities/places):\n${formatted}\n\n` +
+        `If a violation is on a query that legitimately cannot or should not be scoped, ` +
         `add the file to ALLOWLIST_FILES in this test with a one-line justification. ` +
         `Otherwise, add the missing predicate.`,
     ).toEqual([]);
@@ -445,6 +569,7 @@ describe("cross-tenant coverage", () => {
       ...adminRouteFiles,
       ...invitesFile,
       ...promoteFiles,
+      ...crowdsourcingWriterFiles,
       ...middlewareFiles,
     } as Record<string, string>;
     const missing = ALLOWLIST_FILES.filter((p) => !(p in allFiles));
@@ -454,17 +579,49 @@ describe("cross-tenant coverage", () => {
     ).toEqual([]);
   });
 
-  it("DOMAIN_TABLES contains the five known tenant-scoped tables", () => {
-    // Lockstep guard: if someone shrinks DOMAIN_TABLES without a
-    // schema change, this assertion fails. If the schema gains a
-    // sixth tenant-scoped table, this assertion fails until
-    // DOMAIN_TABLES is extended.
+  it("DOMAIN_TABLES contains the guarded tables, split by scope", () => {
+    // Lockstep guard: if someone shrinks the guarded set without a
+    // schema change, this assertion fails. entities/places/vocabularyTerms
+    // are federation-scoped after migrations 0045-0048; the crowdsourcing
+    // subtree joined the tenant-scoped set in step 4 (migration 0042 gave
+    // each a NOT NULL tenant_id).
+    expect(TENANT_TABLES).toEqual([
+      "users",
+      "repositories",
+      "descriptions",
+      "projects",
+      "volumes",
+      "volumePages",
+      "entries",
+      "qcFlags",
+      "comments",
+      "resegmentationFlags",
+      "activityLog",
+      "drafts",
+    ]);
+    expect(FEDERATION_TABLES).toEqual([
+      "entities",
+      "places",
+      "vocabularyTerms",
+      "authorityOperations",
+    ]);
     expect(DOMAIN_TABLES).toEqual([
       "users",
       "repositories",
       "descriptions",
+      "projects",
+      "volumes",
+      "volumePages",
+      "entries",
+      "qcFlags",
+      "comments",
+      "resegmentationFlags",
+      "activityLog",
+      "drafts",
       "entities",
       "places",
+      "vocabularyTerms",
+      "authorityOperations",
     ]);
   });
 });

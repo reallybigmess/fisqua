@@ -15,7 +15,7 @@
  * the volume keeps the cataloguer from triggering no-op transitions
  * that would clear unsaved changes for nothing.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { useTranslation } from "react-i18next";
@@ -95,7 +95,7 @@ export function EntryNav({
     <div className="flex items-center gap-3 border-b border-stone-200 bg-white px-4 py-2">
       {/* Reference code */}
       {currentEntry.referenceCode && (
-        <span className="font-mono text-[0.875rem] text-stone-500">
+        <span className="font-mono text-sm text-stone-500">
           {currentEntry.referenceCode}
         </span>
       )}
@@ -111,7 +111,7 @@ export function EntryNav({
         >
           <ChevronLeftIcon />
         </button>
-        <span className="font-sans text-[0.875rem] text-stone-500">
+        <span className="font-sans text-sm text-stone-500">
           {currentIndex + 1} {t("navigation.de")} {totalEntries}
         </span>
         <button

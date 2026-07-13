@@ -25,7 +25,7 @@ import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import * as schema from "../../app/db/schema";
-import { applyMigrations, cleanDatabase } from "../helpers/db";
+import { DEFAULT_TEST_TENANT_ID, applyMigrations, cleanDatabase } from "../helpers/db";
 import { createTestUser } from "../helpers/auth";
 import {
   createComment,
@@ -51,6 +51,7 @@ async function seedFixture(db: Db) {
 
   await db.insert(schema.projects).values({
     id: projectId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     name: "Test Project",
     createdBy: user.id,
     createdAt: now,
@@ -67,6 +68,7 @@ async function seedFixture(db: Db) {
 
   await db.insert(schema.volumes).values({
     id: volumeId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     projectId,
     name: "Test Volume",
     referenceCode: "co-test-vol",
@@ -79,6 +81,7 @@ async function seedFixture(db: Db) {
 
   await db.insert(schema.volumePages).values({
     id: pageId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     volumeId,
     position: 1,
     imageUrl: "https://example.com/image-1.jpg",
@@ -90,6 +93,7 @@ async function seedFixture(db: Db) {
 
   await db.insert(schema.entries).values({
     id: entryId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     volumeId,
     position: 0,
     startPage: 1,
@@ -103,6 +107,7 @@ async function seedFixture(db: Db) {
   const qcFlagId = crypto.randomUUID();
   await db.insert(schema.qcFlags).values({
     id: qcFlagId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     volumeId,
     pageId,
     reportedBy: user.id,

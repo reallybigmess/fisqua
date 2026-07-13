@@ -10,7 +10,7 @@
  * unset. After commit the response 302s back to the platform host's
  * operator surface (`https://platform.fisqua.test/operator/tenants`).
  *
- * Per Claude's Discretion in CONTEXT.md, no audit row is written by
+ * By design, no audit row is written by
  * end-impersonation — the original `login_as` row's
  * impersonation_session_id + the audit-coverage keystone's exemption
  * for this file together capture the timeframe.
@@ -21,7 +21,7 @@
  *      preserved; still 302s back to platform.
  *   3. POST without a session cookie → 302 to /login.
  *
- * @version v0.4.0
+ * @version v0.5.0
  */
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
@@ -171,5 +171,3 @@ describe("/end-impersonation — POST action", () => {
     expect(r.headers.get("Location")).toBe("/login");
   });
 });
-
-// @version v0.4.0

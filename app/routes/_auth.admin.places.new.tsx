@@ -9,11 +9,10 @@
  * Historical administrative divisions and external authority links
  * are editable on the edit page.
  *
- * Tenant attribution comes from request context, populated by
- * `authMiddleware`; the new place row is attributed to `tenant.id`
- * rather than a single-tenant hard-code.
+ * Authority scope is the federation (migrations 0045-0048): the new place row
+ * is attributed to the session tenant's federation (`tenant.federationId`).
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { useState } from "react";
@@ -21,6 +20,7 @@ import { Form, useActionData, redirect, Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ChevronRight } from "lucide-react";
 import { tenantContext, userContext } from "../context";
+import { requireCapability } from "../lib/tenant";
 import { CollapsibleSection } from "~/components/admin/collapsible-section";
 import { NameVariantInput } from "~/components/forms/name-variant-input";
 import { LodLinkField } from "~/components/forms/lod-link-field";
@@ -36,6 +36,8 @@ export async function loader({ context }: Route.LoaderArgs) {
   const { requireAdmin } = await import("~/lib/permissions.server");
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
+  requireCapability(tenant, "authorities");
   return {};
 }
 
@@ -53,9 +55,17 @@ export async function action({ request, context }: Route.ActionArgs) {
   const user = context.get(userContext);
   requireAdmin(user);
   const tenant = context.get(tenantContext);
+  requireCapability(tenant, "authorities");
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
+
+  // Authority mutation gate (ruled 2026-07-08): creating a place is a
+  // canonical authority mutation subject to federation steward review.
+  // Member-tenant admins keep READ access to shared places elsewhere but
+  // are denied here. Behaviour-neutral today (lead admin = steward).
+  const { requireFederationSteward } = await import("~/lib/federation.server");
+  await requireFederationSteward(db, user, tenant);
 
   const formData = await request.formData();
 
@@ -124,7 +134,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   try {
     await db.insert(places).values({
-      tenantId: tenant.id,
+      federationId: tenant.federationId,
       id,
       ...parsed.data,
       nameVariants: parsed.data.nameVariants ?? "[]",

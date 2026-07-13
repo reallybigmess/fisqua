@@ -16,8 +16,8 @@
  * it; per-page-view audit traffic would be high-volume + low-signal
  * and is explicitly out of scope.
  *
- * The list shows: slug, name, kind, descriptive_standard, the four
- * capability booleans (rendered as a 4-letter mask CVPM where each
+ * The list shows: slug, name, kind, descriptive_standard, the five
+ * capability booleans (rendered as a 5-letter mask CVPMA where each
  * letter is present iff the corresponding capability is enabled),
  * the disabled flag, and a per-row "View" link that points to
  * `/operator/tenants/:slug`.
@@ -31,7 +31,7 @@
  * The [New tenant] button in the header points at
  * `/operator/tenants/new`.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { Link, useLoaderData } from "react-router";
@@ -113,6 +113,7 @@ export default function TenantsList() {
                   tenant.vocabularyHubEnabled ? "V" : "",
                   tenant.publishPipelineEnabled ? "P" : "",
                   tenant.multiRepositoryEnabled ? "M" : "",
+                  tenant.authoritiesEnabled ? "A" : "",
                 ]
                   .filter(Boolean)
                   .join("");

@@ -5,7 +5,7 @@
  * flags on that page. Clicking the badge opens the per-page QC panel; the
  * badge hides when there are no open flags.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 import { Flag } from "lucide-react";
 
@@ -47,7 +47,7 @@ export function FlagBadge({
  visible. No "two-or-more" gate: a single open flag
  still surfaces the exact count. */}
  <span
- className="absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full border border-madder bg-white px-1 font-sans text-[10px] font-bold text-madder-deep"
+ className="absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full border border-madder bg-white px-1 font-sans text-10 font-bold text-madder-deep"
  >
  {count}
  </span>

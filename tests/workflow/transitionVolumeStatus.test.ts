@@ -31,7 +31,7 @@ import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import * as schema from "../../app/db/schema";
-import { applyMigrations, cleanDatabase } from "../helpers/db";
+import { applyMigrations, cleanDatabase, DEFAULT_TEST_TENANT_ID } from "../helpers/db";
 import { createTestUser } from "../helpers/auth";
 import { transitionVolumeStatus } from "../../app/lib/workflow.server";
 
@@ -42,6 +42,7 @@ async function seedProject(db: Db, userId: string): Promise<string> {
   const now = Date.now();
   await db.insert(schema.projects).values({
     id: projectId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     name: "Test Project",
     description: null,
     conventions: null,
@@ -69,6 +70,7 @@ async function seedVolume(
   const now = Date.now();
   await db.insert(schema.volumes).values({
     id: volumeId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     projectId,
     name: "Test Volume",
     referenceCode: `TEST-${volumeId.slice(0, 8)}`,

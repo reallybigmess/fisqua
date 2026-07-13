@@ -11,17 +11,27 @@
  *
  * ## Atomicity contract
  *
- * Three writes land in one D1 batch composed by `withAuditLog`:
+ * Writes land in one D1 batch composed by `withAuditLog`:
  *
- *   1. INSERT INTO tenants — the new tenant row.
- *   2. INSERT INTO users   — the bootstrap superadmin's user row,
+ *   1. INSERT INTO tenants — the new tenant row, with federation_id
+ *      NULL initially (set in step 3).
+ *   2. INSERT INTO federations — the tenant's federation-of-one
+ *      (lead_tenant_id = the new tenant), since every tenant belongs to
+ *      a federation (federation spec §2).
+ *   3. UPDATE tenants SET federation_id — point the new tenant at its
+ *      federation. Steps 1–3 are ordered this way because tenants <->
+ *      federations is a circular FK pair and D1 has no DEFERRED FK
+ *      support, so each per-statement FK check must already be
+ *      satisfiable.
+ *   4. INSERT INTO users   — the bootstrap superadmin's user row,
  *      living in the new tenant (tenantId=new tenant id), carrying
  *      isSuperAdmin=true and isAdmin=true so the operator's first
  *      delegate has full admin in addition to superadmin.
- *   3. INSERT INTO audit_log — the `create_tenant` row carrying the
+ *   5. INSERT INTO audit_log — the `create_tenant` row carrying the
  *      slug, descriptive_standard, capability snapshot, and the
- *      bootstrap email in `details`. The bootstrap-user write is part
- *      of `create_tenant`'s scope, NOT a separate audit row.
+ *      bootstrap email in `details`. The federation and bootstrap-user
+ *      writes are part of `create_tenant`'s scope, NOT separate audit
+ *      rows.
  *
  * If any write fails (CHECK violation, FK violation, transient D1
  * error) the entire batch rolls back — atomic by D1's all-or-nothing
@@ -48,14 +58,14 @@
  * so the form re-renders with the locale's `tenant_new.errors.slug_taken`
  * message rather than 5xx-ing on a UNIQUE constraint failure.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { Form, redirect } from "react-router";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { useTranslation } from "react-i18next";
-import { tenants, users } from "../db/schema";
+import { tenants, users, federations } from "../db/schema";
 import { PLATFORM_TENANT_ID } from "../lib/tenant";
 import { withAuditLog } from "../lib/audit.server";
 import { CreateTenantSchema } from "../lib/operator-actions.server";
@@ -102,6 +112,10 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   const newTenantId = crypto.randomUUID();
   const newUserId = crypto.randomUUID();
+  // Every tenant belongs to a federation (federation spec §2). A newly
+  // provisioned tenant is a federation of one, led by itself; the
+  // federation is minted here and set on the tenant in the same batch.
+  const newFederationId = crypto.randomUUID();
   const now = Date.now();
 
   // The single audit-bearing batch: tenant + user inserts + audit row.
@@ -126,12 +140,23 @@ export async function action({ request, context }: Route.ActionArgs) {
           vocabulary_hub: parsed.data.vocabularyHubEnabled,
           publish_pipeline: parsed.data.publishPipelineEnabled,
           multi_repository: parsed.data.multiRepositoryEnabled,
+          authorities: parsed.data.authoritiesEnabled,
         },
         bootstrap_email: parsed.data.bootstrapEmail,
       },
       now,
     },
     async (txDb) => {
+      // tenants <-> federations is a circular FK pair and D1 has no
+      // DEFERRED FK support, so the batch is ordered to keep every
+      // per-statement FK check satisfied: (1) insert the tenant with
+      // federation_id NULL (the column is DB-nullable; NULL is exempt
+      // from FK checks), (2) insert the federation-of-one whose
+      // lead_tenant_id points at the now-existing tenant, (3) UPDATE the
+      // tenant's federation_id to the now-existing federation. The
+      // `null` cast is required because schema.ts declares federationId
+      // `.notNull()` (an app-layer read guarantee); the DB column is
+      // nullable by construction (see migration 0044).
       const insertTenant = txDb.insert(tenants).values({
         id: newTenantId,
         slug: parsed.data.slug,
@@ -143,11 +168,28 @@ export async function action({ request, context }: Route.ActionArgs) {
         vocabularyHubEnabled: parsed.data.vocabularyHubEnabled,
         publishPipelineEnabled: parsed.data.publishPipelineEnabled,
         multiRepositoryEnabled: parsed.data.multiRepositoryEnabled,
+        authoritiesEnabled: parsed.data.authoritiesEnabled,
         quotaStorageBytes: parsed.data.quotaStorageBytes,
         disabledAt: null,
+        federationId: null as unknown as string,
         createdAt: now,
         updatedAt: now,
       });
+      const insertFederation = txDb.insert(federations).values({
+        id: newFederationId,
+        slug: parsed.data.slug,
+        name: parsed.data.name,
+        leadTenantId: newTenantId,
+        status: "active",
+        // Operator-set gate, default off — a fresh tenant starts as a
+        // federation-of-one (federation spec §5).
+        multiMemberEnabled: false,
+        createdAt: now,
+      });
+      const setTenantFederation = txDb
+        .update(tenants)
+        .set({ federationId: newFederationId })
+        .where(eq(tenants.id, newTenantId));
       const insertUser = txDb.insert(users).values({
         id: newUserId,
         tenantId: newTenantId,
@@ -165,7 +207,12 @@ export async function action({ request, context }: Route.ActionArgs) {
         updatedAt: now,
       });
       return {
-        workStatements: [insertTenant, insertUser],
+        workStatements: [
+          insertTenant,
+          insertFederation,
+          setTenantFederation,
+          insertUser,
+        ],
         result: { tenantId: newTenantId, slug: parsed.data.slug },
       };
     },
@@ -357,6 +404,15 @@ export default function CreateTenantPage({
                 value="true"
               />
               <span>{t("tenants_list.capabilities.multi_repository")}</span>
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                name="authoritiesEnabled"
+                value="true"
+                defaultChecked
+              />
+              <span>{t("tenants_list.capabilities.authorities")}</span>
             </label>
           </div>
         </fieldset>

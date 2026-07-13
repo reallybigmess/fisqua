@@ -328,4 +328,3 @@ function main(): void {
 
 main();
 
-// @version v0.4.1

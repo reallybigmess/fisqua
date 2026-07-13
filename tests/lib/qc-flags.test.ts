@@ -23,7 +23,7 @@ import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import * as schema from "../../app/db/schema";
-import { applyMigrations, cleanDatabase } from "../helpers/db";
+import { DEFAULT_TEST_TENANT_ID, applyMigrations, cleanDatabase } from "../helpers/db";
 import { createTestUser } from "../helpers/auth";
 import {
   createQcFlag,
@@ -55,6 +55,7 @@ async function seedFixture(db: Db) {
   await db.insert(schema.projects).values([
     {
       id: projectId,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       name: "QC Project",
       createdBy: reporter.id,
       createdAt: now,
@@ -62,6 +63,7 @@ async function seedFixture(db: Db) {
     },
     {
       id: otherProjectId,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       name: "Other Project",
       createdBy: reporter.id,
       createdAt: now,
@@ -72,6 +74,7 @@ async function seedFixture(db: Db) {
   await db.insert(schema.volumes).values([
     {
       id: volumeId,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       projectId,
       name: "QC Volume",
       referenceCode: "co-test-qc",
@@ -83,6 +86,7 @@ async function seedFixture(db: Db) {
     },
     {
       id: otherVolumeId,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       projectId: otherProjectId,
       name: "Other Volume",
       referenceCode: "co-test-qc-other",
@@ -97,6 +101,7 @@ async function seedFixture(db: Db) {
   await db.insert(schema.volumePages).values([
     {
       id: pageAId,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       volumeId,
       position: 1,
       imageUrl: "https://example.com/image-a.jpg",
@@ -107,6 +112,7 @@ async function seedFixture(db: Db) {
     },
     {
       id: pageBId,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       volumeId,
       position: 2,
       imageUrl: "https://example.com/image-b.jpg",
@@ -117,6 +123,7 @@ async function seedFixture(db: Db) {
     },
     {
       id: otherPageId,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       volumeId: otherVolumeId,
       position: 1,
       imageUrl: "https://example.com/image-other.jpg",

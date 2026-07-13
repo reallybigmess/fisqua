@@ -22,11 +22,11 @@
  * so a malformed payload fails fast with a useful message rather than
  * surfacing as a CHECK violation deep in the batch.
  *
- * @version v0.4.1
+ * @version v0.4.2
  */
 import { eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import { entries } from "../db/schema";
+import { entries, volumes } from "../db/schema";
 import type { Entry } from "./boundary-types";
 import { ENTRY_TYPES } from "./validation/enums";
 
@@ -106,6 +106,20 @@ export async function saveEntries(
 
   const now = Date.now();
 
+  // An entry inherits its tenant from its parent volume. Resolve it once
+  // so every inserted row carries tenant_id explicitly (the schema has no
+  // default). Every entry in the payload shares this volumeId
+  // (validateEntries enforces it), so one lookup suffices.
+  const volumeRow = await db
+    .select({ tenantId: volumes.tenantId })
+    .from(volumes)
+    .where(eq(volumes.id, volumeId))
+    .get();
+  if (!volumeRow) {
+    throw new Error(`saveEntries: volume ${volumeId} not found`);
+  }
+  const tenantId = volumeRow.tenantId;
+
   // 1. Load existing entry IDs for this volume
   const existingRows = await db
     .select({ id: entries.id })
@@ -162,6 +176,7 @@ export async function saveEntries(
     stmts.push(
       db.insert(entries).values({
         id: e.id,
+        tenantId,
         volumeId,
         parentId: e.parentId,
         position: e.position,

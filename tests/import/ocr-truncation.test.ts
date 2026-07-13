@@ -11,18 +11,22 @@
  *
  * Locks the round-1 mitigation contract (planner decision 2026-05-03).
  *
- * @version v0.4.0
+ * @version v0.4.1
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 
-const OUTPUT_DIR = ".import";
-
+// Per-suite scratch dir (never the production `.import/` snapshot dir —
+// see audit item 23).
+let outputDir: string;
+async function setUpOutputDir() {
+  outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "fisqua-import-test-"));
+}
 async function cleanOutput() {
   try {
-    await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
+    await fs.rm(outputDir, { recursive: true, force: true });
   } catch {
     // ignore
   }
@@ -114,7 +118,7 @@ async function writeFixture(rows: MinimalDescription[]): Promise<string> {
 }
 
 describe("OCR truncation at import boundary", () => {
-  beforeEach(cleanOutput);
+  beforeEach(setUpOutputDir);
   afterEach(cleanOutput);
 
   it("passes through rows with ocr_text under 90 KB unchanged", async () => {
@@ -129,7 +133,7 @@ describe("OCR truncation at import boundary", () => {
     const repoIdMap = new Map<number, string>([
       [1, "00000000-0000-4000-8000-000000000001"],
     ]);
-    const { result } = await importDescriptions(fixture, repoIdMap);
+    const { result } = await importDescriptions(fixture, repoIdMap, outputDir);
 
     expect(result.imported).toBe(1);
     const sql = await fs.readFile(result.sqlFiles[0], "utf8");
@@ -138,7 +142,7 @@ describe("OCR truncation at import boundary", () => {
 
     // No sidecar should be written when no truncations occurred.
     const sidecarExists = await fs
-      .access(path.join(OUTPUT_DIR, "ocr-truncations.json"))
+      .access(path.join(outputDir, "ocr-truncations.json"))
       .then(() => true)
       .catch(() => false);
     expect(sidecarExists).toBe(false);
@@ -163,7 +167,7 @@ describe("OCR truncation at import boundary", () => {
     const repoIdMap = new Map<number, string>([
       [1, "00000000-0000-4000-8000-000000000001"],
     ]);
-    const { result } = await importDescriptions(fixture, repoIdMap);
+    const { result } = await importDescriptions(fixture, repoIdMap, outputDir);
 
     expect(result.imported).toBe(1);
     expect(result.errors).toHaveLength(0);
@@ -184,7 +188,7 @@ describe("OCR truncation at import boundary", () => {
 
     // Sidecar file lists the truncation.
     const sidecar = JSON.parse(
-      await fs.readFile(path.join(OUTPUT_DIR, "ocr-truncations.json"), "utf8"),
+      await fs.readFile(path.join(outputDir, "ocr-truncations.json"), "utf8"),
     );
     expect(sidecar.truncations).toHaveLength(1);
     expect(sidecar.truncations[0]).toMatchObject({
@@ -218,7 +222,7 @@ describe("OCR truncation at import boundary", () => {
     const repoIdMap = new Map<number, string>([
       [1, "00000000-0000-4000-8000-000000000001"],
     ]);
-    const { result } = await importDescriptions(fixture, repoIdMap);
+    const { result } = await importDescriptions(fixture, repoIdMap, outputDir);
 
     expect(result.imported).toBe(1);
 
@@ -245,13 +249,13 @@ describe("OCR truncation at import boundary", () => {
     const repoIdMap = new Map<number, string>([
       [1, "00000000-0000-4000-8000-000000000001"],
     ]);
-    const { result } = await importDescriptions(fixture, repoIdMap);
+    const { result } = await importDescriptions(fixture, repoIdMap, outputDir);
 
     expect(result.imported).toBe(2);
     expect(result.errors).toHaveLength(0);
 
     const sidecarExists = await fs
-      .access(path.join(OUTPUT_DIR, "ocr-truncations.json"))
+      .access(path.join(outputDir, "ocr-truncations.json"))
       .then(() => true)
       .catch(() => false);
     expect(sidecarExists).toBe(false);

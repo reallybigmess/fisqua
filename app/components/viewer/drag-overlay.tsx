@@ -5,7 +5,7 @@
  * entry boundary to a new page. Rendered in a React portal so its geometry
  * is independent of the scrolling viewer below.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 type DragOverlayProps = {
   visible: boolean;
@@ -37,7 +37,7 @@ export function DragOverlay({ visible, top, width, isInvalid }: DragOverlayProps
  >
  {/* Ghost sequence badge */}
  <div
- className={`absolute left-2 top-1/2 z-30 flex -translate-y-1/2 items-center justify-center rounded-full px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm ${
+ className={`absolute left-2 top-1/2 z-30 flex -translate-y-1/2 items-center justify-center rounded-full px-2 py-0.5 text-10 font-semibold text-white shadow-sm ${
  isInvalid ? "bg-madder" : "bg-teal-600"
  }`}
  >

@@ -6,14 +6,14 @@
  * counts, and exposes the new-project dialog. Destructive actions are
  * gated behind a confirm dialog and record an audit trail.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { useState } from "react";
 import { useFetcher, useActionData, useSearchParams, Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ExternalLink } from "lucide-react";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import { formatDate } from "~/lib/format";
 import type { Route } from "./+types/_auth.admin.cataloguing.projects";
 
@@ -55,12 +55,13 @@ const STATUS_BADGE_COLORS: Record<string, string> = {
 
 export async function loader({ request, context }: Route.LoaderArgs) {
   const { drizzle } = await import("drizzle-orm/d1");
-  const { eq, desc, isNull, isNotNull, sql } = await import("drizzle-orm");
+  const { eq, and, desc, isNull, isNotNull, sql } = await import("drizzle-orm");
   const { requireCollabAdmin } = await import("../lib/permissions.server");
   const { projects, projectMembers, users, volumes } = await import("../db/schema");
 
   const user = context.get(userContext);
   requireCollabAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -68,6 +69,9 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const showArchived = url.searchParams.get("archived") === "true";
 
+  // This cross-project admin view must only ever list projects belonging
+  // to the request tenant; the `projects.tenantId` predicate is the
+  // structural guarantee that another tenant's projects cannot appear.
   const allProjects = await db
     .select({
       id: projects.id,
@@ -78,7 +82,12 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       archivedAt: projects.archivedAt,
     })
     .from(projects)
-    .where(showArchived ? isNotNull(projects.archivedAt) : isNull(projects.archivedAt))
+    .where(
+      and(
+        eq(projects.tenantId, tenant.id),
+        showArchived ? isNotNull(projects.archivedAt) : isNull(projects.archivedAt),
+      ),
+    )
     .orderBy(desc(projects.updatedAt))
     .all();
 
@@ -113,7 +122,9 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       const volumeRows = await db
         .select({ status: volumes.status, count: sql<number>`count(*)` })
         .from(volumes)
-        .where(eq(volumes.projectId, project.id))
+        .where(
+          and(eq(volumes.tenantId, tenant.id), eq(volumes.projectId, project.id)),
+        )
         .groupBy(volumes.status)
         .all();
 
@@ -147,6 +158,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   const user = context.get(userContext);
   requireCollabAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -168,6 +180,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     const { createProject } = await import("~/lib/projects.server");
     await createProject(
       db,
+      tenant.id,
       { name: nameResult.data, description },
       user.id
     );
@@ -319,7 +332,7 @@ function ProjectRow({ project }: { project: ProjectDetail }) {
                       {member.name || member.email}
                     </span>
                     <span
-                      className={`rounded-full px-1.5 py-0.5 font-sans text-[10px] font-semibold ${ROLE_BADGE_COLORS[member.role] || "bg-stone-100 text-stone-600"}`}
+                      className={`rounded-full px-1.5 py-0.5 font-sans text-10 font-semibold ${ROLE_BADGE_COLORS[member.role] || "bg-stone-100 text-stone-600"}`}
                     >
                       {t(`workflow:role.${member.role}`)}
                     </span>

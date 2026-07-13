@@ -24,25 +24,30 @@
  * Lazy import + `cleanOutput` hook follow
  * `tests/import/description-import.test.ts`.
  *
- * @version v0.4.0
+ * @version v0.4.1
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import * as os from "node:os";
 import { NEOGRANADINA_TENANT_ID } from "../../app/lib/tenant";
 
-const OUTPUT_DIR = ".import";
-
+// Per-suite scratch dir (never the production `.import/` snapshot dir —
+// see audit item 23).
+let outputDir: string;
+async function setUpOutputDir() {
+  outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "fisqua-import-test-"));
+}
 async function cleanOutput() {
   try {
-    await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
+    await fs.rm(outputDir, { recursive: true, force: true });
   } catch {
     // ignore
   }
 }
 
 describe("descriptions row-builder (v0.4 union schema)", () => {
-  beforeEach(cleanOutput);
+  beforeEach(setUpOutputDir);
   afterEach(cleanOutput);
 
   it("emits tenant_id = NEOGRANADINA_TENANT_ID immediately after id for every row", async () => {
@@ -53,12 +58,12 @@ describe("descriptions row-builder (v0.4 union schema)", () => {
       "../../scripts/commands/repositories"
     );
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve(
       "tests/import/fixtures/round-builder/descriptions.json",
     );
-    const { result } = await importDescriptions(fixturePath, repoIdMap);
+    const { result } = await importDescriptions(fixturePath, repoIdMap, outputDir);
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
 
     // Row-builder must emit tenant_id on every row.
@@ -73,12 +78,12 @@ describe("descriptions row-builder (v0.4 union schema)", () => {
       "../../scripts/commands/repositories"
     );
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve(
       "tests/import/fixtures/round-builder/descriptions.json",
     );
-    const { result } = await importDescriptions(fixturePath, repoIdMap);
+    const { result } = await importDescriptions(fixturePath, repoIdMap, outputDir);
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
 
     expect(content).toContain("django-zasqua");
@@ -94,12 +99,12 @@ describe("descriptions row-builder (v0.4 union schema)", () => {
       "../../scripts/commands/repositories"
     );
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve(
       "tests/import/fixtures/round-builder/descriptions.json",
     );
-    const { result } = await importDescriptions(fixturePath, repoIdMap);
+    const { result } = await importDescriptions(fixturePath, repoIdMap, outputDir);
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
 
     expect(content).toContain("1850-12-31");
@@ -113,12 +118,12 @@ describe("descriptions row-builder (v0.4 union schema)", () => {
       "../../scripts/commands/repositories"
     );
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve(
       "tests/import/fixtures/round-builder/descriptions.json",
     );
-    const { result } = await importDescriptions(fixturePath, repoIdMap);
+    const { result } = await importDescriptions(fixturePath, repoIdMap, outputDir);
     // Failure mode: the row-builder must reach a SQL file. The
     // COLUMNS array includes admin_biog_history / preferred_citation
     // / acquisition_info / system_of_arrangement /
@@ -138,12 +143,12 @@ describe("descriptions row-builder (v0.4 union schema)", () => {
       "../../scripts/commands/repositories"
     );
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve(
       "tests/import/fixtures/round-builder/descriptions.json",
     );
-    const { result } = await importDescriptions(fixturePath, repoIdMap);
+    const { result } = await importDescriptions(fixturePath, repoIdMap, outputDir);
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
 
     // related_materials was dropped in 0036 — the import row-builder
@@ -159,12 +164,12 @@ describe("descriptions row-builder (v0.4 union schema)", () => {
       "../../scripts/commands/repositories"
     );
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve(
       "tests/import/fixtures/round-builder/descriptions.json",
     );
-    const { result } = await importDescriptions(fixturePath, repoIdMap);
+    const { result } = await importDescriptions(fixturePath, repoIdMap, outputDir);
     // Record 44 carries `legacy_ids_seed: [{provider: "", id: 99}]`,
     // which violates LegacyIdSchema.provider.min(1). The row-builder
     // should fail this row and record an error.
@@ -173,4 +178,4 @@ describe("descriptions row-builder (v0.4 union schema)", () => {
   });
 });
 
-// Version: v0.4.0
+// Version: v0.4.1

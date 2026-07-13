@@ -103,14 +103,13 @@
  * override that never relies on debounce timing or in-app
  * navigation lifecycle.
  *
- * **Title-field coverage.** `buildFieldsPayload` includes
- * `title: current.title ?? null` as its first key, so the
- * cataloguer's keystrokes in the "Title *" input reach
- * `entries.title` on disk via the same autosave path every other
- * field rides. Pinned by tests in
- * `tests/description/autosave.test.ts`.
+ * **Field coverage.** `buildFieldsPayload` derives its payload from
+ * the shared `DESCRIPTION_FIELD_KEYS` registry — the same tuple the
+ * server writer iterates — so a field cannot exist on one side of
+ * the wire only (the failure mode behind the title-field incident).
+ * Pinned by tests in `tests/description/autosave.test.ts`.
  *
- * @version v0.4.1
+ * @version v0.4.2
  */
 
 import {
@@ -129,6 +128,7 @@ import type { DescriptionEntry, CommentWithAuthor } from "../lib/description-typ
 import {
   DESCRIPTION_STATUS_STYLES,
   DESCRIPTION_STATUS_LABELS,
+  DESCRIPTION_FIELD_KEYS,
   type DescriptionStatus,
 } from "../lib/description-workflow";
 import { DescriptionForm } from "../components/description/description-form";
@@ -158,7 +158,7 @@ import { PROJECT_ROLES } from "../lib/validation/enums";
 export async function loader({ params, context }: Route.LoaderArgs) {
   const { drizzle } = await import("drizzle-orm/d1");
   const { eq, and } = await import("drizzle-orm");
-  const { requireProjectRole } = await import("../lib/permissions.server");
+  const { requireProjectRole, highestProjectRole } = await import("../lib/permissions.server");
   const {
     loadDescriptionEntry,
     loadVolumeEntriesForDescription,
@@ -204,13 +204,9 @@ export async function loader({ params, context }: Route.LoaderArgs) {
     });
   }
 
-  // Check description access
-  const roleOrder = ["lead", "reviewer", "cataloguer"] as const;
-  const userRole =
-    memberships.length > 0
-      ? roleOrder.find((r) => memberships.some((m) => m.role === r)) ??
-        "cataloguer"
-      : "cataloguer";
+  // Check description access. Admins can arrive with no membership
+  // rows (requireProjectRole bypass); cataloguer is the floor.
+  const userRole = highestProjectRole(memberships) ?? "cataloguer";
 
   const isLead = userRole === "lead";
   const isAssignedDescriber = entry.assignedDescriber === user.id;
@@ -367,20 +363,14 @@ export default function DescriptionEditorRoute({
   // additive `saveDescription` writer.
   const buildFieldsPayload = useCallback(
     (override?: { fieldName: string; value: string }) => {
-      const current = entryRef.current;
-      const fields = {
-        title: current.title ?? null,
-        translatedTitle: current.translatedTitle ?? null,
-        resourceType: current.resourceType ?? null,
-        dateExpression: current.dateExpression ?? null,
-        dateStart: current.dateStart ?? null,
-        dateEnd: current.dateEnd ?? null,
-        extent: current.extent ?? null,
-        scopeContent: current.scopeContent ?? null,
-        language: current.language ?? null,
-        descriptionNotes: current.descriptionNotes ?? null,
-        internalNotes: current.internalNotes ?? null,
-      } as Record<string, unknown>;
+      const current = entryRef.current as Record<string, unknown>;
+      // Derived from the shared registry, not a hand-kept literal — the
+      // server writer iterates the same DESCRIPTION_FIELD_KEYS, so a
+      // field can no longer exist on one side of the wire only.
+      const fields: Record<string, unknown> = {};
+      for (const key of DESCRIPTION_FIELD_KEYS) {
+        fields[key] = current[key] ?? null;
+      }
 
       if (override && override.fieldName in fields) {
         fields[override.fieldName] = override.value || null;
@@ -827,14 +817,14 @@ export default function DescriptionEditorRoute({
           <Link to="/" className="flex items-center">
             <img src="/brand/fisqua-mark.svg" alt="" className="h-6 w-6" aria-hidden="true" />
           </Link>
-          <span className="font-sans text-[0.875rem] text-stone-500">
+          <span className="font-sans text-sm text-stone-500">
             {t("editor.subtitle")}
           </span>
         </div>
 
         {/* Centre: entry title */}
         <div className="flex min-w-0 flex-1 justify-center">
-          <h1 className="truncate font-serif text-[1.25rem] font-semibold text-stone-700">
+          <h1 className="truncate font-serif text-xl font-semibold text-stone-700">
             {entry.title || entry.translatedTitle || `#${entry.position + 1}`}
           </h1>
         </div>
@@ -880,12 +870,12 @@ export default function DescriptionEditorRoute({
               {t("editor.save_now")}
             </button>
           </div>
-          <span className="font-sans text-[0.875rem] text-stone-500">
+          <span className="font-sans text-sm text-stone-500">
             {currentUser.email}
           </span>
           <Link
             to="/auth/logout"
-            className="font-sans text-[0.875rem] font-medium text-indigo hover:underline"
+            className="font-sans text-sm font-medium text-indigo hover:underline"
           >
             {t("editor.cerrar_sesion")}
           </Link>
@@ -912,7 +902,7 @@ export default function DescriptionEditorRoute({
           <button
             type="button"
             onClick={() => setShowResegDialog(true)}
-            className="flex items-center gap-1.5 rounded-md border border-saffron bg-saffron-tint px-3 py-1.5 font-sans text-[0.8125rem] font-medium text-saffron-deep hover:bg-saffron-tint"
+            className="flex items-center gap-1.5 rounded-md border border-saffron bg-saffron-tint px-3 py-1.5 font-sans text-13 font-medium text-saffron-deep hover:bg-saffron-tint"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -1129,19 +1119,19 @@ function ResegmentationDialogStub({
               <line x1="12" y1="17" x2="12.01" y2="17" />
             </svg>
           </div>
-          <h2 className="font-display text-[1.5rem] font-semibold text-stone-700">
+          <h2 className="font-display text-2xl font-semibold text-stone-700">
             {t("resegmentation.reportar_problema")}
           </h2>
         </div>
 
         {/* Warning */}
-        <div className="mb-4 rounded-lg bg-saffron-tint p-3 text-[0.875rem] text-saffron-deep">
+        <div className="mb-4 rounded-lg bg-saffron-tint p-3 text-sm text-saffron-deep">
           {t("resegmentation.warning")}
         </div>
 
         {/* Problem type */}
         <div className="mb-4">
-          <p className="mb-2 font-sans text-[0.875rem] font-medium text-stone-700">
+          <p className="mb-2 font-sans text-sm font-medium text-stone-700">
             {t("resegmentation.tipo_problema")}
           </p>
           <div className="space-y-2">
@@ -1185,11 +1175,11 @@ function ResegmentationDialogStub({
                   className="mt-0.5 accent-saffron"
                 />
                 <div>
-                  <span className="font-sans text-[0.875rem] font-medium text-stone-700">
+                  <span className="font-sans text-sm font-medium text-stone-700">
                     {opt.label}
                   </span>
                   {opt.desc && (
-                    <p className="font-sans text-[0.75rem] text-stone-500">
+                    <p className="font-sans text-xs text-stone-500">
                       {opt.desc}
                     </p>
                   )}
@@ -1202,14 +1192,14 @@ function ResegmentationDialogStub({
         {/* Affected entries */}
         {neighbourEntries.length > 0 && (
           <div className="mb-4">
-            <p className="mb-2 font-sans text-[0.875rem] font-medium text-stone-700">
+            <p className="mb-2 font-sans text-sm font-medium text-stone-700">
               {t("resegmentation.entradas_afectadas")}
             </p>
             <div className="max-h-32 overflow-y-auto rounded border border-stone-200 p-2">
               {neighbourEntries.map((ne) => (
                 <label
                   key={ne.id}
-                  className="flex items-center gap-2 py-1 font-sans text-[0.8125rem] font-medium text-indigo"
+                  className="flex items-center gap-2 py-1 font-sans text-13 font-medium text-indigo"
                 >
                   <input
                     type="checkbox"
@@ -1237,7 +1227,7 @@ function ResegmentationDialogStub({
         {/* Description */}
         <div className="mb-4">
           <textarea
-            className="min-h-[100px] w-full rounded border border-stone-200 p-3 font-sans text-[0.875rem] text-stone-700 placeholder:text-stone-400 focus:border-saffron focus:outline-none focus:ring-1 focus:ring-saffron"
+            className="min-h-[100px] w-full rounded border border-stone-200 p-3 font-sans text-sm text-stone-700 placeholder:text-stone-400 focus:border-saffron focus:outline-none focus:ring-1 focus:ring-saffron"
             placeholder={t("resegmentation.descripcion_placeholder")}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -1249,7 +1239,7 @@ function ResegmentationDialogStub({
           <button
             type="button"
             onClick={onClose}
-            className="rounded px-4 py-2 font-sans text-[0.875rem] text-stone-500 hover:bg-stone-100"
+            className="rounded px-4 py-2 font-sans text-sm text-stone-500 hover:bg-stone-100"
           >
             {t("resegmentation.cancelar")}
           </button>
@@ -1257,7 +1247,7 @@ function ResegmentationDialogStub({
             type="button"
             onClick={handleSubmit}
             disabled={!canSubmit || submitting}
-            className="rounded bg-saffron px-4 py-2 font-sans text-[0.875rem] font-medium text-white hover:bg-saffron-deep disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded bg-saffron px-4 py-2 font-sans text-sm font-medium text-white hover:bg-saffron-deep disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t("resegmentation.enviar_reporte")}
           </button>

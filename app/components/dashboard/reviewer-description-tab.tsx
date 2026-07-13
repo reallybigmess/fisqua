@@ -15,7 +15,7 @@
  * positions. All loaders run on the parent route; this file is pure
  * render.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { Link } from "react-router";
@@ -147,10 +147,10 @@ export function ReviewerDescriptionTab({ data }: ReviewerDescriptionTabProps) {
               <polyline points="22 4 12 14.01 9 11.01" />
             </svg>
           </div>
-          <h3 className="mt-4 font-serif text-[18px] font-semibold text-indigo">
+          <h3 className="mt-4 font-serif text-lg font-semibold text-indigo">
             {t("empty.no_description_review_title")}
           </h3>
-          <p className="mt-2 font-serif text-[15px] text-stone-500 max-w-[36ch] mx-auto">
+          <p className="mt-2 font-serif text-15 text-stone-500 max-w-measure mx-auto">
             {t("empty.no_description_review_body")}
           </p>
         </div>

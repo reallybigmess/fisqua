@@ -8,7 +8,7 @@
  * member. Cross-references the cataloguing admin team page so the
  * project lead can work without an admin round-trip.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { Form, useActionData, useFetcher } from "react-router";
@@ -207,7 +207,7 @@ export default function ProjectMembers({ loaderData }: Route.ComponentProps) {
 
       {/* Members table */}
       <section>
-        <h2 className="font-sans text-[1.5rem] font-semibold text-stone-700">
+        <h2 className="font-sans text-2xl font-semibold text-stone-700">
           {t("project:heading.members")} ({members.length})
         </h2>
 

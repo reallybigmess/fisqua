@@ -6,7 +6,7 @@
  * global search input, the locale switcher, and the user-menu popover
  * with sign-out and configuration links.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { Form, Link } from "react-router";
@@ -28,17 +28,17 @@ export function TopBar({ user, appName }: TopBarProps) {
         <Link to="/dashboard" className="flex items-center gap-3 no-underline">
           <img src="/brand/fisqua-mark.svg" alt="" className="h-8 w-8" aria-hidden="true" />
           <div className="h-6 border-l border-stone-200" aria-hidden="true" />
-          <span className="font-sans text-[0.875rem] text-stone-500">
+          <span className="font-sans text-sm text-stone-500">
             Fisqua: <strong className="font-semibold">Neogranadina</strong>
           </span>
         </Link>
 
         <div className="flex items-center gap-3">
-          <span className="font-sans text-[0.875rem] text-stone-500">{user.email}</span>
+          <span className="font-sans text-sm text-stone-500">{user.email}</span>
           <Form method="post" action="/auth/logout">
             <button
               type="submit"
-              className="font-sans text-[0.875rem] font-medium text-indigo hover:underline"
+              className="font-sans text-sm font-medium text-indigo hover:underline"
             >
               {t("nav.log_out")}
             </button>

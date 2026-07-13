@@ -1,3 +1,12 @@
+# Preview
+#
+# Gates every PR to `main`: runs the full test suite (`npm test` — all
+# three vitest configs: Workers pool, node, import) and the TypeScript
+# type-check. Direct pushes to `main` are gated separately by
+# tests.yml.
+#
+# @version v0.4.1
+
 name: Preview
 
 on:
@@ -11,7 +20,7 @@ concurrency:
 jobs:
   preview:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: write
@@ -22,5 +31,5 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx vitest --run
+      - run: npm test
       - run: npm run typecheck

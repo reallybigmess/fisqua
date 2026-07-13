@@ -7,7 +7,7 @@
  * exposes handles for programmatic scroll, and hosts the comment
  * region-pin overlay when comments exist.
  *
- * @version v0.3.0
+ * @version v0.3.1
  */
 import {
   useRef,
@@ -122,16 +122,9 @@ type IIIFViewerProps = {
   onFlagClick?: (args: { pageId: string; pagePosition: number }) => void;
   /**
  * invoked when the user clicks the FlagBadge.
- * The parent opens the per-page QCFlagCardExpandable popover. Replaces
- * the `onBadgeClick` path.
+ * The parent opens the per-page QCFlagCardExpandable popover.
  */
   onFlagBadgeClick?: (pageId: string) => void;
-  /**
- * (legacy): kept for compatibility with the
- * existing viewer-route wiring until it migrates to `onFlagBadgeClick`.
- * New callers should prefer `onFlagBadgeClick`.
- */
-  onBadgeClick?: (args: { pageId: string; pagePosition: number }) => void;
   /**
  * drawing-mode state. When set to "point" or
  * "box", page-image clicks / drags produce region pins instead of
@@ -220,7 +213,12 @@ function loadScript(src: string): Promise<void> {
  const script = document.createElement("script");
  script.src = src;
  script.onload = () => resolve();
- script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+ script.onerror = () => {
+ // Remove the failed tag: the existing-element check above would
+ // otherwise resolve immediately on retry without OSD present.
+ script.remove();
+ reject(new Error(`Failed to load script: ${src}`));
+ };
  document.head.appendChild(script);
   });
 }
@@ -252,7 +250,6 @@ export const IIIFViewer = forwardRef<IIIFViewerHandle, IIIFViewerProps>(
  openFlagsByPage,
  onFlagClick,
  onFlagBadgeClick,
- onBadgeClick,
  pinMode = "off",
  onRegionPlace,
  draftPin,
@@ -267,12 +264,13 @@ export const IIIFViewer = forwardRef<IIIFViewerHandle, IIIFViewerProps>(
  },
  ref,
   ) {
- const { t } = useTranslation(["qc_flags"]);
+ const { t } = useTranslation(["qc_flags", "viewer"]);
  const scrollRef = useRef<HTMLDivElement>(null);
  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
  const [visibleRange, setVisibleRange] = useState({ start: 0, end: 5 });
  const [containerWidth, setContainerWidth] = useState(800);
  const [osdReady, setOsdReady] = useState(false);
+ const [osdError, setOsdError] = useState(false);
  const osdInstancesRef = useRef<Map<number, any>>(new Map());
  const lastPageIndexRef = useRef(0);
  const onPageChangeRef = useRef(onPageChange);
@@ -362,12 +360,20 @@ export const IIIFViewer = forwardRef<IIIFViewerHandle, IIIFViewerProps>(
  [pages, containerWidth, zoom]
  );
 
- // Load OpenSeadragon script
- useEffect(() => {
+ // Load OpenSeadragon; a failed load surfaces the retry banner
+ // instead of leaving a silent strip of placeholder boxes.
+ const loadOsd = useCallback(() => {
+ setOsdError(false);
  loadScript("/vendor/openseadragon.min.js")
  .then(() => setOsdReady(true))
- .catch((err) => console.error(err));
+ .catch((err) => {
+ console.error(err);
+ setOsdError(true);
+ });
  }, []);
+ useEffect(() => {
+ loadOsd();
+ }, [loadOsd]);
 
  // Observe container width
  useEffect(() => {
@@ -800,7 +806,22 @@ export const IIIFViewer = forwardRef<IIIFViewerHandle, IIIFViewerProps>(
  );
 
  return (
- <div className="flex h-full w-full">
+ <div className="relative flex h-full w-full">
+ {osdError && (
+ <div
+ role="alert"
+ className="absolute inset-x-0 top-0 z-30 flex items-center justify-center gap-3 border-b border-madder bg-madder-wash px-4 py-2 text-sm text-madder-deep"
+ >
+ <span>{t("viewer:load_error.message")}</span>
+ <button
+ type="button"
+ onClick={loadOsd}
+ className="rounded-md border border-madder px-3 py-1 font-medium text-madder-deep hover:bg-madder-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-madder"
+ >
+ {t("viewer:load_error.retry")}
+ </button>
+ </div>
+ )}
  {/* Page label gutter */}
  <div
  ref={scrollRef}
@@ -969,11 +990,6 @@ export const IIIFViewer = forwardRef<IIIFViewerHandle, IIIFViewerProps>(
  onClick={() => {
  if (onFlagBadgeClick) {
  onFlagBadgeClick(page.id);
- } else if (onBadgeClick) {
- onBadgeClick({
- pageId: page.id,
- pagePosition: page.position,
- });
  }
  }}
  aria-label={t("qc_flags:badge.per_page_aria", {
@@ -1123,8 +1139,17 @@ function OSDPage({
  crossOriginPolicy: "Anonymous",
  });
 
- // Disable OSD's inner scroll handler so page scroll works normally
- viewer.innerTracker.scrollHandler = false;
+ // Let wheel events reach the page so it scrolls normally. OSD's
+ // canvas-scroll handler cancels the native wheel event by default
+ // even with scrollToZoom off, so we must both skip OSD's own zoom
+ // action and un-cancel the event via the documented event contract.
+ viewer.addHandler(
+ "canvas-scroll",
+ (event: { preventDefaultAction: boolean; preventDefault: boolean }) => {
+ event.preventDefaultAction = true;
+ event.preventDefault = false;
+ },
+ );
 
  instancesRef.current.set(index, viewer);
 

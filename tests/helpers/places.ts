@@ -2,25 +2,26 @@
  * Tests — places
  *
  * This helper module wraps place-row creation for the test suite.
- * Every place row carries a tenant_id NOT NULL FK to tenants(id),
- * so tests must call seedTenants() before invoking this helper.
- * Defaults to DEFAULT_TEST_TENANT_ID.
+ * Every place row carries a federation_id NOT NULL FK to federations(id)
+ * (migrations 0045-0048 lifted places to federation scope), so tests must call
+ * seedTenants() + seedFederations() before invoking this helper.
+ * Defaults to DEFAULT_TEST_FEDERATION_ID.
  *
  * historical_* columns, country_code, admin_level_1, admin_level_2,
  * and wikidata_id were dropped from the places table (0% populated
  * in production audit). The new `fclass` column (5-value GeoNames
  * feature class with CHECK constraint) is exposed on the helper.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 import { drizzle } from "drizzle-orm/d1";
 import { env } from "cloudflare:test";
 import * as schema from "../../app/db/schema";
-import { DEFAULT_TEST_TENANT_ID } from "./db";
+import { DEFAULT_TEST_FEDERATION_ID } from "./db";
 
 export async function createTestPlace(overrides: Partial<{
   id: string;
-  tenantId: string;
+  federationId: string;
   placeCode: string;
   label: string;
   displayName: string;
@@ -41,7 +42,7 @@ export async function createTestPlace(overrides: Partial<{
   const id = overrides.id ?? crypto.randomUUID();
   const values = {
     id,
-    tenantId: overrides.tenantId ?? DEFAULT_TEST_TENANT_ID,
+    federationId: overrides.federationId ?? DEFAULT_TEST_FEDERATION_ID,
     placeCode: overrides.placeCode ?? "nl-test01",
     label: overrides.label ?? "Test Place",
     displayName: overrides.displayName ?? "Test Place",

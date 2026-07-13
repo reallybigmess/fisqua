@@ -24,7 +24,7 @@
  * and overwrote Tenant B's R2 objects. The current shape closes that
  * exposure.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { eq, and, inArray, isNull, sql } from "drizzle-orm";
@@ -465,14 +465,20 @@ export async function exportFondsDc(
 export async function exportRepositories(
   db: DrizzleD1Database<any>,
   storage: ExportStorage,
-  tenant: ExportTenant
+  tenant: ExportTenant,
+  memberTenantIds?: string[]
 ): Promise<{ count: number }> {
+  // Federation publish (spec §9 step 8): read every member tenant's
+  // repositories and description counts, but write the single
+  // repositories.json under the publish (lead) slug. Omitted →
+  // single-tenant own-publish, byte-identical to pre-step-8 behaviour.
+  const tenantIds = memberTenantIds ?? [tenant.id];
   const allRepos = await db
     .select()
     .from(repositories)
     .where(
       and(
-        eq(repositories.tenantId, tenant.id),
+        inArray(repositories.tenantId, tenantIds),
         eq(repositories.enabled, true)
       )
     )
@@ -487,7 +493,7 @@ export async function exportRepositories(
     .from(descriptions)
     .where(
       and(
-        eq(descriptions.tenantId, tenant.id),
+        inArray(descriptions.tenantId, tenantIds),
         eq(descriptions.isPublished, true)
       )
     )
@@ -508,7 +514,7 @@ export async function exportRepositories(
     .from(descriptions)
     .where(
       and(
-        eq(descriptions.tenantId, tenant.id),
+        inArray(descriptions.tenantId, tenantIds),
         eq(descriptions.isPublished, true),
         isNull(descriptions.parentId)
       )
@@ -553,8 +559,17 @@ export async function exportRepositories(
 export async function exportEntities(
   db: DrizzleD1Database<any>,
   storage: ExportStorage,
-  tenant: ExportTenant
+  tenant: ExportTenant,
+  memberTenantIds?: string[]
 ): Promise<{ count: number }> {
+  // Federation publish (spec §9 step 8): the authority set is already
+  // federation-scoped (migrations 0045-0048), but which entities EXPORT
+  // is driven by which are linked to PUBLISHED DESCRIPTIONS. After the
+  // step-6 partition those descriptions span multiple member tenants, so
+  // a lead-only join would drop entities linked solely to AHR
+  // descriptions. Read across every member tenant; single value →
+  // pre-step-8 behaviour.
+  const tenantIds = memberTenantIds ?? [tenant.id];
   const entityRows = await db
     .selectDistinct({
       id: entities.id,
@@ -590,8 +605,12 @@ export async function exportEntities(
     )
     .where(
       and(
-        eq(entities.tenantId, tenant.id),
-        eq(descriptions.tenantId, tenant.id),
+        // Authorities are federation-scoped (migrations 0045-0048); the export
+        // reads the federation's member tenants' published descriptions joined
+        // to the federation's entities. I4 guarantees each description's
+        // tenant's federation equals the entity's federation.
+        eq(entities.federationId, tenant.federationId),
+        inArray(descriptions.tenantId, tenantIds),
         eq(descriptions.isPublished, true),
         isNull(entities.mergedInto)
       )
@@ -641,8 +660,14 @@ export async function exportEntities(
 export async function exportPlaces(
   db: DrizzleD1Database<any>,
   storage: ExportStorage,
-  tenant: ExportTenant
+  tenant: ExportTenant,
+  memberTenantIds?: string[]
 ): Promise<{ count: number }> {
+  // Federation publish (spec §9 step 8): same rationale as exportEntities
+  // — read across every member tenant's published descriptions so places
+  // linked solely to AHR descriptions are not dropped. Single value →
+  // pre-step-8 behaviour.
+  const tenantIds = memberTenantIds ?? [tenant.id];
   const placeRows = await db
     .selectDistinct({
       id: places.id,
@@ -675,8 +700,11 @@ export async function exportPlaces(
     )
     .where(
       and(
-        eq(places.tenantId, tenant.id),
-        eq(descriptions.tenantId, tenant.id),
+        // Federation-scoped authorities (migrations 0045-0048), joined to the
+        // member tenants' published descriptions (I4 keeps the federations
+        // aligned).
+        eq(places.federationId, tenant.federationId),
+        inArray(descriptions.tenantId, tenantIds),
         eq(descriptions.isPublished, true),
         isNull(places.mergedInto)
       )

@@ -14,7 +14,7 @@
  * — a chainable Drizzle stub that resolves an ordered list of responses
  * for each `.get()` / `.all()` call.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
@@ -26,6 +26,7 @@ import type { ExportTenant } from "../../app/lib/export/types";
 
 const TEST_TENANT: ExportTenant = {
   id: "test-tenant-id",
+  federationId: "b4462493-6170-44f8-ae07-24666606d1f1", // NEOGRANADINA_FEDERATION_ID
   slug: "neogranadina",
   descriptiveStandard: "isadg",
 };
@@ -197,6 +198,7 @@ describe("exportFondsEad", () => {
     // RAD profile turns includeSystemOfArrangement on; ISAD(G) leaves it off.
     const radTenant: ExportTenant = {
       id: "rad-tenant-id",
+      federationId: "rad-federation-id", // mock tenant — federation id is not queried by the mock DB
       slug: "rad-archive",
       descriptiveStandard: "rad",
     };

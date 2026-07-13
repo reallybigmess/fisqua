@@ -6,7 +6,7 @@
  * state unless an explicit controlled pair is passed, and emits a summary
  * line when collapsed so the caller never loses scanning context.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { useState, useId } from "react";
@@ -39,7 +39,7 @@ export function CollapsibleSection({
       >
         <span
           id={headingId}
-          className="text-sm font-semibold uppercase tracking-[0.05em] text-stone-500"
+          className="text-sm font-semibold uppercase tracking-wider text-stone-500"
         >
           {title}
         </span>

@@ -10,7 +10,7 @@
  * omit it; per-standard validators live in
  * `app/lib/validation/standard-aware-description.ts`.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
@@ -23,6 +23,7 @@ import {
   cleanDatabase,
   seedTenants,
   DEFAULT_TEST_TENANT_ID,
+  DEFAULT_TEST_FEDERATION_ID,
 } from "../helpers/db";
 import { createTestRepository } from "../helpers/repositories";
 import { LegacyIdsSchema } from "../../app/lib/validation/legacy-ids";
@@ -82,7 +83,7 @@ describe("union schema", () => {
 
     // Sanity: a legal value (P) inserts cleanly.
     await db.insert(schema.places).values({
-      tenantId: DEFAULT_TEST_TENANT_ID,
+      federationId: DEFAULT_TEST_FEDERATION_ID,
       id: baseId,
       placeCode: "nl-fclok1",
       label: "Legal fclass",
@@ -95,7 +96,7 @@ describe("union schema", () => {
 
     // NULL fclass also inserts cleanly (CHECK guards `IS NULL OR IN (...)`).
     await db.insert(schema.places).values({
-      tenantId: DEFAULT_TEST_TENANT_ID,
+      federationId: DEFAULT_TEST_FEDERATION_ID,
       id: crypto.randomUUID(),
       placeCode: "nl-fclnul",
       label: "Null fclass",
@@ -178,7 +179,7 @@ describe("union schema", () => {
     // Entity-side aspirational refs:
     const entityId = crypto.randomUUID();
     await db.insert(schema.entities).values({
-      tenantId: DEFAULT_TEST_TENANT_ID,
+      federationId: DEFAULT_TEST_FEDERATION_ID,
       id: entityId,
       entityCode: "ne-pres01",
       displayName: "Preserved Person",
@@ -300,7 +301,7 @@ describe("union schema", () => {
     const entityId = crypto.randomUUID();
     const entityLegacy = JSON.stringify([{ provider: "viaf-import-2026", id: 999 }]);
     await db.insert(schema.entities).values({
-      tenantId: DEFAULT_TEST_TENANT_ID,
+      federationId: DEFAULT_TEST_FEDERATION_ID,
       id: entityId,
       entityCode: "ne-legac1",
       displayName: "Legacy Entity",

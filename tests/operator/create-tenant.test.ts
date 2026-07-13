@@ -177,6 +177,8 @@ describe("/operator/tenants/new — create tenant + bootstrap superadmin", () =>
       vocabulary_hub: true,
       publish_pipeline: true,
       multi_repository: false,
+      // Omitted from the form → CreateTenantSchema default (on).
+      authorities: true,
     });
 
     // Magic-link row landed for the bootstrap user.

@@ -48,9 +48,10 @@
  * downstream waves consume to translate pre-existing CA cross-refs
  * back to Fisqua UUIDs.
  *
- * @version v0.4.0
+ * @version v0.4.1
  */
 import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import * as crypto from "node:crypto";
 import type { IdMap, ImportResult } from "../lib/types";
 import { escapeSql, generateInserts, writeSqlFiles } from "../lib/sql";
@@ -185,10 +186,16 @@ interface HierarchyInfo {
  * validates reference_code shape, builds legacy_ids JSON, rewrites manifest
  * URLs, and produces chunked SQL INSERT files (batchSize=50 for D1 100KB
  * statement-size headroom).
+ *
+ * All output — SQL files, the pk-uuid-mapping.json sidecar, and the
+ * ocr-truncations.json sidecar — is written under `outputDir` (default
+ * `.import/`, the production CLI's unchanged root; tests pass a
+ * per-suite temp dir so parallel runs don't share scratch space).
  */
 export async function importDescriptions(
   inputPath: string,
-  repoIdMap: IdMap
+  repoIdMap: IdMap,
+  outputDir = ".import"
 ): Promise<{ result: ImportResult; idMap: IdMap; skippedPks: Set<number> }> {
   const raw = await fs.readFile(inputPath, "utf8");
   const records = JSON.parse(raw) as Record<string, unknown>[];
@@ -496,17 +503,17 @@ export async function importDescriptions(
   // 100/statement risks blowing D1's 100KB-per-statement limit when
   // scope_content + ocr_text are populated.
   const statements = generateInserts("descriptions", COLUMNS, rows, 50);
-  const sqlFiles = await writeSqlFiles("descriptions", statements);
+  const sqlFiles = await writeSqlFiles("descriptions", statements, 50, outputDir);
 
   // Write PK-to-UUID mapping for downstream consumers
   const mapping: Record<string, string> = {};
   for (const [oldId, newId] of idMap.entries()) {
     mapping[String(oldId)] = newId;
   }
-  const mappingDir = ".import";
+  const mappingDir = outputDir;
   await fs.mkdir(mappingDir, { recursive: true });
   await fs.writeFile(
-    `${mappingDir}/pk-uuid-mapping.json`,
+    path.join(mappingDir, "pk-uuid-mapping.json"),
     JSON.stringify({ descriptions: mapping }, null, 2),
     "utf8"
   );
@@ -514,7 +521,7 @@ export async function importDescriptions(
   // OCR truncation sidecar (mitigation; full text deferred to v0.5
   // OCR-to-R2 migration).
   if (ocrTruncations.length > 0) {
-    const truncationsPath = `${mappingDir}/ocr-truncations.json`;
+    const truncationsPath = path.join(mappingDir, "ocr-truncations.json");
     await fs.writeFile(
       truncationsPath,
       JSON.stringify({ truncations: ocrTruncations }, null, 2),
@@ -539,4 +546,4 @@ export async function importDescriptions(
   };
 }
 
-// Version: v0.4.0
+// Version: v0.4.1

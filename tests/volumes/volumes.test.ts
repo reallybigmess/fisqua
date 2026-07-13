@@ -31,7 +31,7 @@ import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import * as schema from "../../app/db/schema";
-import { applyMigrations, cleanDatabase } from "../helpers/db";
+import { applyMigrations, cleanDatabase, DEFAULT_TEST_TENANT_ID } from "../helpers/db";
 import { createTestUser } from "../helpers/auth";
 import { sampleManifest, sampleManifestUrl } from "../helpers/manifests";
 import type { ParsedManifest } from "../../app/lib/iiif.server";
@@ -114,6 +114,7 @@ describe("volume CRUD operations", () => {
     projectId = crypto.randomUUID();
     await db.insert(schema.projects).values({
       id: projectId,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       name: "Test Project",
       createdBy: leadUser.id,
       createdAt: now,
