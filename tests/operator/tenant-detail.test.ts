@@ -187,7 +187,7 @@ describe("/operator/tenants/:slug — detail loader", () => {
     const { action } = await import(
       "../../app/routes/_operator.tenants.$slug"
     );
-    // neogranadina starts with all four capabilities ON. Flip
+    // neogranadina starts with all its capabilities ON. Flip
     // vocabulary_hub off (omit it; the unchecked checkbox absence
     // means false). Keep the others on.
     const request = buildPostRequest("neogranadina", {
@@ -196,6 +196,7 @@ describe("/operator/tenants/:slug — detail loader", () => {
       // vocabularyHubEnabled deliberately omitted (unchecked)
       publishPipelineEnabled: "true",
       multiRepositoryEnabled: "true",
+      authoritiesEnabled: "true",
     });
     const result = await action({
       request,
@@ -233,7 +234,7 @@ describe("/operator/tenants/:slug — detail loader", () => {
     const { action } = await import(
       "../../app/routes/_operator.tenants.$slug"
     );
-    // neogranadina starts with all four capabilities ON. Submit the
+    // neogranadina starts with all its capabilities ON. Submit the
     // exact same state.
     const request = buildPostRequest("neogranadina", {
       intent: "set_capability",
@@ -241,6 +242,7 @@ describe("/operator/tenants/:slug — detail loader", () => {
       vocabularyHubEnabled: "true",
       publishPipelineEnabled: "true",
       multiRepositoryEnabled: "true",
+      authoritiesEnabled: "true",
     });
     const result = await action({
       request,

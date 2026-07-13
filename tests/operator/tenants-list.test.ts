@@ -24,8 +24,9 @@
  *      render in the workers test pool without going through the
  *      full HTTP round-trip).
  *   4. The disabled tenant row's `disabledAt` field is non-null.
+ *   5. Rows carry `authoritiesEnabled` (the A in the CVPMA mask).
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
@@ -144,6 +145,36 @@ describe("operator tenants list", () => {
     expect(platformRow!.kind).toBe("platform");
   });
 
+  it("rows carry authoritiesEnabled reflecting the flag (the A in the CVPMA mask derives from this)", async () => {
+    const { drizzle } = await import("drizzle-orm/d1");
+    const { eq } = await import("drizzle-orm");
+    const schema = await import("../../app/db/schema");
+    const db = drizzle(env.DB);
+    await db
+      .update(schema.tenants)
+      .set({ authoritiesEnabled: false })
+      .where(eq(schema.tenants.slug, "second-tenant"));
+
+    const { loader } = await import(
+      "../../app/routes/_operator.tenants._index"
+    );
+    const ctx = buildContext();
+    const result = (await loader({
+      request: new Request("https://platform.fisqua.test/operator/tenants"),
+      context: ctx,
+      params: {},
+    } as any)) as {
+      tenants: Array<{ slug: string; authoritiesEnabled: boolean }>;
+    };
+
+    const off = result.tenants.find((t) => t.slug === "second-tenant");
+    expect(off).toBeDefined();
+    expect(off!.authoritiesEnabled as unknown as boolean).toBe(false);
+    // seedTenants leaves the flag at its DEFAULT 1 for everyone else.
+    const on = result.tenants.find((t) => t.slug === "neogranadina");
+    expect(on!.authoritiesEnabled as unknown as boolean).toBe(true);
+  });
+
   it("disabled tenant row carries non-null disabledAt", async () => {
     const { loader } = await import(
       "../../app/routes/_operator.tenants._index"
@@ -172,4 +203,4 @@ describe("operator tenants list", () => {
   });
 });
 
-// @version v0.4.0
+// @version v0.4.2

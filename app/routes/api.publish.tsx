@@ -17,13 +17,14 @@
  * this route's tenant context comes from the auth middleware that
  * resolved the request host.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { z } from "zod";
 import { tenantContext, userContext } from "../context";
 import { requireSuperAdmin } from "../lib/superadmin.server";
-import { getFondsList } from "../lib/export/fonds-list.server";
+import { getScopedFondsList } from "../lib/export/fonds-list.server";
+import { resolveExportScope } from "../lib/export/federation-scope.server";
 import type { Route } from "./+types/api.publish";
 
 const VALID_TYPES = ["descriptions", "repositories", "entities", "places"] as const;
@@ -65,11 +66,19 @@ export async function action({ request, context }: Route.ActionArgs) {
       `Tenant ${tenant.slug} has no descriptive_standard (kind=platform tenants cannot publish)`
     );
   }
-  const fondsList = await getFondsList(db, {
+  // Resolve the export scope (federation spec §9 step 8). When this
+  // route runs on the federation LEAD host the scope aggregates every
+  // member tenant, so the validator accepts fonds from ANY member (the
+  // lead publishes all members); a non-lead tenant sees only its own.
+  // The same resolution the workflow uses — so a fonds that validates
+  // here is one the workflow can read.
+  const scope = await resolveExportScope(db, {
     id: tenant.id,
+    federationId: tenant.federationId,
     slug: tenant.slug,
     descriptiveStandard: tenant.descriptiveStandard,
   });
+  const fondsList = await getScopedFondsList(db, scope.memberTenantIds);
   const PublishRequestSchema = z.object({
     selectedFonds: z
       .array(
@@ -134,6 +143,10 @@ export async function action({ request, context }: Route.ActionArgs) {
     status: "pending",
     selectedFonds: JSON.stringify(selectedFonds),
     selectedTypes: JSON.stringify(selectedTypes),
+    // Federation this run publishes (migration 0055). Recorded at insert
+    // so the run history is federation-attributed even before the
+    // workflow's load-config runs.
+    federationId: scope.federationId,
     stepsCompleted: 0,
     totalSteps,
     createdAt: now,

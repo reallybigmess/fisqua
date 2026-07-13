@@ -288,6 +288,139 @@
       "when": 1778800000000,
       "tag": "0041_fix_fts_delete_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1778900000000,
+      "tag": "0042_crowdsourcing_tenant_ids",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1779000000000,
+      "tag": "0043_per_tenant_code_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1779100000000,
+      "tag": "0044_federations",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1779200000000,
+      "tag": "0045_authority_federation_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1779300000000,
+      "tag": "0046_entities_federation_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1779400000000,
+      "tag": "0047_places_federation_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1779500000000,
+      "tag": "0048_authority_code_index_swap_and_tenant_id_drop",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1779600000000,
+      "tag": "0049_federation_memberships",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "6",
+      "when": 1779700000000,
+      "tag": "0050_per_tenant_draft_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1779800000000,
+      "tag": "0051_partition_ahr_tenant",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "6",
+      "when": 1779800001000,
+      "tag": "0052_partition_ahr_descriptions_2",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "6",
+      "when": 1779800002000,
+      "tag": "0053_partition_ahr_descriptions_3",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "6",
+      "when": 1779800003000,
+      "tag": "0054_partition_ahr_descriptions_4",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1779800004000,
+      "tag": "0055_export_runs_federation_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1779800005000,
+      "tag": "0056_provision_member_tenants",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1779800006000,
+      "tag": "0057_authority_operations",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1779800007000,
+      "tag": "0058_authorities_capability",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "6",
+      "when": 1779800008000,
+      "tag": "0059_authority_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1779800009000,
+      "tag": "0060_coordinate_precision_vocabulary",
+      "breakpoints": true
     }
   ]
 }

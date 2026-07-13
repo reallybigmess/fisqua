@@ -15,15 +15,21 @@
  * the recovery story for a transient failure is "retry the whole
  * workflow run", not "resume mid-step".
  *
- * The workflow loads the tenant once at start in `load-config` and
- * threads it as the last argument to every per-fonds and per-type
- * pipeline step. Because `exportRuns.tenantId` does NOT yet exist on
- * the schema, the tenant is resolved via a join from
- * `exportRuns.triggeredBy → users.tenantId → tenants`. The
- * descriptive_standard is loaded too so the downstream EAD3 profile
- * pick can use it without a second sweep.
+ * The workflow resolves the EXPORT SCOPE once at start in
+ * `load-config` (federation spec §9 step 8). The triggering tenant is
+ * resolved via a join from `exportRuns.triggeredBy → users.tenantId →
+ * tenants`; `resolveExportScope` then decides whether this is a
+ * federation publish (the lead aggregating every member tenant's rows)
+ * or a single-tenant own-publish. Either way EVERY artefact is written
+ * under ONE R2 prefix — the publish (lead) slug — so a federation run
+ * reproduces the pre-partition single-tenant layout byte-for-byte
+ * (publish-neutrality). Per-fonds steps receive a per-fonds tenant whose
+ * `id`/`descriptiveStandard` are the fonds' OWNING member tenant (so the
+ * right rows are read and the right EAD3 profile is picked) but whose
+ * `slug` is the publish slug; per-type steps receive the publish tenant
+ * plus the full member-tenant id list to aggregate their reads across.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import {
@@ -51,6 +57,8 @@ import {
   FondsBodyTooLargeError,
 } from "../lib/export/combined.server";
 import { exportFondsMets } from "../lib/export/mets-export.server";
+import { resolveExportScope } from "../lib/export/federation-scope.server";
+import { getFondsOwners } from "../lib/export/fonds-list.server";
 import type { ExportTenant } from "../lib/export/types";
 
 /**
@@ -94,19 +102,18 @@ export class PublishExportWorkflow extends WorkflowEntrypoint<
           .get();
         if (!run) throw new Error(`exportRun ${exportId} not found`);
 
-        // Resolve the tenant once at workflow start. Every per-fonds
-        // and per-type step downstream takes this as its last argument
-        // so every D1 read filters by tenant.id and every R2 key is
-        // prefixed with tenant.slug.
+        // Resolve the triggering tenant, then the export SCOPE. The
+        // route already gates publish on superadmin +
+        // requireCapability(tenant, 'publish_pipeline'), so the
+        // triggering user's tenant is the same tenant the route's
+        // authMiddleware resolved against the request host.
         //
-        // exportRuns.tenantId does NOT exist on the schema in v0.4;
-        // resolve via the triggering user's tenant. The route already
-        // gates publish on superadmin + requireCapability(tenant,
-        // 'publish_pipeline'), so the user's tenant is the same tenant
-        // the route's authMiddleware resolved against the request host.
+        // exportRuns has no tenantId column; resolve the trigger tenant
+        // via the triggering user's tenant.
         const tenantRow = await db
           .select({
             id: tenants.id,
+            federationId: tenants.federationId,
             slug: tenants.slug,
             descriptiveStandard: tenants.descriptiveStandard,
           })
@@ -125,23 +132,62 @@ export class PublishExportWorkflow extends WorkflowEntrypoint<
           );
         }
 
+        const triggerTenant: ExportTenant = {
+          id: tenantRow.id,
+          federationId: tenantRow.federationId,
+          slug: tenantRow.slug,
+          descriptiveStandard: tenantRow.descriptiveStandard,
+        };
+
+        // Federation publish vs single-tenant own-publish (spec §9 step
+        // 8). resolveExportScope is the ONE decision point shared with
+        // the route + api.publish validator.
+        const scope = await resolveExportScope(db, triggerTenant);
+
+        // Map each selected fonds to the member tenant that OWNS it, so
+        // per-fonds steps read from the right tenant. All writes still
+        // land under scope.publishSlug (the lead slug) — see below.
+        const ownerByFonds = await getFondsOwners(db, scope.memberTenantIds);
+        const memberById = new Map(scope.members.map((m) => [m.id, m]));
+        const selectedFonds = JSON.parse(run.selectedFonds) as string[];
+
+        // Plain serialisable Record (Workflows persist step returns as
+        // JSON — a Map would not survive the step boundary). Each value
+        // has the owning tenant's id + descriptiveStandard but the
+        // publish (lead) slug, so reads hit the owner while keys stay
+        // under one prefix.
+        const fondsTenants: Record<string, ExportTenant> = {};
+        for (const fonds of selectedFonds) {
+          const ownerId = ownerByFonds.get(fonds) ?? scope.publishTenant.id;
+          const owner = memberById.get(ownerId) ?? scope.publishTenant;
+          fondsTenants[fonds] = {
+            id: owner.id,
+            federationId: scope.federationId,
+            slug: scope.publishSlug,
+            descriptiveStandard: owner.descriptiveStandard,
+          };
+        }
+
         await db
           .update(exportRuns)
           .set({
             status: "running",
             startedAt: Date.now(),
             workflowInstanceId: event.instanceId,
+            // Record which federation this run published (idempotent —
+            // api.publish already set it; a workflow-only trigger path
+            // still gets it right).
+            federationId: scope.federationId,
           })
           .where(eq(exportRuns.id, exportId));
 
         return {
-          selectedFonds: JSON.parse(run.selectedFonds) as string[],
+          selectedFonds,
           selectedTypes: JSON.parse(run.selectedTypes) as string[],
-          tenant: {
-            id: tenantRow.id,
-            slug: tenantRow.slug,
-            descriptiveStandard: tenantRow.descriptiveStandard,
-          } as ExportTenant,
+          publishTenant: scope.publishTenant,
+          memberTenantIds: scope.memberTenantIds,
+          fondsTenants,
+          authoritiesEnabled: scope.authoritiesEnabled,
         };
       });
 
@@ -152,7 +198,7 @@ export class PublishExportWorkflow extends WorkflowEntrypoint<
         for (const fonds of config.selectedFonds) {
           const result = await step.do(`descriptions:${fonds}`, async () => {
             await recordStepStart(db, exportId, `descriptions:${fonds}`);
-            const r = await exportFondsDescriptions(db, storage, fonds, config.tenant);
+            const r = await exportFondsDescriptions(db, storage, fonds, config.fondsTenants[fonds]);
             counts[`descriptions:${fonds}`] = r.recordCount;
             await recordStepEnd(db, exportId, `descriptions:${fonds}`, counts);
             return r;
@@ -178,7 +224,7 @@ export class PublishExportWorkflow extends WorkflowEntrypoint<
             storage,
             config.selectedFonds,
             perFondsCounts,
-            config.tenant
+            config.publishTenant
           );
           counts["descriptions:index"] = r.totalRecordCount;
           await recordStepEnd(db, exportId, "descriptions:index", counts);
@@ -189,7 +235,7 @@ export class PublishExportWorkflow extends WorkflowEntrypoint<
         for (const fonds of config.selectedFonds) {
           await step.do(`children:${fonds}`, async () => {
             await recordStepStart(db, exportId, `children:${fonds}`);
-            const r = await exportFondsChildren(db, storage, fonds, config.tenant);
+            const r = await exportFondsChildren(db, storage, fonds, config.fondsTenants[fonds]);
             counts[`children:${fonds}`] = r.putCount;
             await recordStepEnd(db, exportId, `children:${fonds}`, counts);
           });
@@ -200,7 +246,7 @@ export class PublishExportWorkflow extends WorkflowEntrypoint<
         for (const fonds of config.selectedFonds) {
           await step.do(`mets:${fonds}`, async () => {
             await recordStepStart(db, exportId, `mets:${fonds}`);
-            const r = await exportFondsMets(db, this.env.METS_BUCKET, fonds, config.tenant);
+            const r = await exportFondsMets(db, this.env.METS_BUCKET, fonds, config.fondsTenants[fonds]);
             counts[`mets:${fonds}`] = r.generatedCount;
             await recordStepEnd(db, exportId, `mets:${fonds}`, counts);
           });
@@ -212,7 +258,7 @@ export class PublishExportWorkflow extends WorkflowEntrypoint<
         for (const fonds of config.selectedFonds) {
           await step.do(`ead:${fonds}`, async () => {
             await recordStepStart(db, exportId, `ead:${fonds}`);
-            const r = await exportFondsEad(db, storage, fonds, config.tenant);
+            const r = await exportFondsEad(db, storage, fonds, config.fondsTenants[fonds]);
             counts[`ead:${fonds}`] = r.recordCount;
             await recordStepEnd(db, exportId, `ead:${fonds}`, counts);
           });
@@ -224,7 +270,7 @@ export class PublishExportWorkflow extends WorkflowEntrypoint<
         for (const fonds of config.selectedFonds) {
           await step.do(`dc:${fonds}`, async () => {
             await recordStepStart(db, exportId, `dc:${fonds}`);
-            const r = await exportFondsDc(db, storage, fonds, config.tenant);
+            const r = await exportFondsDc(db, storage, fonds, config.fondsTenants[fonds]);
             counts[`dc:${fonds}`] = r.recordCount;
             await recordStepEnd(db, exportId, `dc:${fonds}`, counts);
           });
@@ -234,25 +280,28 @@ export class PublishExportWorkflow extends WorkflowEntrypoint<
       if (config.selectedTypes.includes("repositories")) {
         await step.do("repositories", async () => {
           await recordStepStart(db, exportId, "repositories");
-          const r = await exportRepositories(db, storage, config.tenant);
+          const r = await exportRepositories(db, storage, config.publishTenant, config.memberTenantIds);
           counts.repositories = r.count;
           await recordStepEnd(db, exportId, "repositories", counts);
         });
       }
 
-      if (config.selectedTypes.includes("entities")) {
+      // Entities/places export the authority junctions; skip both when
+      // the triggering tenant lacks the authorities capability (spec §6).
+      // The display-field-only renderers above stay untouched.
+      if (config.authoritiesEnabled && config.selectedTypes.includes("entities")) {
         await step.do("entities", async () => {
           await recordStepStart(db, exportId, "entities");
-          const r = await exportEntities(db, storage, config.tenant);
+          const r = await exportEntities(db, storage, config.publishTenant, config.memberTenantIds);
           counts.entities = r.count;
           await recordStepEnd(db, exportId, "entities", counts);
         });
       }
 
-      if (config.selectedTypes.includes("places")) {
+      if (config.authoritiesEnabled && config.selectedTypes.includes("places")) {
         await step.do("places", async () => {
           await recordStepStart(db, exportId, "places");
-          const r = await exportPlaces(db, storage, config.tenant);
+          const r = await exportPlaces(db, storage, config.publishTenant, config.memberTenantIds);
           counts.places = r.count;
           await recordStepEnd(db, exportId, "places", counts);
         });

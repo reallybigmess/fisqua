@@ -5,9 +5,8 @@
 -- descriptive standards so the v0.4 production import lands once
 -- into the final shape rather than re-migrating mid-stream.
 --
--- The drop list is the 9 columns the production-data audit
--- (../docs/fisqua/releases/0.4/0.4.0/production-data-audit.md) confirmed
--- dead in production: 7 historical / typed-LOD columns on places, one
+-- The drop list is the 9 columns the v0.4.0 production-data audit
+-- confirmed dead in production: 7 historical / typed-LOD columns on places, one
 -- legalStatus on entities, one relatedMaterials on descriptions. The
 -- audit reports 0% population on each.
 --

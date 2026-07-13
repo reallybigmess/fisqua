@@ -3,8 +3,9 @@
 # Manually-triggered CI workflow that ships Fisqua to Cloudflare.
 # Run it from the GitHub Actions UI (Actions → Deploy → Run workflow)
 # when ready to ship. The job runs in two stages: a test stage that
-# installs dependencies, runs Vitest and the TypeScript type-check,
-# and a deploy stage that runs the React Router production build,
+# installs dependencies, runs the full test suite (`npm test` — all
+# three vitest configs) and the TypeScript type-check, and a deploy
+# stage that runs the React Router production build,
 # applies any pending D1 migrations to the `fisqua-db` database, and
 # uploads the Worker to Cloudflare.
 #
@@ -13,7 +14,7 @@
 # secrets: CLOUDFLARE_WORKERS_TOKEN (API token with Workers Edit +
 # D1 Edit), CLOUDFLARE_ACCOUNT_ID.
 #
-# Version: v0.3.1
+# Version: v0.4.1
 
 name: Deploy
 
@@ -27,7 +28,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,7 +36,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx vitest --run
+      - run: npm test
       - run: npm run typecheck
 
   deploy:

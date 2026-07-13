@@ -8,7 +8,7 @@
  * coverage lives in `tests/export/cross-tenant.test.ts` against a
  * real D1 binding.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as descriptionsServer from "../../app/lib/export/descriptions.server";
@@ -26,6 +26,7 @@ import type { ExportTenant } from "../../app/lib/export/types";
 
 const TEST_TENANT: ExportTenant = {
   id: "test-tenant-id",
+  federationId: "b4462493-6170-44f8-ae07-24666606d1f1", // NEOGRANADINA_FEDERATION_ID
   slug: "neogranadina",
   descriptiveStandard: "isadg",
 };

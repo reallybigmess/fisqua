@@ -1,0 +1,38 @@
+-- Export runs: federation attribution (federation migration sequence step 8)
+--
+-- Adds `export_runs.federation_id` so an aggregated publish run records
+-- WHICH federation it published (federation spec §3 line 50, §9 step 8).
+-- Publishing is a federation-level operation -- the lead publishes all
+-- member tenants -- so the run's natural attribution is the federation,
+-- not a single tenant. (`export_runs` has never carried a tenant_id
+-- column; tenant scoping of the run history is done by joining
+-- triggered_by -> users.tenant_id. The member-scoped own-publish option
+-- is deferred, so no tenant_id column is added here either.)
+--
+-- WHY THIS IS PURELY ADDITIVE, NULLABLE, AND TRIVIAL
+-- --------------------------------------------------
+-- `export_runs` is a ledger: append-only run records, small and mostly
+-- historical. A single `ADD COLUMN` is metadata-only -- no table rebuild
+-- (the rebuild pattern is prohibited for populated tables; see 0042's
+-- header), no row-touching backfill, so none of the D1 cascade / 30s /
+-- FTS-trigger hazards the 0042 / 0045 / 0051 headers document can fire
+-- here. Local wall time is a few milliseconds.
+--
+-- WHY NULLABLE (not NOT NULL DEFAULT)
+-- -----------------------------------
+-- Existing rows predate federation-aware publishing and have no correct
+-- federation to backfill to at the SQL layer (there is no single right
+-- federation -- runs could have been triggered from any tenant). Unlike
+-- tenants.federation_id (0044), export_runs.federation_id is NOT a
+-- scoping root that authority reads resolve through, so a NULL on a
+-- historical row is harmless -- it simply means "pre-step-8 run, not
+-- federation-attributed". New runs set it explicitly at insert
+-- (api.publish). The column therefore stays nullable at BOTH the DB and
+-- Drizzle layers (schema.ts declares it optional), and carries a REAL
+-- foreign key so a non-null value can never point at a missing
+-- federation. ADD COLUMN cannot combine NOT NULL with a REFERENCES
+-- clause anyway (SQLite requires a NULL-able added FK column).
+--
+-- Version: v0.4.2
+
+ALTER TABLE export_runs ADD COLUMN federation_id TEXT REFERENCES federations(id);

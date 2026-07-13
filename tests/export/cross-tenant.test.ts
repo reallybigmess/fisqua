@@ -33,7 +33,7 @@
  *      caught even if the data-leak assertions pass for a different
  *      reason.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
@@ -44,6 +44,8 @@ import * as schema from "../../app/db/schema";
 import {
   DEFAULT_TEST_TENANT_ID,
   SECOND_TEST_TENANT_ID,
+  DEFAULT_TEST_FEDERATION_ID,
+  SECOND_TEST_FEDERATION_ID,
   applyMigrations,
   cleanDatabase,
 } from "../helpers/db";
@@ -95,11 +97,13 @@ const SECOND_TENANT_SLUG = "second-tenant";
 
 const NEOGRANADINA_TENANT = {
   id: DEFAULT_TEST_TENANT_ID,
+  federationId: DEFAULT_TEST_FEDERATION_ID,
   slug: NEOGRANADINA_SLUG,
   descriptiveStandard: "isadg" as const,
 };
 const SECOND_TENANT = {
   id: SECOND_TEST_TENANT_ID,
+  federationId: SECOND_TEST_FEDERATION_ID,
   slug: SECOND_TENANT_SLUG,
   descriptiveStandard: "isadg" as const,
 };
