@@ -26,7 +26,7 @@ import {
 import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "../../app/db/schema";
-import { applyMigrations, cleanDatabase } from "../helpers/db";
+import { applyMigrations, cleanDatabase, DEFAULT_TEST_TENANT_ID } from "../helpers/db";
 import { createTestUser } from "../helpers/auth";
 import { getUserProjects } from "../../app/lib/projects.server";
 
@@ -49,6 +49,7 @@ describe("dashboard", () => {
       await db.insert(schema.projects).values([
         {
           id: "proj-a",
+          tenantId: DEFAULT_TEST_TENANT_ID,
           name: "Project A",
           createdBy: user.id,
           createdAt: now,
@@ -56,6 +57,7 @@ describe("dashboard", () => {
         },
         {
           id: "proj-b",
+          tenantId: DEFAULT_TEST_TENANT_ID,
           name: "Project B",
           createdBy: user.id,
           createdAt: now,
@@ -99,6 +101,7 @@ describe("dashboard", () => {
       // Create a project with only otherUser
       await db.insert(schema.projects).values({
         id: "proj-c",
+        tenantId: DEFAULT_TEST_TENANT_ID,
         name: "Project C",
         createdBy: otherUser.id,
         createdAt: now,
@@ -126,6 +129,7 @@ describe("dashboard", () => {
       // Create a project where admin has no membership
       await db.insert(schema.projects).values({
         id: "proj-d",
+        tenantId: DEFAULT_TEST_TENANT_ID,
         name: "Project D",
         createdBy: other.id,
         createdAt: now,

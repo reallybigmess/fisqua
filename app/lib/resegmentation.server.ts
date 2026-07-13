@@ -20,12 +20,12 @@
  * live alongside the create path so the lifecycle stays in one
  * place.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { eq, and } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import { resegmentationFlags } from "../db/schema";
+import { resegmentationFlags, volumes } from "../db/schema";
 import type { ResegmentationFlag } from "./description-types";
 
 /**
@@ -46,8 +46,20 @@ export async function createResegmentationFlag(
   const id = crypto.randomUUID();
   const now = Date.now();
 
+  // A resegmentation flag inherits its tenant from its parent volume.
+  // Resolve it so the row sets tenant_id explicitly (no schema default).
+  const volumeRow = await db
+    .select({ tenantId: volumes.tenantId })
+    .from(volumes)
+    .where(eq(volumes.id, data.volumeId))
+    .get();
+  if (!volumeRow) {
+    throw new Response("Volume not found", { status: 404 });
+  }
+
   await db.insert(resegmentationFlags).values({
     id,
+    tenantId: volumeRow.tenantId,
     volumeId: data.volumeId,
     entryId: data.entryId,
     reportedBy: data.reportedBy,

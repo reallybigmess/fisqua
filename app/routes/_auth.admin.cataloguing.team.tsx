@@ -12,7 +12,7 @@
  * `entries`) inherit tenant scope through the user FK chain
  * (memberships only join users that already belong to the tenant).
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { useState } from "react";
@@ -45,7 +45,7 @@ const ROLE_BADGE_COLORS: Record<string, string> = {
 
 export async function loader({ context }: Route.LoaderArgs) {
   const { drizzle } = await import("drizzle-orm/d1");
-  const { eq, inArray, isNull, sql } = await import("drizzle-orm");
+  const { eq, and, inArray, isNull, sql } = await import("drizzle-orm");
   const { requireCollabAdmin } = await import("../lib/permissions.server");
   const { users, projectMembers, projects, volumes, entries } = await import(
     "../db/schema"
@@ -92,14 +92,20 @@ export async function loader({ context }: Route.LoaderArgs) {
     .innerJoin(projects, eq(projectMembers.projectId, projects.id))
     .all();
 
-  // 3. Query volume workload per user
+  // 3. Query volume workload per user (tenant-scoped: workload counts
+  // must reflect only the request tenant's volumes).
   const volumeWorkload = await db
     .select({
       assignedTo: volumes.assignedTo,
       count: sql<number>`COUNT(*)`,
     })
     .from(volumes)
-    .where(inArray(volumes.status, ["in_progress", "sent_back"]))
+    .where(
+      and(
+        eq(volumes.tenantId, tenant.id),
+        inArray(volumes.status, ["in_progress", "sent_back"]),
+      ),
+    )
     .groupBy(volumes.assignedTo)
     .all();
 
@@ -109,7 +115,7 @@ export async function loader({ context }: Route.LoaderArgs) {
       .map((v) => [v.assignedTo!, v.count])
   );
 
-  // 4. Query entry workload per user
+  // 4. Query entry workload per user (tenant-scoped).
   const entryWorkload = await db
     .select({
       assignedDescriber: entries.assignedDescriber,
@@ -117,7 +123,10 @@ export async function loader({ context }: Route.LoaderArgs) {
     })
     .from(entries)
     .where(
-      inArray(entries.descriptionStatus, ["assigned", "in_progress", "sent_back"])
+      and(
+        eq(entries.tenantId, tenant.id),
+        inArray(entries.descriptionStatus, ["assigned", "in_progress", "sent_back"]),
+      ),
     )
     .groupBy(entries.assignedDescriber)
     .all();
@@ -128,11 +137,11 @@ export async function loader({ context }: Route.LoaderArgs) {
       .map((e) => [e.assignedDescriber!, e.count])
   );
 
-  // 5. Get all non-archived projects for the assign dropdown
+  // 5. Get all non-archived projects for the assign dropdown (tenant-scoped)
   const availableProjects = await db
     .select({ id: projects.id, name: projects.name })
     .from(projects)
-    .where(isNull(projects.archivedAt))
+    .where(and(eq(projects.tenantId, tenant.id), isNull(projects.archivedAt)))
     .all();
 
   // 6. Merge into team list
@@ -218,11 +227,11 @@ export async function action({ request, context }: Route.ActionArgs) {
       return { ok: false, error: i18n.t("team:error_user_not_found") };
     }
 
-    // Verify projectId exists
+    // Verify projectId exists in the calling tenant
     const [targetProject] = await db
       .select({ id: projects.id })
       .from(projects)
-      .where(eq(projects.id, projectId))
+      .where(and(eq(projects.tenantId, tenant.id), eq(projects.id, projectId)))
       .limit(1)
       .all();
     if (!targetProject) {

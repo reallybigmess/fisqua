@@ -48,7 +48,7 @@
  * flows through the typed `Standard` prop into `getStandardConfig`
  * and `tStd`.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { useState, useCallback, useMemo } from "react";
@@ -110,11 +110,11 @@ function FieldLabel({
   required?: boolean;
 }) {
   return (
-    <label className="mb-1 block font-sans text-[0.875rem] font-medium text-indigo">
+    <label className="mb-1 block font-sans text-sm font-medium text-indigo">
       {label}
       {required && <span className="ml-1 text-madder">*</span>}
       {optional && (
-        <span className="ml-1.5 text-[0.75rem] font-normal text-stone-400">
+        <span className="ml-1.5 text-xs font-normal text-stone-400">
           Opcional
         </span>
       )}
@@ -125,7 +125,7 @@ function FieldLabel({
 function FieldError({ error }: { error?: string }) {
   if (!error) return null;
   return (
-    <p className="mt-1 font-sans text-[0.75rem] text-indigo">{error}</p>
+    <p className="mt-1 font-sans text-xs text-indigo">{error}</p>
   );
 }
 
@@ -208,13 +208,13 @@ export function DescriptionForm({
   );
 
   const inputClass =
-    "w-full rounded border border-stone-200 bg-white px-3 py-2 font-serif text-[1rem] text-stone-700 placeholder:text-stone-400 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo disabled:bg-stone-100 disabled:cursor-not-allowed";
+    "w-full rounded border border-stone-200 bg-white px-3 py-2 font-serif text-base text-stone-700 placeholder:text-stone-400 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo disabled:bg-stone-100 disabled:cursor-not-allowed";
 
   const textareaClass =
-    "w-full rounded border border-stone-200 bg-white px-3 py-2 font-sans text-[0.9375rem] leading-[1.6] text-stone-700 placeholder:text-stone-400 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo disabled:bg-stone-100 disabled:cursor-not-allowed";
+    "w-full rounded border border-stone-200 bg-white px-3 py-2 font-sans text-15 leading-[1.6] text-stone-700 placeholder:text-stone-400 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo disabled:bg-stone-100 disabled:cursor-not-allowed";
 
   const selectClass =
-    "w-full rounded border border-stone-200 bg-white px-3 py-2 font-sans text-[0.875rem] text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo disabled:bg-stone-100 disabled:cursor-not-allowed";
+    "w-full rounded border border-stone-200 bg-white px-3 py-2 font-sans text-sm text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo disabled:bg-stone-100 disabled:cursor-not-allowed";
 
   // Show submit button only when status is in_progress or sent_back
   const showSubmit =
@@ -226,7 +226,7 @@ export function DescriptionForm({
     <div className="space-y-3">
       {/* Pause warning banner */}
       {isPaused && (
-        <div className="rounded-lg border border-saffron bg-saffron-tint p-3 font-sans text-[0.875rem] text-saffron-deep">
+        <div className="rounded-lg border border-saffron bg-saffron-tint p-3 font-sans text-sm text-saffron-deep">
           {t("editor.descripcion_pausada")}
         </div>
       )}
@@ -470,7 +470,7 @@ export function DescriptionForm({
         isDisabled
         onToggle={() => {}}
       >
-        <p className="font-sans text-[0.875rem] text-stone-500">
+        <p className="font-sans text-sm text-stone-500">
           {t("locked.entities_places")}
         </p>
       </DescriptionSection>
@@ -481,7 +481,7 @@ export function DescriptionForm({
           <button
             type="button"
             onClick={onSubmitForReview}
-            className="h-11 w-full rounded-md bg-indigo font-sans text-[0.9375rem] font-semibold text-parchment hover:bg-indigo-deep active:bg-indigo-deep"
+            className="h-11 w-full rounded-md bg-indigo font-sans text-15 font-semibold text-parchment hover:bg-indigo-deep active:bg-indigo-deep"
           >
             {t("actions.enviar_para_revision")}
           </button>
@@ -491,4 +491,4 @@ export function DescriptionForm({
   );
 }
 
-/* @version v0.4.0 */
+/* @version v0.4.2 */

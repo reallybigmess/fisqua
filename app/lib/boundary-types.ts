@@ -23,7 +23,7 @@
  * the SaveStatus pill component, so `app/lib/` stays unit-testable
  * without dragging in the component layer.
  *
- * @version v0.4.1
+ * @version v0.4.0
  */
 
 // EntryType is derived from the canonical `ENTRY_TYPES` array

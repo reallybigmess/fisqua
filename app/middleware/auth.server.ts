@@ -28,7 +28,7 @@
  * `authMiddleware` const below; treat that as the authoritative
  * description and this header as the narrative orientation.
  *
- * @version v0.4.1
+ * @version v0.4.2
  */
 
 // --- TEMPLATE INFRASTRUCTURE --- do not modify when extending
@@ -37,6 +37,7 @@ import { redirect } from "react-router";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import {
+  grantContext,
   impersonationContext,
   tenantContext,
   userContext,
@@ -51,6 +52,12 @@ import {
   requireTenantUser,
   SUBDOMAIN_HOST_SUFFIXES,
 } from "../lib/tenant";
+import {
+  applyGrantEffectiveRole,
+  logGrantWrite,
+  resolveGrant,
+  type GrantAccess,
+} from "../lib/federation.server";
 import { users } from "../db/schema";
 
 import type { MiddlewareFunction } from "react-router";
@@ -84,23 +91,34 @@ const IMPERSONATION_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
  *      with `/operator/`.
  *   5a. Hard-404 the request if the tenant is the platform tenant
  *       and the path is not in `OPERATOR_ROUTE_PREFIXES`.
- *   5b. Defence-in-depth wrong-workspace redirect. If
- *       `user.tenantId !== tenant.id` AND the user is not the platform
+ *   5b. Resolve a federation grant. If the user's home tenant is not the
+ *       request tenant (and they are neither operator nor impersonating),
+ *       `resolveGrant` checks `federation_memberships` for a live grant
+ *       into this tenant's federation. On a grant, replace `userContext`
+ *       with the grant's effective member-tenant role flags (staff never
+ *       admin; steward admin-equivalent — invariant I6).
+ *   5c. Defence-in-depth wrong-workspace redirect. If there is no grant
+ *       AND `user.tenantId !== tenant.id` AND the user is not the platform
  *       operator AND the impersonation envelope is unset AND the
  *       current host is in `SUBDOMAIN_HOST_SUFFIXES` AND the user's
  *       home tenant is reachable, clear the stale `__session` cookie
  *       and 302 to `/wrong-workspace?home=<slug>`. Any miss falls
  *       through to step 6's 403.
- *   6. Assert user/tenant alignment via `requireTenantUser`. The
- *      impersonation carve-out: when `impersonating` is set on the
- *      session, pass `{ allowImpersonation: true }` so the operator's
- *      user (which lives in the platform tenant) is admitted on tenant
- *      subdomains. The carve-out is opt-in per-request based on the
- *      session payload — the helper itself stays default-deny.
+ *   6. Assert user/tenant alignment via `requireTenantUser`. Two
+ *      carve-outs threaded in from above: the resolved `grant` (admits a
+ *      federation-lead-staff-into-member-tenant request), and the
+ *      impersonation opt-in (`allowImpersonation: true` when
+ *      `impersonating` is set, admitting the operator's platform-tenant
+ *      user on tenant subdomains). Both are per-request; the helper stays
+ *      default-deny.
  *   7. Attach the tenant to `tenantContext`.
  *   8. Attach the impersonation state (or null) to
- *      `impersonationContext` so layouts can render the banner and
- *      routes can read the role-override.
+ *      `impersonationContext` and the grant state (or null) to
+ *      `grantContext` so layouts can render the banners and surfaces can
+ *      read the role-override / cross-tenant provenance.
+ *   8b. Audit grant-access writes: a mutating request (non GET/HEAD)
+ *      under a live grant records an `edit_on_behalf` row with actor =
+ *      the grant-holder's home tenant, target = the member tenant (I6).
  *   9. Throttle-update `lastActiveAt` on the user row.
  *  10. If the session is impersonating, refresh
  *      `impersonating.lastActivityAt = Date.now()` and commit the
@@ -122,7 +140,7 @@ const IMPERSONATION_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
  * session. The handoff route opts in for its own one-shot call when
  * minting the session; everything else flows through here.
  *
- * @version v0.4.1
+ * @version v0.4.2
  */
 export const authMiddleware: MiddlewareFunction = async (
   { request, context },
@@ -178,6 +196,35 @@ export const authMiddleware: MiddlewareFunction = async (
   // indistinguishable from the resolver's unknown-host 404.
   assertNonPlatformOrAllowlisted(tenant, new URL(request.url).pathname);
 
+  // --- Federation grant resolution ---
+  // A user whose home tenant is not the request tenant may still reach it
+  // through a federation membership (grant access, spec §4). Resolve it
+  // BEFORE the wrong-workspace branch (so a legitimate grant-holder is not
+  // bounced home) and BEFORE requireTenantUser (so its grant branch admits
+  // them). resolveGrant short-circuits to null with no DB read on home
+  // access, and denies a suspended federation or a suspended/disabled
+  // tenant. Operator sessions and active impersonation envelopes take
+  // their own paths and never resolve a grant.
+  let grant: GrantAccess | null = null;
+  if (
+    !impersonatingFromSession &&
+    user.tenantId !== tenant.id &&
+    user.tenantId !== PLATFORM_TENANT_ID
+  ) {
+    grant = await resolveGrant(db, user, tenant);
+  }
+
+  // Under a grant, the acting role flags become the grant's effective
+  // member-tenant flags (staff never admin; steward admin-equivalent --
+  // invariant I6). Re-attach the effective user so every downstream role
+  // gate honours the override without grant awareness. Identity and the
+  // HOME tenantId are preserved.
+  let effectiveUser = user;
+  if (grant) {
+    effectiveUser = applyGrantEffectiveRole(user, grant);
+    context.set(userContext, effectiveUser);
+  }
+
   // Wrong-workspace interstitial (defence-in-depth UX).
   // The magic-link verify and OAuth handoff paths refuse to mint a
   // wrong-tenant session, so the routine wrong-tenant trigger never
@@ -195,6 +242,7 @@ export const authMiddleware: MiddlewareFunction = async (
   // subdomain to redirect into (security boundary).
   if (
     !impersonatingFromSession &&
+    !grant &&
     user.tenantId !== tenant.id &&
     user.tenantId !== PLATFORM_TENANT_ID
   ) {
@@ -226,8 +274,9 @@ export const authMiddleware: MiddlewareFunction = async (
   // without the carve-out. Pass allowImpersonation:true ONLY when the
   // session actually carries an impersonating envelope — every other
   // request sees default-deny.
-  requireTenantUser(tenant, user, {
+  requireTenantUser(tenant, effectiveUser, {
     allowImpersonation: impersonatingFromSession !== undefined,
+    grant: grant ? { federationId: grant.federationId } : null,
   });
 
   context.set(tenantContext, tenant);
@@ -243,6 +292,29 @@ export const authMiddleware: MiddlewareFunction = async (
         }
       : null,
   );
+  context.set(
+    grantContext,
+    grant
+      ? {
+          role: grant.role,
+          federationId: grant.federationId,
+          homeTenantId: grant.homeTenantId,
+        }
+      : null,
+  );
+
+  // Audit every grant-access WRITE in a member tenant (invariant I6).
+  // Single chokepoint: a mutating request (non GET/HEAD) served under a
+  // live grant records an `edit_on_behalf` row with actor = the
+  // grant-holder's home tenant and target = the member tenant. Reads are
+  // not audited (operator-surface precedent, audit.server.ts).
+  if (
+    grant &&
+    request.method !== "GET" &&
+    request.method !== "HEAD"
+  ) {
+    await logGrantWrite(db, effectiveUser, tenant, grant, request);
+  }
 
   // Throttle-update lastActiveAt on the user row (5-minute throttle to
   // avoid write amplification).

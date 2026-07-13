@@ -16,7 +16,7 @@
  * Biográfico Electrónico authority ref) and the generic `legacy_ids`
  * JSON column.
  *
- * @version v0.4.0
+ * @version v0.4.3
  */
 
 import { z } from "zod/v4";
@@ -55,6 +55,11 @@ export const entitySchema = z.object({
   // Generic legacy id JSON column (0036). Full Zod shape lives in
   // app/lib/validation/legacy-ids.ts.
   legacyIds: z.string().default("[]"),
+  // Free-text notes pair (migration 0059). `notes` may eventually
+  // publish; `internalNotes` never leaves the admin surface (excluded
+  // from the export pipeline). Both nullable — absent = no note.
+  notes: z.string().nullable().optional(),
+  internalNotes: z.string().nullable().optional(),
   createdAt: z.number().int(),
   updatedAt: z.number().int(),
 });

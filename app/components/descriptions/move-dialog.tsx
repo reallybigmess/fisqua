@@ -4,7 +4,7 @@
  * This dialog deals with moving a description from one parent to another
  * within the tree, with a destination picker and cascade preview.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -208,7 +208,7 @@ export function MoveDialog({
                         }`}
                       >
                         <span
-                          className={`inline-block rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                          className={`inline-block rounded-full px-1.5 py-0.5 text-10 font-medium ${
                             isSelected
                               ? "bg-white/20 text-white"
                               : badgeStyle

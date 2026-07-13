@@ -24,13 +24,14 @@
  * so the downstream migration can route those entities to the explicit
  * "unresolved" branch rather than silently dropping the value.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 import type { ImportResult } from "../lib/types";
 import { escapeSql, generateInserts, writeSqlFiles } from "../lib/sql";
+import { NEOGRANADINA_FEDERATION_ID } from "../../app/lib/tenant";
 
 /**
  * Shape of each entry in canonical_functions_v2.json.
@@ -54,7 +55,9 @@ interface TermRecord {
 }
 
 const COLUMNS = [
-  "id", "canonical", "category", "status", "merged_into",
+  // federation_id (migration 0045): vocabulary_terms is federation-scoped.
+  // The canonical vocabulary import files under the Neogranadina federation.
+  "id", "federation_id", "canonical", "category", "status", "merged_into",
   "entity_count", "proposed_by", "reviewed_by", "reviewed_at",
   "notes", "created_at", "updated_at",
 ];
@@ -124,6 +127,7 @@ export async function importVocabularyTerms(
   for (const term of termsByCanonical.values()) {
     rows.push([
       escapeSql(term.id),
+      escapeSql(NEOGRANADINA_FEDERATION_ID),
       escapeSql(term.canonical),
       escapeSql(term.category),
       escapeSql("approved"),

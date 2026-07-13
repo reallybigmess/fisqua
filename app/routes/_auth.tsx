@@ -10,12 +10,12 @@
  * context so nested pages can react.
  *
  * The loader reads `tenantContext` (populated by `authMiddleware`
- * after resolving the request `Host` header) and surfaces the four
+ * after resolving the request `Host` header) and surfaces the five
  * capability flags to the `<Sidebar>` so capability-off nav surfaces
- * are hidden. For a tenant with all four capabilities on the
+ * are hidden. For a tenant with all five capabilities on the
  * rendered tree is byte-identical to v0.3.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { useState, useEffect } from "react";
@@ -34,7 +34,7 @@ export const middleware = [
   },
 ];
 
-export async function loader({ context }: Route.LoaderArgs) {
+export async function loader({ request, context }: Route.LoaderArgs) {
   const { getAppConfig } = await import("../lib/config.server");
   const { drizzle } = await import("drizzle-orm/d1");
   const { eq } = await import("drizzle-orm");
@@ -60,7 +60,7 @@ export async function loader({ context }: Route.LoaderArgs) {
     .limit(1);
   const hasAnyProjectMembership = membershipRows.length > 0;
 
-  // Surface only the four capability flags the sidebar needs;
+  // Surface only the five capability flags the sidebar needs;
   // structurally matches `SidebarTenant` so the prop typecheck is a
   // simple shape match rather than a wider Tenant cast. Keeping the
   // payload narrow also avoids accidentally serialising capability
@@ -71,7 +71,36 @@ export async function loader({ context }: Route.LoaderArgs) {
     vocabularyHubEnabled: tenant.vocabularyHubEnabled,
     publishPipelineEnabled: tenant.publishPipelineEnabled,
     multiRepositoryEnabled: tenant.multiRepositoryEnabled,
+    authoritiesEnabled: tenant.authoritiesEnabled,
   };
+
+  // Possible-duplicates badge for the Authorities sidebar entry —
+  // computed only for admins on authorities-on tenants AND only while
+  // the current request is inside the authorities section. The count
+  // is two GROUP BY scans over lower(display_name) (which no index
+  // serves) plus a join over the separate ledger rows; running that on
+  // every admin navigation is disproportionate for a badge, so pages
+  // outside /admin/entities and /admin/places render the nav entry
+  // without a pill. Within the section the pill is always fresh.
+  // The count itself is the CHEAP approximation (exact lowercase-name
+  // collision pairs minus dismissed pairs), not the worklist's
+  // accent-normalised number; see `getDuplicateBadgeCounts`.
+  let duplicateCount = 0;
+  const pathname = new URL(request.url).pathname;
+  const inAuthoritiesSection =
+    pathname.startsWith("/admin/entities") ||
+    pathname.startsWith("/admin/places");
+  if (
+    inAuthoritiesSection &&
+    tenant.authoritiesEnabled &&
+    (user.isAdmin || user.isSuperAdmin)
+  ) {
+    const { getDuplicateBadgeCounts } = await import(
+      "../lib/authority-duplicates.server"
+    );
+    const counts = await getDuplicateBadgeCounts(db, tenant.federationId);
+    duplicateCount = counts.entities + counts.places;
+  }
 
   // Surface a narrow `impersonating` payload for the banner. Empty
   // shape (null) when no envelope is active. We deliberately do NOT
@@ -87,6 +116,7 @@ export async function loader({ context }: Route.LoaderArgs) {
     hasAnyProjectMembership,
     tenant: tenantCaps,
     impersonating: impersonatingForBanner,
+    duplicateCount,
   };
 }
 
@@ -169,7 +199,7 @@ export default function CatalogacionLayout({ loaderData }: Route.ComponentProps)
             className="h-7 w-7"
             aria-hidden="true"
           />
-          <span className="ml-2 font-display text-[22px] font-semibold leading-none text-verdigris">
+          <span className="ml-2 font-display text-2xl font-semibold leading-none text-verdigris">
             Fisqua
           </span>
           <div className="mx-3 h-5 w-px bg-stone-200" aria-hidden="true" />
@@ -213,6 +243,7 @@ export default function CatalogacionLayout({ loaderData }: Route.ComponentProps)
                 tenant={loaderData.tenant}
                 collapsed={effectiveCollapsed}
                 onToggle={toggleCollapsed}
+                duplicateCount={loaderData.duplicateCount}
               />
             </div>
           </div>
@@ -230,6 +261,7 @@ export default function CatalogacionLayout({ loaderData }: Route.ComponentProps)
             tenant={loaderData.tenant}
             collapsed={effectiveCollapsed}
             onToggle={toggleCollapsed}
+            duplicateCount={loaderData.duplicateCount}
           />
         )}
         <div

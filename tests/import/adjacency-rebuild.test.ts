@@ -11,23 +11,29 @@
  * under it; ids 4-5 are files under series 2; ids 6-7 are files
  * under series 3. Expected depth values are 0, 1, 1, 2, 2, 2, 2.
  *
- * @version v0.4.0
+ * @version v0.4.1
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import * as os from "node:os";
 
-const OUTPUT_DIR = ".import";
+// Per-suite scratch dir (never the production `.import/` snapshot dir —
+// see audit item 23).
+let outputDir: string;
+async function setUpOutputDir() {
+  outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "fisqua-import-test-"));
+}
 async function cleanOutput() {
   try {
-    await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
+    await fs.rm(outputDir, { recursive: true, force: true });
   } catch {
     // ignore
   }
 }
 
 describe("adjacency rebuild on the 7-row 3-level tree", () => {
-  beforeEach(cleanOutput);
+  beforeEach(setUpOutputDir);
   afterEach(cleanOutput);
 
   it("returns an idMap with 7 entries", async () => {
@@ -39,12 +45,12 @@ describe("adjacency rebuild on the 7-row 3-level tree", () => {
     );
 
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve(
       "tests/import/fixtures/adjacency/descriptions.json",
     );
-    const { result, idMap } = await importDescriptions(fixturePath, repoIdMap);
+    const { result, idMap } = await importDescriptions(fixturePath, repoIdMap, outputDir);
     expect(result.total).toBe(7);
     expect(result.imported).toBe(7);
     expect(idMap.size).toBe(7);
@@ -62,12 +68,12 @@ describe("adjacency rebuild on the 7-row 3-level tree", () => {
     );
 
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve(
       "tests/import/fixtures/adjacency/descriptions.json",
     );
-    const { result, idMap } = await importDescriptions(fixturePath, repoIdMap);
+    const { result, idMap } = await importDescriptions(fixturePath, repoIdMap, outputDir);
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
 
     const fondsUuid = idMap.get(1)!;
@@ -87,12 +93,12 @@ describe("adjacency rebuild on the 7-row 3-level tree", () => {
     );
 
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve(
       "tests/import/fixtures/adjacency/descriptions.json",
     );
-    const { result } = await importDescriptions(fixturePath, repoIdMap);
+    const { result } = await importDescriptions(fixturePath, repoIdMap, outputDir);
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
 
     expect(content).toContain("Fonds > Series A > File 4");
@@ -107,12 +113,12 @@ describe("adjacency rebuild on the 7-row 3-level tree", () => {
     );
 
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
 
     const fixturePath = path.resolve(
       "tests/import/fixtures/adjacency/descriptions.json",
     );
-    const { result } = await importDescriptions(fixturePath, repoIdMap);
+    const { result } = await importDescriptions(fixturePath, repoIdMap, outputDir);
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
 
     // INSERT statements include depth as an integer literal. With
@@ -123,4 +129,4 @@ describe("adjacency rebuild on the 7-row 3-level tree", () => {
   });
 });
 
-// Version: v0.4.0
+// Version: v0.4.1

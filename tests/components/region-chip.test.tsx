@@ -16,7 +16,7 @@
  * cannot silently drop the middle-dot separator or change the page
  * interpolation contract.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -55,7 +55,7 @@ describe("computeChipClassName", () => {
   it("uses stone-600 text at sans 10px bold --,", () => {
     const cls = computeChipClassName();
     expect(cls).toContain("text-stone-600");
-    expect(cls).toContain("text-[10px]");
+    expect(cls).toContain("text-10");
     expect(cls).toContain("font-bold");
     expect(cls).toContain("font-sans");
   });

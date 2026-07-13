@@ -29,7 +29,7 @@
  * column was dropped in migration 0036 (0% populated in the production
  * audit); the locale entry is removed in lockstep.
  *
- * @version v0.4.0
+ * @version v0.4.3
  */
 export default {
   // Page
@@ -231,6 +231,14 @@ export default {
   role_sent_to: "Sent to",
   role_published: "Published",
   role_venue: "Venue",
+  // Role-picker group labels (optgroups; keys mirror ENTITY_ROLE_GROUPS)
+  role_group_production: "Production & mentions",
+  role_group_correspondence: "Correspondence",
+  role_group_notarial: "Notarial attestation",
+  role_group_legal: "Legal proceedings",
+  role_group_family: "Family & inheritance",
+  role_group_transactions: "Transactions",
+  role_group_visual: "Visual materials",
   honorific_label: "Honorific",
   function_label: "Function",
   name_as_recorded_label: "Name as recorded",
@@ -341,4 +349,4 @@ export default {
   next_page: "Next page",
 } as const;
 
-/* @version v0.4.0 */
+/* @version v0.4.3 */

@@ -38,7 +38,7 @@
  *   target=production -> fisqua-db --remote
  * database_name is always passed explicitly.
  *
- * @version v0.4.0
+ * @version v0.4.1
  */
 
 import * as fs from "node:fs/promises";
@@ -47,12 +47,14 @@ import { execSync } from "node:child_process";
 import { NEOGRANADINA_TENANT_ID } from "../../app/lib/tenant";
 import type { CountSnapshot, ClearAssertion } from "../lib/types";
 
-const OUTPUT_DIR = ".import";
+const DEFAULT_OUTPUT_DIR = ".import";
 
 /**
  * Generate the tenant-scoped clear SQL. Writes a single .sql file under
- * .import/ and returns its path in a one-element array (so callers can
- * iterate uniformly over a list of generated SQL files).
+ * `opts.outputDir` (default `.import/`, the production CLI's unchanged
+ * root; tests pass a per-suite temp dir) and returns its path in a
+ * one-element array (so callers can iterate uniformly over a list of
+ * generated SQL files).
  *
  * Defaults to NEOGRANADINA_TENANT_ID; the optional `tenantId` override is
  * used by tests/import/clear-isolation.test.ts so the keystone fixture can
@@ -74,10 +76,11 @@ const OUTPUT_DIR = ".import";
  * tenant-scoped today and live outside the per-tenant import workflow.
  */
 export async function generateTenantScopedClearSql(
-  opts: { tenantId?: string } = {},
+  opts: { tenantId?: string; outputDir?: string } = {},
 ): Promise<string[]> {
   const tenantId = opts.tenantId ?? NEOGRANADINA_TENANT_ID;
-  await fs.mkdir(OUTPUT_DIR, { recursive: true });
+  const outputDir = opts.outputDir ?? DEFAULT_OUTPUT_DIR;
+  await fs.mkdir(outputDir, { recursive: true });
 
   const sql = `PRAGMA defer_foreign_keys = true;
 
@@ -94,7 +97,7 @@ DELETE FROM places WHERE tenant_id = '${tenantId}';
 DELETE FROM repositories WHERE tenant_id = '${tenantId}';
 `;
 
-  const filePath = path.join(OUTPUT_DIR, "clear-001.sql");
+  const filePath = path.join(outputDir, "clear-001.sql");
   await fs.writeFile(filePath, sql, "utf8");
   return [filePath];
 }
@@ -110,16 +113,21 @@ DELETE FROM repositories WHERE tenant_id = '${tenantId}';
  * search silently broken for the descriptions table after a
  * clear-and-reimport until the next row write touched the FTS
  * triggers. The current list catches up.
+ *
+ * Writes under `outputDir` (default `.import/`, the production CLI's
+ * unchanged root; tests pass a per-suite temp dir).
  */
-export async function generateFtsRebuild(): Promise<string[]> {
-  await fs.mkdir(OUTPUT_DIR, { recursive: true });
+export async function generateFtsRebuild(
+  outputDir: string = DEFAULT_OUTPUT_DIR,
+): Promise<string[]> {
+  await fs.mkdir(outputDir, { recursive: true });
 
   const sql = `INSERT INTO entities_fts(entities_fts) VALUES('rebuild');
 INSERT INTO places_fts(places_fts) VALUES('rebuild');
 INSERT INTO descriptions_fts(descriptions_fts) VALUES('rebuild');
 `;
 
-  const filePath = path.join(OUTPUT_DIR, "fts-rebuild-001.sql");
+  const filePath = path.join(outputDir, "fts-rebuild-001.sql");
   await fs.writeFile(filePath, sql, "utf8");
   return [filePath];
 }
@@ -151,9 +159,9 @@ function buildWranglerFileArgs(target: ClearTarget, sqlFilePath: string): string
  * Multi-line UNION ALL SQL via embedded shell-quoted --command is
  * fragile on macOS (zsh quoting hazards, embedded backslashes,
  * newlines in the wrangler argv). Writing SQL to a temp file under
- * .import/ and using --file= instead avoids the hazard. The wrangler
- * --json output shape is identical between --command and --file
- * invocations.
+ * `outputDir` (default `.import/`) and using --file= instead avoids
+ * the hazard. The wrangler --json output shape is identical between
+ * --command and --file invocations.
  *
  * Temp file is deleted in finally{} regardless of success or failure;
  * the unlink is idempotent so a missing file at cleanup is not an error.
@@ -162,10 +170,11 @@ async function wranglerJsonViaFile(
   target: ClearTarget,
   sql: string,
   label: string,
+  outputDir: string = DEFAULT_OUTPUT_DIR,
 ): Promise<unknown[]> {
-  await fs.mkdir(OUTPUT_DIR, { recursive: true });
+  await fs.mkdir(outputDir, { recursive: true });
   const tmpPath = path.join(
-    OUTPUT_DIR,
+    outputDir,
     `snapshot-${label}-${Date.now()}.sql`,
   );
   await fs.writeFile(tmpPath, sql, "utf8");
@@ -206,9 +215,14 @@ async function wranglerJsonViaFile(
  * UNION-ALL shape is the explicit anti-chatty-assertions pattern --
  * 8 separate calls would multiply round-trip latency for no
  * information gain.
+ *
+ * Temp snapshot SQL files are written under `outputDir` (default
+ * `.import/`, the production CLI's unchanged root; tests pass a
+ * per-suite temp dir).
  */
 export async function snapshotCounts(
   target: ClearTarget,
+  outputDir: string = DEFAULT_OUTPUT_DIR,
 ): Promise<CountSnapshot> {
   // Per-tenant counts across the four tenanted domain tables. GROUP BY
   // tenant_id so tenants with zero rows in a table are simply absent
@@ -226,6 +240,7 @@ SELECT 'places', tenant_id, COUNT(*) FROM places GROUP BY tenant_id;
     target,
     domainSql,
     "domain",
+    outputDir,
   )) as Array<{ tbl: string; tenant_id: string; cnt: number }>;
 
   const ancillarySql = `SELECT 'audit_log' AS tbl, COUNT(*) AS cnt FROM audit_log
@@ -237,6 +252,7 @@ UNION ALL SELECT 'comments', COUNT(*) FROM comments;
     target,
     ancillarySql,
     "ancillary",
+    outputDir,
   )) as Array<{ tbl: string; cnt: number }>;
 
   const domainByTenant = new Map<
@@ -345,4 +361,4 @@ export function assertPostClearInvariants(
   return results;
 }
 
-// Version: v0.4.0
+// Version: v0.4.1

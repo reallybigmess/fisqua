@@ -10,13 +10,12 @@
  * on the edit page so the create form stays focused on "what you need
  * to start linking descriptions to this entity".
  *
- * Tenant attribution comes from request context, populated by
- * `authMiddleware`; the new entity row is attributed to `tenant.id`
- * rather than a single-tenant hard-code, and the existing-term
- * lookup + primary-function-count subqueries are scoped to the
- * calling tenant.
+ * Authority scope is the federation (migrations 0045-0048): the new entity
+ * row is attributed to the session tenant's federation, and the
+ * existing-term lookup, vocabulary typeahead, and primary-function-count
+ * subqueries are scoped to `tenant.federationId`.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { useState } from "react";
@@ -24,6 +23,7 @@ import { Form, useActionData, redirect, Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ChevronRight } from "lucide-react";
 import { tenantContext, userContext } from "../context";
+import { requireCapability } from "../lib/tenant";
 import { CollapsibleSection } from "~/components/admin/collapsible-section";
 import { NameVariantInput } from "~/components/forms/name-variant-input";
 import { LodLinkField } from "~/components/forms/lod-link-field";
@@ -38,6 +38,8 @@ export async function loader({ context }: Route.LoaderArgs) {
   const { requireAdmin } = await import("~/lib/permissions.server");
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
+  requireCapability(tenant, "authorities");
   return {};
 }
 
@@ -56,6 +58,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   const user = context.get(userContext);
   requireAdmin(user);
   const tenant = context.get(tenantContext);
+  requireCapability(tenant, "authorities");
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -77,6 +80,7 @@ export async function action({ request, context }: Route.ActionArgs) {
       .from(vocabularyTerms)
       .where(
         and(
+          eq(vocabularyTerms.federationId, tenant.federationId),
           like(vocabularyTerms.canonical, `%${q}%`),
           isNull(vocabularyTerms.mergedInto),
           eq(vocabularyTerms.status, "approved")
@@ -86,6 +90,15 @@ export async function action({ request, context }: Route.ActionArgs) {
       .all();
     return { searchResults: results };
   }
+
+  // Authority mutation gate (ruled 2026-07-08). Member-tenant admins keep
+  // READ access to the shared authority space (the search-functions
+  // branch above), but creating an entity is a canonical authority
+  // mutation subject to federation steward review. Behaviour-neutral
+  // today: every federation is a federation-of-one whose lead admin is a
+  // steward by branch (A) of isFederationSteward.
+  const { requireFederationSteward } = await import("~/lib/federation.server");
+  await requireFederationSteward(db, user, tenant);
 
   // Parse name variants from hidden field
   let nameVariants: string[] = [];
@@ -182,6 +195,7 @@ export async function action({ request, context }: Route.ActionArgs) {
       .from(vocabularyTerms)
       .where(
         and(
+          eq(vocabularyTerms.federationId, tenant.federationId),
           sql`LOWER(${vocabularyTerms.canonical}) = LOWER(${primaryFunctionText})`,
           isNull(vocabularyTerms.mergedInto)
         )
@@ -194,6 +208,7 @@ export async function action({ request, context }: Route.ActionArgs) {
       const newTermId = crypto.randomUUID();
       await db.insert(vocabularyTerms).values({
         id: newTermId,
+        federationId: tenant.federationId,
         canonical: primaryFunctionText,
         category: null,
         status: "proposed",
@@ -208,7 +223,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   try {
     await db.insert(entities).values({
-      tenantId: tenant.id,
+      federationId: tenant.federationId,
       id,
       ...parsed.data,
       surname: parsed.data.surname ?? null,
@@ -235,7 +250,7 @@ export async function action({ request, context }: Route.ActionArgs) {
         .from(entities)
         .where(
           and(
-            eq(entities.tenantId, tenant.id),
+            eq(entities.federationId, tenant.federationId),
             eq(entities.primaryFunctionId, resolvedFunctionId)
           )
         )

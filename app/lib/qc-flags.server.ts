@@ -7,11 +7,11 @@
  * denormalised reporter / resolver display names. Every mutation is
  * behind a project-role guard; callers pass the guarded user in.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 import { eq, and, inArray, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import { qcFlags } from "../db/schema";
+import { qcFlags, volumes } from "../db/schema";
 
 /**
  * Problem taxonomy for a QC flag.
@@ -75,8 +75,20 @@ export async function createQcFlag(
   const id = crypto.randomUUID();
   const now = Date.now();
 
+  // A QC flag inherits its tenant from its parent volume. Resolve it so
+  // the row sets tenant_id explicitly (the schema has no default).
+  const volumeRow = await db
+    .select({ tenantId: volumes.tenantId })
+    .from(volumes)
+    .where(eq(volumes.id, data.volumeId))
+    .get();
+  if (!volumeRow) {
+    throw new Response("Volume not found", { status: 404 });
+  }
+
   await db.insert(qcFlags).values({
  id,
+ tenantId: volumeRow.tenantId,
  volumeId: data.volumeId,
  pageId: data.pageId,
  reportedBy: data.reportedBy,

@@ -8,7 +8,7 @@
  * the two progress bars never collide visually on a dashboard that
  * surfaces both pipelines side by side.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { useTranslation } from "react-i18next";
@@ -53,7 +53,7 @@ export function DescriptionProgressBar({ counts }: DescriptionProgressBarProps) 
     <div className="space-y-1">
       {/* Label */}
       <div className="flex items-center justify-between">
-        <span className="text-[0.8125rem] font-semibold uppercase text-stone-500">
+        <span className="text-13 font-semibold uppercase text-stone-500">
           {t("tabs.descripcion")}
         </span>
         <span className="text-xs text-stone-500">

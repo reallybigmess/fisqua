@@ -29,7 +29,7 @@ import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import * as schema from "../../app/db/schema";
-import { applyMigrations, cleanDatabase } from "../helpers/db";
+import { applyMigrations, cleanDatabase, DEFAULT_TEST_TENANT_ID } from "../helpers/db";
 import { createTestUser } from "../helpers/auth";
 import { requireProjectRole } from "../../app/lib/permissions.server";
 
@@ -50,6 +50,7 @@ describe("project settings", () => {
 
       await db.insert(schema.projects).values({
         id: "proj-s1",
+        tenantId: DEFAULT_TEST_TENANT_ID,
         name: "Original Name",
         description: "Original desc",
         createdBy: user.id,
@@ -74,7 +75,9 @@ describe("project settings", () => {
 
       expect(updated!.name).toBe("Updated Name");
       expect(updated!.description).toBe("Updated desc");
-      expect(updated!.updatedAt).toBeGreaterThan(now);
+      // >= not >: seed and update can land in the same millisecond, and
+      // Date.now() has no finer resolution to distinguish them.
+      expect(updated!.updatedAt).toBeGreaterThanOrEqual(now);
     });
 
     it("updates conventions text", async () => {
@@ -84,6 +87,7 @@ describe("project settings", () => {
 
       await db.insert(schema.projects).values({
         id: "proj-s2",
+        tenantId: DEFAULT_TEST_TENANT_ID,
         name: "Test",
         createdBy: user.id,
         createdAt: now,
@@ -116,6 +120,7 @@ describe("project settings", () => {
 
       await db.insert(schema.projects).values({
         id: "proj-s3",
+        tenantId: DEFAULT_TEST_TENANT_ID,
         name: "Test",
         createdBy: user.id,
         createdAt: now,
@@ -151,6 +156,7 @@ describe("project settings", () => {
 
       await db.insert(schema.projects).values({
         id: "proj-s4",
+        tenantId: DEFAULT_TEST_TENANT_ID,
         name: "Test",
         createdBy: user.id,
         createdAt: now,
@@ -176,6 +182,7 @@ describe("project settings", () => {
 
       await db.insert(schema.projects).values({
         id: "proj-s5",
+        tenantId: DEFAULT_TEST_TENANT_ID,
         name: "Test",
         createdBy: user.id,
         createdAt: now,

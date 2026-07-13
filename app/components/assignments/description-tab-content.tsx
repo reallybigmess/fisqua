@@ -9,7 +9,7 @@
  * the team-progress cards keyed to description assignments. All data is
  * read-only here; commit affordances live on the inner tables and cards.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { Link, useFetcher } from "react-router";
@@ -250,7 +250,7 @@ function PromoteCard({ volume }: { volume: PromotableVolume }) {
           {volume.referenceCode}
         </p>
       )}
-      <p className="mt-2 font-serif text-[15px] text-stone-500 max-w-[36ch] mx-auto">
+      <p className="mt-2 font-serif text-15 text-stone-500 max-w-measure mx-auto">
         {t("promote.entradas_aprobadas", { count: volume.approvedEntryCount })}
       </p>
       <fetcher.Form method="post" className="mt-3">

@@ -6,7 +6,7 @@
  * post and surfaces the inline region-pin affordance when the thread is
  * anchored to a region on the page.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useFetcher } from "react-router";
@@ -365,7 +365,7 @@ export function CommentThread(props: CommentThreadProps) {
  className="flex w-full items-center gap-2 text-left"
  onClick={() => setIsOpen((prev) => !prev)}
  >
- <h3 className="font-display text-[1.25rem] font-semibold text-stone-700">
+ <h3 className="font-display text-xl font-semibold text-stone-700">
  {heading}
  </h3>
  <ChevronIcon open={isOpen} />

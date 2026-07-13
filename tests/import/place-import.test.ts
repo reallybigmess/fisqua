@@ -15,31 +15,36 @@
  * (same input → same UUIDs across runs) so the SQL diff stays small
  * on re-runs.
  *
- * @version v0.3.0
+ * @version v0.4.1
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import * as os from "node:os";
 import type { IdMap } from "../../scripts/lib/types";
 
-const OUTPUT_DIR = ".import";
-
+// Per-suite scratch dir (never the production `.import/` snapshot dir —
+// see audit item 23).
+let outputDir: string;
+async function setUpOutputDir() {
+  outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "fisqua-import-test-"));
+}
 async function cleanOutput() {
   try {
-    await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
+    await fs.rm(outputDir, { recursive: true, force: true });
   } catch {
     // ignore
   }
 }
 
 describe("importPlaces", () => {
-  beforeEach(cleanOutput);
+  beforeEach(setUpOutputDir);
   afterEach(cleanOutput);
 
   it("returns correct row count and IdMap for all input records", async () => {
     const { importPlaces } = await import("../../scripts/commands/places");
     const fixturePath = path.resolve("tests/import/fixtures/places.json");
-    const { result, idMap } = await importPlaces(fixturePath);
+    const { result, idMap } = await importPlaces(fixturePath, outputDir);
 
     expect(result.table).toBe("places");
     expect(result.total).toBe(4);
@@ -52,7 +57,7 @@ describe("importPlaces", () => {
   it("resolves parent_id to UUID (not original integer)", async () => {
     const { importPlaces } = await import("../../scripts/commands/places");
     const fixturePath = path.resolve("tests/import/fixtures/places.json");
-    const { result, idMap } = await importPlaces(fixturePath);
+    const { result, idMap } = await importPlaces(fixturePath, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
     // Boyaca (id=201) has parent_id=200, so its parent should be Colombia's UUID
@@ -63,7 +68,7 @@ describe("importPlaces", () => {
   it("root place has parent_id = NULL in SQL", async () => {
     const { importPlaces } = await import("../../scripts/commands/places");
     const fixturePath = path.resolve("tests/import/fixtures/places.json");
-    const { result } = await importPlaces(fixturePath);
+    const { result } = await importPlaces(fixturePath, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
     // Colombia (id=200) has parent_id=null, so SQL should contain NULL for it
@@ -73,7 +78,7 @@ describe("importPlaces", () => {
   it("place_code values match /^nl-[a-z2-9]{6}$/", async () => {
     const { importPlaces } = await import("../../scripts/commands/places");
     const fixturePath = path.resolve("tests/import/fixtures/places.json");
-    const { result } = await importPlaces(fixturePath);
+    const { result } = await importPlaces(fixturePath, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
     const codePattern = /nl-[a-z2-9]{6}/g;
@@ -84,27 +89,31 @@ describe("importPlaces", () => {
     expect(unique.size).toBe(4);
   });
 
-  it("renames colonial_* fields to historical_* in SQL output", async () => {
+  it("drops colonial_* fields entirely (historical_* columns removed in drizzle/0036)", async () => {
     const { importPlaces } = await import("../../scripts/commands/places");
     const fixturePath = path.resolve("tests/import/fixtures/places.json");
-    const { result } = await importPlaces(fixturePath);
+    const { result } = await importPlaces(fixturePath, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
-    // SQL column names should be historical_*, not colonial_*
-    expect(content).toContain("historical_gobernacion");
-    expect(content).toContain("historical_partido");
-    expect(content).toContain("historical_region");
+    // The historical_* target columns no longer exist in the schema, so the
+    // importer must emit neither the old colonial_* names nor the renamed
+    // historical_* ones — the fields are dropped, not carried.
+    expect(content).not.toContain("historical_gobernacion");
+    expect(content).not.toContain("historical_partido");
+    expect(content).not.toContain("historical_region");
     expect(content).not.toContain("colonial_gobernacion");
     expect(content).not.toContain("colonial_partido");
     expect(content).not.toContain("colonial_region");
-    // Tunja (id=202) has colonial_gobernacion="Tunja" — should appear as value
-    expect(content).toContain("Tunja");
+    // "Andes" appears in the fixture only as a colonial_region value (never as
+    // a label or variant) — its absence proves the dropped values don't leak
+    // into the row bodies either.
+    expect(content).not.toContain("Andes");
   });
 
   it("handles needs_geocoding as boolean -> integer", async () => {
     const { importPlaces } = await import("../../scripts/commands/places");
     const fixturePath = path.resolve("tests/import/fixtures/places.json");
-    const { result } = await importPlaces(fixturePath);
+    const { result } = await importPlaces(fixturePath, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
     // needs_geocoding should be 0 or 1, not true/false strings
@@ -114,7 +123,7 @@ describe("importPlaces", () => {
 });
 
 describe("importEntityFunctions", () => {
-  beforeEach(cleanOutput);
+  beforeEach(setUpOutputDir);
   afterEach(cleanOutput);
 
   it("resolves entity_id FK via entity IdMap", async () => {
@@ -131,7 +140,7 @@ describe("importEntityFunctions", () => {
       [101, "aaaaaaaa-0000-0000-0000-000000000101"],
     ]);
 
-    const result = await importEntityFunctions(fixturePath, entityIdMap);
+    const result = await importEntityFunctions(fixturePath, entityIdMap, outputDir);
 
     expect(result.table).toBe("entity_functions");
     expect(result.total).toBe(3);
@@ -156,7 +165,7 @@ describe("importEntityFunctions", () => {
       [100, "aaaaaaaa-0000-0000-0000-000000000100"],
     ]);
 
-    const result = await importEntityFunctions(fixturePath, entityIdMap);
+    const result = await importEntityFunctions(fixturePath, entityIdMap, outputDir);
 
     // Entity 100 has 2 functions (rows 0,1), entity 101 has 1 function (row 2)
     expect(result.imported).toBe(2);
@@ -177,7 +186,7 @@ describe("importEntityFunctions", () => {
       [101, "aaaaaaaa-0000-0000-0000-000000000101"],
     ]);
 
-    const result = await importEntityFunctions(fixturePath, entityIdMap);
+    const result = await importEntityFunctions(fixturePath, entityIdMap, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
     expect(content).toContain("INSERT INTO entity_functions");

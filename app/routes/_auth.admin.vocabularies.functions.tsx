@@ -6,14 +6,18 @@
  * actions for approve, reject, and merge. Each row deep-links to the
  * per-function detail page.
  *
- * @version v0.3.0
+ * Authority scope is the federation (migration 0045): the term list,
+ * merge-dialog search, and the add/rename/deprecate mutations are all
+ * scoped to `tenant.federationId`.
+ *
+ * @version v0.4.2
  */
 
 import { useState, useEffect, useMemo } from "react";
 import { Link, useSearchParams, useFetcher } from "react-router";
 import { useTranslation } from "react-i18next";
 import { Search, Plus, MoreVertical } from "lucide-react";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import { FUNCTION_CATEGORIES } from "~/lib/validation/enums";
 import { CategoryFilterChips } from "~/components/admin/category-filter-chips";
 import { VocabularyStatusBadge } from "~/components/admin/vocabulary-status-badge";
@@ -47,16 +51,25 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
   const url = new URL(request.url);
 
-  // JSON search API for merge dialog
-  if (url.searchParams.get("intent") === "search-terms") {
+  // JSON search API for the merge dialog. The shared admin MergeDialog
+  // calls `?_search=true`; the legacy vocab dialog used
+  // `?intent=search-terms`. Both resolve here to a federation-scoped
+  // term lookup — vocabulary_terms is shared within a federation
+  // (migration 0045), not globally.
+  if (
+    url.searchParams.get("_search") === "true" ||
+    url.searchParams.get("intent") === "search-terms"
+  ) {
     const q = url.searchParams.get("q")?.trim() || "";
     const excludeId = url.searchParams.get("exclude") || "";
     const conditions = [
+      eq(vocabularyTerms.federationId, tenant.federationId),
       like(vocabularyTerms.canonical, `%${escapeLike(q)}%`),
       isNull(vocabularyTerms.mergedInto),
       eq(vocabularyTerms.status, "approved"),
@@ -86,8 +99,11 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const dir = url.searchParams.get("dir") || "desc";
   const pageSize = 50;
 
-  // Build conditions
-  const conditions = [isNull(vocabularyTerms.mergedInto)];
+  // Build conditions. Federation-scoped (migration 0045).
+  const conditions = [
+    eq(vocabularyTerms.federationId, tenant.federationId),
+    isNull(vocabularyTerms.mergedInto),
+  ];
 
   if (status && status !== "all") {
     conditions.push(eq(vocabularyTerms.status, status as "approved" | "proposed" | "deprecated"));
@@ -139,7 +155,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 export async function action({ request, context }: Route.ActionArgs) {
   const { requireAdmin } = await import("~/lib/permissions.server");
   const { drizzle } = await import("drizzle-orm/d1");
-  const { eq, sql } = await import("drizzle-orm");
+  const { and, eq, sql } = await import("drizzle-orm");
   const { vocabularyTerms, changelog } = await import("~/db/schema");
   const { vocabularyTermSchema } = await import(
     "~/lib/validation/vocabulary"
@@ -147,9 +163,21 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
+
+  // Authority mutation gate (ruled 2026-07-08): every intent here
+  // (add-function, rename, deprecate) is a canonical vocabulary mutation
+  // subject to federation steward review. Member-tenant PROPOSE is
+  // currently unreachable -- the only propose sites live inside the
+  // steward-gated entity create/update intents -- and defers to the
+  // entities/places propose-for-review follow-up (ruled 2026-07-08).
+  // Behaviour-neutral today (lead admin = steward).
+  const { requireFederationSteward } = await import("~/lib/federation.server");
+  await requireFederationSteward(db, user, tenant);
+
   const formData = await request.formData();
   const intent = formData.get("intent") as string;
   const now = Math.floor(Date.now() / 1000);
@@ -166,6 +194,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     const id = crypto.randomUUID();
     await db.insert(vocabularyTerms).values({
       id,
+      federationId: tenant.federationId,
       canonical: parsed.data.canonical,
       category: parsed.data.category ?? null,
       status: "approved",
@@ -196,14 +225,24 @@ export async function action({ request, context }: Route.ActionArgs) {
     const existing = await db
       .select({ canonical: vocabularyTerms.canonical })
       .from(vocabularyTerms)
-      .where(eq(vocabularyTerms.id, termId))
+      .where(
+        and(
+          eq(vocabularyTerms.id, termId),
+          eq(vocabularyTerms.federationId, tenant.federationId)
+        )
+      )
       .get();
     if (!existing) return { error: "Term not found" };
 
     await db
       .update(vocabularyTerms)
       .set({ canonical: parsed.data.canonical, updatedAt: now })
-      .where(eq(vocabularyTerms.id, termId));
+      .where(
+        and(
+          eq(vocabularyTerms.id, termId),
+          eq(vocabularyTerms.federationId, tenant.federationId)
+        )
+      );
 
     await db.insert(changelog).values({
       id: crypto.randomUUID(),
@@ -226,14 +265,24 @@ export async function action({ request, context }: Route.ActionArgs) {
     const existing = await db
       .select({ canonical: vocabularyTerms.canonical, status: vocabularyTerms.status })
       .from(vocabularyTerms)
-      .where(eq(vocabularyTerms.id, termId))
+      .where(
+        and(
+          eq(vocabularyTerms.id, termId),
+          eq(vocabularyTerms.federationId, tenant.federationId)
+        )
+      )
       .get();
     if (!existing) return { error: "Term not found" };
 
     await db
       .update(vocabularyTerms)
       .set({ status: "deprecated", updatedAt: now })
-      .where(eq(vocabularyTerms.id, termId));
+      .where(
+        and(
+          eq(vocabularyTerms.id, termId),
+          eq(vocabularyTerms.federationId, tenant.federationId)
+        )
+      );
 
     await db.insert(changelog).values({
       id: crypto.randomUUID(),
@@ -438,7 +487,7 @@ export default function AdminVocabularyFunctionsPage({
           <h2 className="font-sans text-lg font-semibold text-stone-700">
             {t("no_functions_found")}
           </h2>
-          <p className="mt-2 font-serif text-[15px] text-stone-500 max-w-[36ch] mx-auto">
+          <p className="mt-2 font-serif text-15 text-stone-500 max-w-measure mx-auto">
             {t("no_functions_body")}
           </p>
         </div>

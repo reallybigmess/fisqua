@@ -15,7 +15,7 @@
  * entity_functions is single-FK and there is no second FK that could
  * cascade.
  *
- * @version v0.4.0
+ * @version v0.4.1
  */
 import * as fs from "node:fs/promises";
 import * as crypto from "node:crypto";
@@ -31,11 +31,14 @@ const COLUMNS = [
 /**
  * Import entity functions from a JSON export file.
  * Resolves entity_id FK via the provided entity IdMap.
- * Missing FK references are logged as errors and skipped.
+ * Missing FK references are logged as errors and skipped. SQL is
+ * written under `outputDir` (default `.import/`, the production
+ * CLI's unchanged root; tests pass a per-suite temp dir).
  */
 export async function importEntityFunctions(
   inputPath: string,
-  entityIdMap: IdMap
+  entityIdMap: IdMap,
+  outputDir = ".import"
 ): Promise<ImportResult> {
   const raw = await fs.readFile(inputPath, "utf8");
   const records = JSON.parse(raw) as Record<string, unknown>[];
@@ -95,7 +98,7 @@ export async function importEntityFunctions(
   }
 
   const statements = generateInserts("entity_functions", COLUMNS, rows, 100);
-  const sqlFiles = await writeSqlFiles("entity_functions", statements);
+  const sqlFiles = await writeSqlFiles("entity_functions", statements, 50, outputDir);
 
   return {
     table: "entity_functions",
@@ -107,4 +110,4 @@ export async function importEntityFunctions(
   };
 }
 
-// Version: v0.4.0
+// Version: v0.4.1

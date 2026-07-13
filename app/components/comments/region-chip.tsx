@@ -6,7 +6,7 @@
  * chip scrolls the viewer to the region and flashes the pin so the reader
  * orients immediately.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 import { useTranslation } from "react-i18next";
 import { MapPin } from "lucide-react";
@@ -46,7 +46,7 @@ export function computeChipClassName(): string {
  "px-2 py-1 rounded",
  "bg-stone-100",
  "border border-stone-200",
- "text-stone-600 text-[10px] font-bold",
+ "text-stone-600 text-10 font-bold",
  "font-sans",
  "hover:bg-stone-200 focus:outline-none focus:ring-2 focus:ring-indigo/40",
  "transition-colors",

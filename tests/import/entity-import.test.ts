@@ -17,30 +17,35 @@
  * source from a stable hash of the legacy id), so the SQL diff
  * stays small on re-runs.
  *
- * @version v0.3.0
+ * @version v0.4.1
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import * as os from "node:os";
 
-const OUTPUT_DIR = ".import";
-
+// Per-suite scratch dir (never the production `.import/` snapshot dir —
+// see audit item 23).
+let outputDir: string;
+async function setUpOutputDir() {
+  outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "fisqua-import-test-"));
+}
 async function cleanOutput() {
   try {
-    await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
+    await fs.rm(outputDir, { recursive: true, force: true });
   } catch {
     // ignore
   }
 }
 
 describe("importEntities", () => {
-  beforeEach(cleanOutput);
+  beforeEach(setUpOutputDir);
   afterEach(cleanOutput);
 
   it("returns correct row count and IdMap for all input records", async () => {
     const { importEntities } = await import("../../scripts/commands/entities");
     const fixturePath = path.resolve("tests/import/fixtures/entities.json");
-    const { result, idMap } = await importEntities(fixturePath);
+    const { result, idMap } = await importEntities(fixturePath, outputDir);
 
     expect(result.table).toBe("entities");
     expect(result.total).toBe(5);
@@ -59,7 +64,7 @@ describe("importEntities", () => {
   it("generates SQL files in .import/ directory", async () => {
     const { importEntities } = await import("../../scripts/commands/entities");
     const fixturePath = path.resolve("tests/import/fixtures/entities.json");
-    const { result } = await importEntities(fixturePath);
+    const { result } = await importEntities(fixturePath, outputDir);
 
     expect(result.sqlFiles.length).toBeGreaterThan(0);
     for (const file of result.sqlFiles) {
@@ -71,7 +76,7 @@ describe("importEntities", () => {
   it("generates SQL with valid INSERT INTO entities statements", async () => {
     const { importEntities } = await import("../../scripts/commands/entities");
     const fixturePath = path.resolve("tests/import/fixtures/entities.json");
-    const { result } = await importEntities(fixturePath);
+    const { result } = await importEntities(fixturePath, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
     expect(content).toContain("PRAGMA defer_foreign_keys = true");
@@ -81,7 +86,7 @@ describe("importEntities", () => {
   it("generates entity_code values matching /^ne-[a-z2-9]{6}$/", async () => {
     const { importEntities } = await import("../../scripts/commands/entities");
     const fixturePath = path.resolve("tests/import/fixtures/entities.json");
-    const { result } = await importEntities(fixturePath);
+    const { result } = await importEntities(fixturePath, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
     const codePattern = /ne-[a-z2-9]{6}/g;
@@ -96,7 +101,7 @@ describe("importEntities", () => {
   it("converts created_at to epoch seconds (integer, not ISO string)", async () => {
     const { importEntities } = await import("../../scripts/commands/entities");
     const fixturePath = path.resolve("tests/import/fixtures/entities.json");
-    const { result } = await importEntities(fixturePath);
+    const { result } = await importEntities(fixturePath, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
     // Should NOT contain ISO datetime strings for created_at
@@ -108,7 +113,7 @@ describe("importEntities", () => {
   it("handles name_variants as JSON string (not double-encoded)", async () => {
     const { importEntities } = await import("../../scripts/commands/entities");
     const fixturePath = path.resolve("tests/import/fixtures/entities.json");
-    const { result } = await importEntities(fixturePath);
+    const { result } = await importEntities(fixturePath, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
     // Should contain the JSON array as a string value
@@ -120,7 +125,7 @@ describe("importEntities", () => {
   it("escapes single quotes in string values (e.g. O'Brien)", async () => {
     const { importEntities } = await import("../../scripts/commands/entities");
     const fixturePath = path.resolve("tests/import/fixtures/entities.json");
-    const { result } = await importEntities(fixturePath);
+    const { result } = await importEntities(fixturePath, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
     // O'Brien should be escaped as O''Brien in SQL
@@ -130,7 +135,7 @@ describe("importEntities", () => {
   it("UUIDs in IdMap are valid v4 format", async () => {
     const { importEntities } = await import("../../scripts/commands/entities");
     const fixturePath = path.resolve("tests/import/fixtures/entities.json");
-    const { idMap } = await importEntities(fixturePath);
+    const { idMap } = await importEntities(fixturePath, outputDir);
 
     const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
     for (const uuid of idMap.values()) {
@@ -140,13 +145,13 @@ describe("importEntities", () => {
 });
 
 describe("importRepositories", () => {
-  beforeEach(cleanOutput);
+  beforeEach(setUpOutputDir);
   afterEach(cleanOutput);
 
   it("returns correct row count and IdMap", async () => {
     const { importRepositories } = await import("../../scripts/commands/repositories");
     const fixturePath = path.resolve("tests/import/fixtures/repositories.json");
-    const { result, idMap } = await importRepositories(fixturePath);
+    const { result, idMap } = await importRepositories(fixturePath, outputDir);
 
     expect(result.table).toBe("repositories");
     expect(result.total).toBe(2);
@@ -160,7 +165,7 @@ describe("importRepositories", () => {
   it("generates SQL with INSERT INTO repositories", async () => {
     const { importRepositories } = await import("../../scripts/commands/repositories");
     const fixturePath = path.resolve("tests/import/fixtures/repositories.json");
-    const { result } = await importRepositories(fixturePath);
+    const { result } = await importRepositories(fixturePath, outputDir);
 
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
     expect(content).toContain("INSERT INTO repositories");

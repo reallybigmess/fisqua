@@ -15,9 +15,12 @@
  * `TENANT-NN`, `STD-NN`, `IMPORT-NN`, etc.), AI-tooling references
  * (`CLAUDE.md`, `.claude/`, `claude.com`, `anthropic`,
  * `co-authored-by`), and developer-workspace path literals
- * (`.planning/`). The literal-path check is what surfaced the
- * runtime path leak in `scripts/reconcile-volume-status.ts` during
- * v0.4 release prep.
+ * (`.planning/`, `docs/fisqua/`, `../docs/`). The literal-path check
+ * is what surfaced the runtime path leak in
+ * `scripts/reconcile-volume-status.ts` during v0.4 release prep, and
+ * the `docs/fisqua/` / `../docs/` arms were added after two source
+ * comments citing a private `../docs/fisqua/...` audit path reached
+ * the public repo in the v0.4.0 port.
  *
  * Case-sensitive on purpose: the REQ-ID prefix codes and planning
  * labels are uppercase by convention (`TENANT-01`, `Phase 33`),
@@ -43,7 +46,7 @@ import { describe, it, expect } from "vitest";
 // that happen to contain "tenant-1" or "import-2026" are NOT
 // planning labels and must not trip the gate.
 const SCRUB_PATTERN =
-  /Phase [0-9]+|Plan [0-9]+|RQ-[0-9]+|AI-SPEC|RESEARCH\.md|UI-SPEC|scratchpad|GSD|gsd-|TENANT-[0-9]+|STD-[0-9]+|IMPORT-[0-9]+|PARITY-[0-9]+|NORM-[0-9]+|SCHEMA-[0-9]+|CONTRACT-[0-9]+|VERIFY-[0-9]+|MODIFIED-[0-9]+|CUTOVER-[0-9]+|Fase [0-9]+|Claude Code|claude code|claude\.com|claude\.ai|Anthropic|anthropic|Co-Authored-By|co-authored-by|CLAUDE\.md|\.claude\/|\.planning\//g;
+  /Phase [0-9]+|Plan [0-9]+|RQ-[0-9]+|AI-SPEC|RESEARCH\.md|UI-SPEC|scratchpad|GSD|gsd-|TENANT-[0-9]+|STD-[0-9]+|IMPORT-[0-9]+|PARITY-[0-9]+|NORM-[0-9]+|SCHEMA-[0-9]+|CONTRACT-[0-9]+|VERIFY-[0-9]+|MODIFIED-[0-9]+|CUTOVER-[0-9]+|Fase [0-9]+|Claude Code|claude code|claude\.com|claude\.ai|Anthropic|anthropic|Co-Authored-By|co-authored-by|CLAUDE\.md|\.claude\/|\.planning\/|docs\/fisqua\/|\.\.\/docs\//g;
 
 // Allowlisted false positives. Each entry MUST carry a comment
 // explaining why the substring is intentional.
@@ -196,6 +199,14 @@ describe("scrub-pattern coverage keystone", () => {
     expect(SCRUB_PATTERN.test("See .planning/debug/foo.md")).toBe(true);
     SCRUB_PATTERN.lastIndex = 0;
     expect(SCRUB_PATTERN.test("per CLAUDE.md")).toBe(true);
+    SCRUB_PATTERN.lastIndex = 0;
+    // Private workspace-doc path references must trip the gate (the
+    // v0.4.0 leak: a source comment citing `../docs/fisqua/...`).
+    expect(
+      SCRUB_PATTERN.test("see ../docs/fisqua/releases/0.4/audit.md"),
+    ).toBe(true);
+    SCRUB_PATTERN.lastIndex = 0;
+    expect(SCRUB_PATTERN.test("docs/fisqua/releases/0.4.0/notes.md")).toBe(true);
     SCRUB_PATTERN.lastIndex = 0;
     expect(SCRUB_PATTERN.test("Phase 33: read impersonation envelope")).toBe(
       true,

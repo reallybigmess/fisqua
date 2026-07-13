@@ -5,7 +5,7 @@
  * showing the record's repository, parent, level, and key identifiers at
  * a glance.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { useState } from "react";
@@ -254,7 +254,7 @@ export function MetadataPreview({
             <h2 className="text-lg font-semibold text-stone-700">
               {t("delete_description")}
             </h2>
-            <p className="mt-2 font-serif text-[15px] text-stone-500 max-w-[36ch] mx-auto">
+            <p className="mt-2 font-serif text-15 text-stone-500 max-w-measure mx-auto">
               {t("error_delete_confirm", { title: item.title })}
             </p>
             <div className="mt-4 flex justify-end gap-3">

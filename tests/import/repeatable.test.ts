@@ -10,25 +10,30 @@
  * pinpoints the missing/extra DELETE rather than collapsing into
  * one uninformative failure.
  *
- * @version v0.4.0
+ * @version v0.4.1
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import * as os from "node:os";
 import { NEOGRANADINA_TENANT_ID } from "../../app/lib/tenant";
 
-const OUTPUT_DIR = ".import";
-
+// Per-suite scratch dir (never the production `.import/` snapshot dir —
+// see audit item 23).
+let outputDir: string;
+async function setUpOutputDir() {
+  outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "fisqua-import-test-"));
+}
 async function cleanOutput() {
   try {
-    await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
+    await fs.rm(outputDir, { recursive: true, force: true });
   } catch {
     // ignore
   }
 }
 
 describe("generateTenantScopedClearSql -- explicit shape assertions", () => {
-  beforeEach(cleanOutput);
+  beforeEach(setUpOutputDir);
   afterEach(cleanOutput);
 
   it("emits exactly the five tenant-scoped DELETEs and no unscoped ones", async () => {
@@ -36,7 +41,7 @@ describe("generateTenantScopedClearSql -- explicit shape assertions", () => {
       "../../scripts/commands/clear"
     );
 
-    const sqlFiles = await generateTenantScopedClearSql();
+    const sqlFiles = await generateTenantScopedClearSql({ outputDir });
     expect(sqlFiles.length).toBeGreaterThan(0);
     const content = await fs.readFile(sqlFiles[0], "utf8");
 
@@ -97,7 +102,7 @@ describe("generateTenantScopedClearSql -- explicit shape assertions", () => {
       "../../scripts/commands/clear"
     );
 
-    const sqlFiles = await generateTenantScopedClearSql();
+    const sqlFiles = await generateTenantScopedClearSql({ outputDir });
     const content = await fs.readFile(sqlFiles[0], "utf8");
 
     expect(content).toContain("PRAGMA defer_foreign_keys = true");
@@ -105,7 +110,7 @@ describe("generateTenantScopedClearSql -- explicit shape assertions", () => {
 });
 
 describe("generateFtsRebuild -- three FTS5 tables", () => {
-  beforeEach(cleanOutput);
+  beforeEach(setUpOutputDir);
   afterEach(cleanOutput);
 
   it("produces rebuild commands for entities_fts, places_fts, and descriptions_fts", async () => {
@@ -113,7 +118,7 @@ describe("generateFtsRebuild -- three FTS5 tables", () => {
       "../../scripts/commands/clear"
     );
 
-    const sqlFiles = await generateFtsRebuild();
+    const sqlFiles = await generateFtsRebuild(outputDir);
 
     expect(sqlFiles.length).toBeGreaterThan(0);
     const content = await fs.readFile(sqlFiles[0], "utf8");
@@ -131,7 +136,7 @@ describe("generateFtsRebuild -- three FTS5 tables", () => {
 });
 
 describe("importDescriptionEntities", () => {
-  beforeEach(cleanOutput);
+  beforeEach(setUpOutputDir);
   afterEach(cleanOutput);
 
   it("resolves both description and entity FKs via IdMaps", async () => {
@@ -157,7 +162,10 @@ describe("importDescriptionEntities", () => {
     const result = await importDescriptionEntities(
       fixturePath,
       descIdMap,
-      entityIdMap
+      entityIdMap,
+      undefined,
+      undefined,
+      outputDir
     );
 
     expect(result.table).toBe("description_entities");
@@ -196,7 +204,10 @@ describe("importDescriptionEntities", () => {
     const result = await importDescriptionEntities(
       fixturePath,
       descIdMap,
-      entityIdMap
+      entityIdMap,
+      undefined,
+      undefined,
+      outputDir
     );
 
     expect(result.imported).toBe(2);
@@ -207,7 +218,7 @@ describe("importDescriptionEntities", () => {
 });
 
 describe("importDescriptionPlaces", () => {
-  beforeEach(cleanOutput);
+  beforeEach(setUpOutputDir);
   afterEach(cleanOutput);
 
   it("resolves both description and place FKs via IdMaps", async () => {
@@ -229,7 +240,10 @@ describe("importDescriptionPlaces", () => {
     const result = await importDescriptionPlaces(
       fixturePath,
       descIdMap,
-      placeIdMap
+      placeIdMap,
+      undefined,
+      undefined,
+      outputDir
     );
 
     expect(result.table).toBe("description_places");

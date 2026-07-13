@@ -16,7 +16,7 @@
  * because authority work rarely produces certain attributions, and the
  * default has to match the field's epistemic stance.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 import {
   describe,
@@ -29,7 +29,7 @@ import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import * as schema from "../../app/db/schema";
-import { DEFAULT_TEST_TENANT_ID, applyMigrations, cleanDatabase } from "../helpers/db";
+import { DEFAULT_TEST_TENANT_ID, DEFAULT_TEST_FEDERATION_ID, applyMigrations, cleanDatabase } from "../helpers/db";
 
 describe("junction tables", () => {
   let db: ReturnType<typeof drizzle>;
@@ -73,7 +73,7 @@ describe("junction tables", () => {
 
     entityId = crypto.randomUUID();
     await db.insert(schema.entities).values({
-      tenantId: DEFAULT_TEST_TENANT_ID,
+      federationId: DEFAULT_TEST_FEDERATION_ID,
       id: entityId,
       entityCode: "ne-jnct01",
       displayName: "Test Entity",
@@ -85,7 +85,7 @@ describe("junction tables", () => {
 
     placeId = crypto.randomUUID();
     await db.insert(schema.places).values({
-      tenantId: DEFAULT_TEST_TENANT_ID,
+      federationId: DEFAULT_TEST_FEDERATION_ID,
       id: placeId,
       placeCode: "nl-jnct01",
       label: "Test Place",

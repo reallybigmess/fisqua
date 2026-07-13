@@ -7,7 +7,7 @@
  * the merge/split workflow labels that authority editors use to keep
  * the function and subject vocabularies tidy.
  *
- * @version v0.3.0
+ * @version v0.4.1
  */
 export default {
   // Page
@@ -100,4 +100,28 @@ export default {
   enum_redeployment_warning:
     "Los cambios en estos vocabularios requieren una actualizaci\u00f3n del c\u00f3digo y un redespliegue.",
   enum_pending_changes: "Cambios pendientes (a\u00fan no desplegados)",
+
+  // Linked-entities list overflow (first page + remainder)
+  linked_more: "{{count}} m\u00e1s",
+
+  // Shared merge/split dialog labels. Tuteo matches this namespace's
+  // register; \u00abfusionar\u00bb (not \u00abcombinar\u00bb) matches merge_into and
+  // error_merge above; \u00abtodas\u00bb agrees with the dialog's rows
+  // (entidades), unlike the entities namespace's masculine v\u00ednculos.
+  mergeTitle: "Fusionar funci\u00f3n",
+  mergeSearch: "Buscar funci\u00f3n destino...",
+  mergeReassignTitle: "Reasignar entidades",
+  mergeReassignSubtitle: "{{name}} tiene {{count}} entidades vinculadas",
+  mergeConfirm: "Confirmar fusi\u00f3n",
+  mergeCancel: "Cancelar",
+  splitTitle: "Dividir funci\u00f3n",
+  splitSubtitle:
+    "Se crear\u00e1 una nueva funci\u00f3n a partir de {{name}}. Selecciona las entidades que deben pasar a la nueva funci\u00f3n.",
+  splitConfirm: "Confirmar divisi\u00f3n",
+  splitCancel: "Cancelar",
+  splitNameLabel: "Nombre de la nueva funci\u00f3n",
+  splitNamePlaceholder: "Escribe el nombre de la nueva funci\u00f3n...",
+  loadMore: "Cargar m\u00e1s",
+  selectAll: "Seleccionar todas",
+  deselectAll: "Deseleccionar todas",
 } as const;

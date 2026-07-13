@@ -6,7 +6,7 @@
  * the kebab menu with edit and delete actions. Renders the resolved badge
  * when the thread has been closed.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 import { useTranslation } from "react-i18next";
 import type { CommentWithAuthor } from "../../lib/description-types";
@@ -102,11 +102,11 @@ export function CommentCard({
  >
  {t(ROLE_I18N_KEYS[comment.authorRole] || "roles.catalogador")}
  </span>
- <span className="font-sans text-[0.75rem] text-stone-500">
+ <span className="font-sans text-xs text-stone-500">
  {comment.authorEmail}
  </span>
  </div>
- <span className="font-sans text-[0.75rem] text-stone-400">
+ <span className="font-sans text-xs text-stone-400">
  {formatRelativeTime(comment.createdAt)}
  </span>
  </div>
@@ -124,14 +124,14 @@ export function CommentCard({
  )}
 
  {/* Comment text */}
- <p className="font-serif text-[0.9375rem] italic leading-[1.6] text-stone-700">
+ <p className="font-serif text-15 italic leading-[1.6] text-stone-700">
  {comment.text}
  </p>
 
  {/* Reply link */}
  <button
  type="button"
- className="mt-1.5 font-sans text-[0.75rem] font-semibold text-indigo hover:underline"
+ className="mt-1.5 font-sans text-xs font-semibold text-indigo hover:underline"
  onClick={() => onReply(comment.id)}
  >
  {t("responder")}

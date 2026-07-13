@@ -17,7 +17,7 @@
  * to another tenant rather than partially writing across the
  * boundary.
  *
- * @version v0.4.1
+ * @version v0.3.0
  */
 import {
   describe,
@@ -29,7 +29,7 @@ import {
 import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "../../app/db/schema";
-import { applyMigrations, cleanDatabase } from "../helpers/db";
+import { DEFAULT_TEST_TENANT_ID, applyMigrations, cleanDatabase } from "../helpers/db";
 import { createTestUser } from "../helpers/auth";
 import { loadEntries, saveEntries } from "../../app/lib/entries.server";
 import type { Entry } from "../../app/lib/boundary-types";
@@ -88,6 +88,7 @@ describe("entry persistence (loadEntries / saveEntries)", () => {
 
     await db.insert(schema.projects).values({
       id: projectId,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       name: "Test Project",
       createdBy: user.id,
       createdAt: now,
@@ -104,6 +105,7 @@ describe("entry persistence (loadEntries / saveEntries)", () => {
 
     await db.insert(schema.volumes).values({
       id: volumeId,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       projectId,
       name: "Test Volume",
       referenceCode: "co-test-vol001",

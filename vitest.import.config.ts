@@ -11,7 +11,7 @@
  * Keep this config narrow — only `tests/import/**` should be included.
  * Anything that exercises the live Worker belongs with `vitest.config.ts`.
  *
- * @version v0.3.0
+ * @version v0.4.1
  */
 
 import { defineConfig } from "vitest/config";

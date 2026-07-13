@@ -25,10 +25,11 @@
  * round-trip should use the integration scaffolding in
  * `tests/middleware/auth.test.ts` instead.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 import type { User, Tenant } from "../../app/context";
 import { DEFAULT_TEST_TENANT_ID } from "./db";
+import { NEOGRANADINA_FEDERATION_ID } from "../../app/lib/tenant";
 
 /**
  * Build a `User` value with safe defaults for tests. Override any
@@ -74,8 +75,10 @@ export function makeTenantContext(overrides: Partial<Tenant> = {}): Tenant {
     vocabularyHubEnabled: overrides.vocabularyHubEnabled ?? true,
     publishPipelineEnabled: overrides.publishPipelineEnabled ?? true,
     multiRepositoryEnabled: overrides.multiRepositoryEnabled ?? true,
+    authoritiesEnabled: overrides.authoritiesEnabled ?? true,
     quotaStorageBytes: overrides.quotaStorageBytes ?? null,
     disabledAt: overrides.disabledAt ?? null,
+    federationId: overrides.federationId ?? NEOGRANADINA_FEDERATION_ID,
     createdAt: overrides.createdAt ?? now,
     updatedAt: overrides.updatedAt ?? now,
   };

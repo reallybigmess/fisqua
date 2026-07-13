@@ -25,7 +25,7 @@
  * `preferís`, `sabés`, `tenés`, `sos`; siempre `quieres`, `prefieres`,
  * `sabes`, `tienes`, `eres`.
  *
- * @version v0.4.0
+ * @version v0.4.3
  */
 export default {
   // Página
@@ -229,6 +229,14 @@ export default {
   role_sent_to: "Recibido en",
   role_published: "Publicado",
   role_venue: "Lugar",
+  // Etiquetas de grupo del selector de rol (optgroups; las claves reflejan ENTITY_ROLE_GROUPS)
+  role_group_production: "Producción y menciones",
+  role_group_correspondence: "Correspondencia",
+  role_group_notarial: "Actuación notarial",
+  role_group_legal: "Procedimientos judiciales",
+  role_group_family: "Familia y herencia",
+  role_group_transactions: "Transacciones",
+  role_group_visual: "Materiales visuales",
   honorific_label: "Honorífico",
   function_label: "Función",
   name_as_recorded_label: "Nombre registrado",
@@ -339,4 +347,4 @@ export default {
   next_page: "Página siguiente",
 } as const;
 
-/* @version v0.4.0 */
+/* @version v0.4.3 */

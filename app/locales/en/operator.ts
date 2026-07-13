@@ -39,6 +39,7 @@ export default {
       vocabulary_hub: "Vocabulary hub",
       publish_pipeline: "Publish pipeline",
       multi_repository: "Multi-repository",
+      authorities: "Authorities",
     },
     view_link: "View",
     empty_state: "No tenants yet.",

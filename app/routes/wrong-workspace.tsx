@@ -28,7 +28,7 @@
  *
  * Visual: sketch 001 Variant A.
  *
- * @version v0.4.1
+ * @version v0.4.2
  */
 
 import { useTranslation } from "react-i18next";
@@ -118,7 +118,7 @@ export default function WrongWorkspacePage({ loaderData }: Route.ComponentProps)
           </p>
 
           {/* Display title */}
-          <h1 className="mb-4 font-display text-[2.5rem] font-semibold leading-[1.15] tracking-[-0.01em] text-indigo">
+          <h1 className="mb-4 font-display text-5xl font-semibold leading-[1.15] tracking-[-0.01em] text-indigo">
             {t("wrong_workspace.title")}
           </h1>
 
@@ -151,7 +151,7 @@ export default function WrongWorkspacePage({ loaderData }: Route.ComponentProps)
           {hasHome ? (
             <a
               href={ctaUrl!}
-              className="mt-2 inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-indigo px-5 font-sans text-[0.9375rem] font-semibold text-parchment hover:bg-indigo-deep focus:outline-none focus:ring-2 focus:ring-indigo focus:ring-offset-2"
+              className="mt-2 inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-indigo px-5 font-sans text-15 font-semibold text-parchment hover:bg-indigo-deep focus:outline-none focus:ring-2 focus:ring-indigo focus:ring-offset-2"
             >
               <span>{t("wrong_workspace.cta", { name: homeTenant!.name })}</span>
               <ArrowRight className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
@@ -159,7 +159,7 @@ export default function WrongWorkspacePage({ loaderData }: Route.ComponentProps)
           ) : (
             <a
               href="/login"
-              className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-indigo px-5 font-sans text-[0.9375rem] font-semibold text-parchment hover:bg-indigo-deep focus:outline-none focus:ring-2 focus:ring-indigo focus:ring-offset-2"
+              className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-indigo px-5 font-sans text-15 font-semibold text-parchment hover:bg-indigo-deep focus:outline-none focus:ring-2 focus:ring-indigo focus:ring-offset-2"
             >
               <span>{t("wrong_workspace.cta_fallback")}</span>
             </a>
@@ -170,7 +170,7 @@ export default function WrongWorkspacePage({ loaderData }: Route.ComponentProps)
             <form method="post" action="/auth/logout" className="inline">
               <button
                 type="submit"
-                className="font-sans text-[0.8125rem] text-stone-500 underline decoration-stone-400 underline-offset-[3px] hover:text-stone-700"
+                className="font-sans text-13 text-stone-500 underline decoration-stone-400 underline-offset-[3px] hover:text-stone-700"
               >
                 {t("wrong_workspace.sign_out_link")}
               </button>
@@ -182,4 +182,4 @@ export default function WrongWorkspacePage({ loaderData }: Route.ComponentProps)
   );
 }
 
-// @version v0.4.1
+// @version v0.4.2

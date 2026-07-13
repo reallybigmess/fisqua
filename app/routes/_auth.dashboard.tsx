@@ -1,15 +1,15 @@
 /**
  * Role-Dependent Dashboard
  *
- * This route is the legacy dashboard kept for deep links and
- * admin-first users. It determines the caller's primary project role
- * — with lead taking
+ * The app's default landing surface: the apex redirect, both
+ * post-login flows, and the top-bar brand link all point here. The
+ * loader determines the caller's primary project role — lead taking
  * precedence over reviewer, reviewer over cataloguer — and renders
  * the appropriate dashboard view (`LeadDashboard`, `ReviewerDashboard`,
  * or `CataloguerDashboard`) with the role-specific payload the loader
  * assembled from volumes, entries, and assignments.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { useState } from "react";
@@ -40,6 +40,19 @@ import {
 } from "../components/dashboard/reviewer-description-tab";
 import type { VolumeCardData } from "../components/dashboard/volume-status-card";
 import type { Route } from "./+types/_auth.dashboard";
+import { drizzle } from "drizzle-orm/d1";
+import { eq, sql, inArray, isNull, and, desc } from "drizzle-orm";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
+import {
+  volumes,
+  projectMembers,
+  users,
+  projects,
+  entries,
+  comments,
+  resegmentationFlags,
+} from "../db/schema";
+import { highestProjectRole } from "../lib/workflow";
 
 export function meta() {
   return [
@@ -52,31 +65,16 @@ type DashboardRole = "lead" | "reviewer" | "cataloguer" | "none";
 
 /**
  * Determine user's primary role across all projects.
- * Priority: lead > reviewer > cataloguer ()
+ * Precedence comes from the shared helper; "none" is dashboard-local
+ * (it selects the empty-state view rather than a permission level).
  */
-function determinePrimaryRole(
+export function determinePrimaryRole(
   memberships: { role: string }[]
 ): DashboardRole {
-  const roles = new Set(memberships.map((m) => m.role));
-  if (roles.has("lead")) return "lead";
-  if (roles.has("reviewer")) return "reviewer";
-  if (roles.has("cataloguer")) return "cataloguer";
-  return "none";
+  return highestProjectRole(memberships) ?? "none";
 }
 
 export async function loader({ context }: Route.LoaderArgs) {
-  const { drizzle } = await import("drizzle-orm/d1");
-  const { eq, sql, inArray, isNull, and, desc } = await import("drizzle-orm");
-  const {
-    volumes,
-    projectMembers,
-    users,
-    projects,
-    entries,
-    comments,
-    resegmentationFlags,
-  } = await import("../db/schema");
-
   const user = context.get(userContext);
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -99,8 +97,8 @@ export async function loader({ context }: Route.LoaderArgs) {
 
   if (primaryRole === "cataloguer") {
     const [segData, descData] = await Promise.all([
-      loadCataloguerData(db, user.id, { eq, sql, inArray, volumes, entries, projects }),
-      loadCataloguerDescriptionData(db, user.id, { eq, inArray, desc, volumes, entries, comments }),
+      loadCataloguerData(db, user.id),
+      loadCataloguerDescriptionData(db, user.id),
     ]);
     return {
       user,
@@ -111,8 +109,8 @@ export async function loader({ context }: Route.LoaderArgs) {
 
   if (primaryRole === "reviewer") {
     const [segData, descData] = await Promise.all([
-      loadReviewerData(db, user.id, { eq, sql, inArray, and, volumes, entries, projects, users }),
-      loadReviewerDescriptionData(db, user.id, { eq, inArray, and, volumes, entries, users, resegmentationFlags }),
+      loadReviewerData(db, user.id),
+      loadReviewerDescriptionData(db, user.id),
     ]);
     return {
       user,
@@ -125,20 +123,17 @@ export async function loader({ context }: Route.LoaderArgs) {
   return {
     user,
     primaryRole,
-    data: await loadLeadData(db, user.id, user.isAdmin, { eq, sql, inArray, isNull, and, desc, volumes, projectMembers, users, projects, entries, resegmentationFlags }),
+    data: await loadLeadData(db, user.id, user.isAdmin),
   };
 }
 
 /**
  * Load cataloguer dashboard data: all assigned volumes grouped by urgency.
  */
-async function loadCataloguerData(
-  db: any,
-  userId: string,
-  deps: any
+export async function loadCataloguerData(
+  db: DrizzleD1Database<any>,
+  userId: string
 ): Promise<{ groups: CataloguerGroups }> {
-  const { eq, sql, inArray, volumes, entries, projects } = deps;
-
   // All volumes assigned to this cataloguer with entry counts
   const assignedVolumes = await db
     .select({
@@ -243,13 +238,10 @@ async function loadCataloguerData(
 /**
  * Load reviewer dashboard data: all volumes assigned for review grouped by status.
  */
-async function loadReviewerData(
-  db: any,
-  userId: string,
-  deps: any
+export async function loadReviewerData(
+  db: DrizzleD1Database<any>,
+  userId: string
 ): Promise<{ groups: ReviewerGroups }> {
-  const { eq, sql, inArray, volumes, entries, projects, users } = deps;
-
   const reviewVolumes = await db
     .select({
       id: volumes.id,
@@ -361,14 +353,11 @@ async function loadReviewerData(
 /**
  * Load lead dashboard data: cross-project overview with attention items.
  */
-async function loadLeadData(
-  db: any,
+export async function loadLeadData(
+  db: DrizzleD1Database<any>,
   userId: string,
-  isAdmin: boolean,
-  deps: any
+  isAdmin: boolean
 ): Promise<{ projects: ProjectOverview[]; attentionItems: AttentionItem[] }> {
-  const { eq, sql, inArray, isNull, and, volumes, projectMembers, users, projects, entries, resegmentationFlags } = deps;
-
   // Get projects where user is lead (or all projects if admin)
   let leadProjectIds: string[];
 
@@ -663,13 +652,10 @@ async function loadLeadData(
 /**
  * Load description entries assigned to this cataloguer for the description tab.
  */
-async function loadCataloguerDescriptionData(
-  db: any,
-  userId: string,
-  deps: any
+export async function loadCataloguerDescriptionData(
+  db: DrizzleD1Database<any>,
+  userId: string
 ): Promise<DescriptionEntryCardData[]> {
-  const { eq, inArray, desc, volumes, entries, comments } = deps;
-
   const assignedEntries = await db
     .select({
       id: entries.id,
@@ -726,9 +712,10 @@ async function loadCataloguerDescriptionData(
       .orderBy(desc(comments.createdAt))
       .all();
 
-    // Keep only the latest per entry
+    // Keep only the latest per entry. entryId is non-null at runtime
+    // (the query filters by inArray on it) but nullable in the schema.
     for (const c of latestComments) {
-      if (!feedbackMap.has(c.entryId)) {
+      if (c.entryId != null && !feedbackMap.has(c.entryId)) {
         feedbackMap.set(c.entryId, c.text);
       }
     }
@@ -760,13 +747,10 @@ async function loadCataloguerDescriptionData(
  * Load description data for reviewer's description tab:
  * reseg flags and entries assigned for description review.
  */
-async function loadReviewerDescriptionData(
-  db: any,
-  userId: string,
-  deps: any
+export async function loadReviewerDescriptionData(
+  db: DrizzleD1Database<any>,
+  userId: string
 ): Promise<ReviewerDescriptionData> {
-  const { eq, inArray, and, volumes, entries, resegmentationFlags } = deps;
-
   // Entries assigned to this reviewer for description review
   const reviewEntries = await db
     .select({
@@ -1040,7 +1024,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
       <div className="flex items-center justify-between">
-        <h1 className="font-display text-[2.5rem] font-semibold text-stone-900">
+        <h1 className="font-display text-5xl font-semibold text-stone-900">
           {primaryRole === "cataloguer"
             ? t("heading.my_work")
             : primaryRole === "reviewer"
@@ -1074,10 +1058,10 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
                   <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                 </svg>
               </div>
-              <h3 className="mt-4 font-serif text-[18px] font-semibold text-indigo">{t("empty.no_projects_title")}</h3>
+              <h3 className="mt-4 font-serif text-lg font-semibold text-indigo">{t("empty.no_projects_title")}</h3>
               {user.isAdmin ? (
                 <>
-                  <p className="mt-2 font-serif text-[15px] text-stone-500 max-w-[36ch] mx-auto">
+                  <p className="mt-2 font-serif text-15 text-stone-500 max-w-measure mx-auto">
                     {t("empty.no_projects_admin_body")}
                   </p>
                   <div className="mt-5 flex items-center justify-center gap-3">
@@ -1096,7 +1080,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
                   </div>
                 </>
               ) : (
-                <p className="mt-2 font-serif text-[15px] text-stone-500 max-w-[36ch] mx-auto">
+                <p className="mt-2 font-serif text-15 text-stone-500 max-w-measure mx-auto">
                   {t("empty.no_projects_member_body")}
                 </p>
               )}

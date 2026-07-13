@@ -6,7 +6,7 @@
  * resegmentation flag badge when one is pending. Expands on click to
  * reveal the inline comment thread and any region-pin chips.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
@@ -463,13 +463,13 @@ export function OutlineEntry({
  onClick={handleClick}
  >
  {/* Sequence badge */}
- <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-stone-200 font-sans text-[10px] font-medium text-stone-600">
+ <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-stone-200 font-sans text-10 font-medium text-stone-600">
  {entry.position + 1}
  </span>
 
  {/* Page range */}
  <span
- className={`shrink-0 font-sans text-[10px] ${
+ className={`shrink-0 font-sans text-10 ${
  isReviewerModified ? "text-madder" : "text-stone-500"
  }`}
  >
@@ -479,7 +479,7 @@ export function OutlineEntry({
  {/* Type badge -- moved before the title */}
  {entry.type && typeLabel && (
  <span
- className={`shrink-0 rounded-full px-1.5 py-0.5 font-sans text-[10px] font-medium ${
+ className={`shrink-0 rounded-full px-1.5 py-0.5 font-sans text-10 font-medium ${
  isReviewerModified
  ? "bg-madder-tint text-madder-deep"
  : TYPE_BADGE_COLORS[entry.type]
@@ -492,7 +492,7 @@ export function OutlineEntry({
  {/* Subtype pill -- only when type='item' AND subtype is non-null. */}
  {entry.type === "item" && entry.subtype && (
  <span
- className="shrink-0 rounded-full border border-stone-200 bg-stone-100 px-1.5 py-0.5 font-sans text-[10px] font-medium text-stone-700"
+ className="shrink-0 rounded-full border border-stone-200 bg-stone-100 px-1.5 py-0.5 font-sans text-10 font-medium text-stone-700"
  title={entry.subtype}
  >
  {entry.subtype}
@@ -512,7 +512,7 @@ export function OutlineEntry({
 
  {/* reseg pill */}
  {showResegPill && (
- <span className="ml-2 inline-block rounded bg-violet-600 px-1.5 py-0.5 font-sans text-[9px] font-bold uppercase tracking-wide text-white">
+ <span className="ml-2 inline-block rounded bg-violet-600 px-1.5 py-0.5 font-sans text-10 font-bold uppercase tracking-wide text-white">
  {t("resegmentation:proposed", {
  defaultValue: "Resegmentación propuesta",
  })}
@@ -731,7 +731,7 @@ export function OutlineEntry({
  >
  &#8594;
  </button>
- <span className="ml-1 font-sans text-[10px] text-stone-400">
+ <span className="ml-1 font-sans text-10 text-stone-400">
  {t("viewer:outline.level_label")}
  </span>
  </div>
@@ -746,7 +746,7 @@ export function OutlineEntry({
  <button
  type="button"
  onClick={onOpenCommentPrompt}
- className="inline-flex items-center gap-1.5 font-sans text-[11px] font-bold text-indigo hover:underline"
+ className="inline-flex items-center gap-1.5 font-sans text-11 font-bold text-indigo hover:underline"
  >
  <svg
  xmlns="http://www.w3.org/2000/svg"

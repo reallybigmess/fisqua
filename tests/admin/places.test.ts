@@ -15,7 +15,7 @@
  * two also keeps the future geocoding fields (`lat`, `lon`,
  * `geonamesId`) off the entities shape.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 import {
   describe,
@@ -28,7 +28,7 @@ import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
 import * as schema from "../../app/db/schema";
-import { DEFAULT_TEST_TENANT_ID, applyMigrations, cleanDatabase } from "../helpers/db";
+import { DEFAULT_TEST_TENANT_ID, DEFAULT_TEST_FEDERATION_ID, applyMigrations, cleanDatabase } from "../helpers/db";
 import { createTestPlace } from "../helpers/places";
 import { createTestUser } from "../helpers/auth";
 import { createTestRepository } from "../helpers/repositories";
@@ -48,7 +48,7 @@ describe("place CRUD", () => {
     const id = crypto.randomUUID();
 
     await db.insert(schema.places).values({
-      tenantId: DEFAULT_TEST_TENANT_ID,
+      federationId: DEFAULT_TEST_FEDERATION_ID,
       id,
       placeCode: "nl-abc123",
       label: "Santa Fe de Bogota",
@@ -436,7 +436,7 @@ describe("place merge and split", () => {
     // Split: create new place (copy fields, clear LOD), move the link
     const newPlaceId = crypto.randomUUID();
     await db.insert(schema.places).values({
-      tenantId: DEFAULT_TEST_TENANT_ID,
+      federationId: DEFAULT_TEST_FEDERATION_ID,
       id: newPlaceId,
       placeCode: "nl-splt01",
       label: "Split Place",

@@ -47,6 +47,7 @@ describe("member management and invite flow", () => {
     const projectId = crypto.randomUUID();
     await db.insert(schema.projects).values({
       id: projectId,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       name: "Test Project",
       createdBy: leadId,
       createdAt: now,

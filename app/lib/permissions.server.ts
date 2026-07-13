@@ -32,7 +32,7 @@
  * to paint UI (disable a button when the user cannot write) and on the
  * server to gate writes before they hit D1.
  *
- * @version v0.3.0
+ * @version v0.4.1
  */
 
 // --- TEMPLATE INFRASTRUCTURE --- do not modify when extending
@@ -123,6 +123,11 @@ export async function requireProjectRole(
 
 // --- EXTENSION POINT --- domain-specific access control below
 
+// Role-precedence semantics live in the pure, client-safe state
+// machine module (app/lib/workflow.ts); re-exported here so server
+// code keeps one import site for role decisions.
+export { WORKFLOW_ROLE_PRECEDENCE, highestProjectRole } from "./workflow";
+
 /**
  * Determine the access level for a user on a specific volume.
  * Pure function — no DB query, takes pre-fetched volume data.
@@ -165,7 +170,10 @@ export function requireVolumeAccess(
 
 /**
  * Load an entry, find its volume and project, check membership.
- * Returns { entry, volume, member } or throws 403/404.
+ * Returns { entry, volume, memberships } or throws 403/404. All
+ * membership rows come back (a user can hold several roles on one
+ * project); use highestProjectRole to derive an effective role —
+ * never a single row, whose position carries no meaning.
  */
 export async function requireEntryAccess(
   db: DrizzleD1Database<any>,
@@ -175,7 +183,7 @@ export async function requireEntryAccess(
 ): Promise<{
   entry: typeof entries.$inferSelect;
   volume: typeof volumes.$inferSelect;
-  member: typeof projectMembers.$inferSelect;
+  memberships: (typeof projectMembers.$inferSelect)[];
 }> {
   const [entry] = await db
     .select()
@@ -207,7 +215,7 @@ export async function requireEntryAccess(
     isAdmin
   );
 
-  return { entry, volume, member: memberships[0] };
+  return { entry, volume, memberships };
 }
 
 /**
@@ -222,19 +230,20 @@ export async function requireDescriptionAccess(
 ): Promise<{
   entry: typeof entries.$inferSelect;
   volume: typeof volumes.$inferSelect;
-  member: typeof projectMembers.$inferSelect;
+  memberships: (typeof projectMembers.$inferSelect)[];
 }> {
-  const { entry, volume, member } = await requireEntryAccess(
+  const { entry, volume, memberships } = await requireEntryAccess(
     db,
     entryId,
     userId,
     isAdmin
   );
 
-  if (isAdmin) return { entry, volume, member };
+  if (isAdmin) return { entry, volume, memberships };
 
-  const role = member?.role;
-  const isLead = role === "lead";
+  // Any lead membership counts — a lead holding a second role must not
+  // lose lead access to whichever row the DB returns first.
+  const isLead = memberships.some((m) => m.role === "lead");
   const isAssignedDescriber = entry.assignedDescriber === userId;
   const isAssignedReviewer = entry.assignedDescriptionReviewer === userId;
 
@@ -245,7 +254,7 @@ export async function requireDescriptionAccess(
     );
   }
 
-  return { entry, volume, member };
+  return { entry, volume, memberships };
 }
 
 /**

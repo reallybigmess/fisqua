@@ -7,7 +7,7 @@
  * runs through the parent form action so the audit log stays owned by the
  * server.
  *
- * @version v0.3.0
+ * @version v0.4.1
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -30,10 +30,24 @@ interface MergeDialogProps {
   onClose: () => void;
   sourceId: string;
   sourceName: string;
-  entityType: "entity" | "place";
+  /**
+   * Informational only — the component body does NOT branch on this
+   * value. It records which authority surface the dialog is serving
+   * (entities, places, or vocabulary terms) for the consumer's own
+   * clarity; all label resolution flows through `i18nNamespace`.
+   */
+  entityType: "entity" | "place" | "vocabulary";
   links: DescriptionLink[];
   searchEndpoint: string;
   i18nNamespace: string;
+  /**
+   * The source record's `updatedAt`. When provided (entities/places), it
+   * rides the merge submission as a hidden `_updatedAt` so the server can
+   * reject a merge staged against a record modified since the form loaded
+   * — the same optimistic-lock guard the update intent uses. Omitted for
+   * vocabulary terms, whose action does not carry the guard.
+   */
+  recordUpdatedAt?: number | string;
 }
 
 export function MergeDialog({
@@ -45,6 +59,7 @@ export function MergeDialog({
   links,
   searchEndpoint,
   i18nNamespace,
+  recordUpdatedAt,
 }: MergeDialogProps) {
   const { t } = useTranslation(i18nNamespace);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -227,6 +242,13 @@ export function MergeDialog({
               {showConfirmOnStep1 && (
                 <Form method="post">
                   <input type="hidden" name="_action" value="merge" />
+                  {recordUpdatedAt != null && (
+                    <input
+                      type="hidden"
+                      name="_updatedAt"
+                      value={String(recordUpdatedAt)}
+                    />
+                  )}
                   <input
                     type="hidden"
                     name="targetId"
@@ -287,6 +309,13 @@ export function MergeDialog({
               </button>
               <Form method="post">
                 <input type="hidden" name="_action" value="merge" />
+                {recordUpdatedAt != null && (
+                  <input
+                    type="hidden"
+                    name="_updatedAt"
+                    value={String(recordUpdatedAt)}
+                  />
+                )}
                 <input
                   type="hidden"
                   name="targetId"

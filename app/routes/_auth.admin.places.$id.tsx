@@ -1,68 +1,88 @@
 /**
- * Places Admin — Edit
+ * Places Admin — record detail (two-column redesign)
  *
- * This page is the edit form for a single place authority record. It edits every
- * Linked Places Format field -- label, display name, place type,
- * coordinates with precision, historical gobernación / partido /
- * region, modern country and admin-level divisions, name variants --
- * plus external authority links (Wikidata, Getty TGN, World Historical
- * Gazetteer, HGIS). Autosaves to `drafts` on a debounce; a conflict
- * banner appears if another user has an open draft on the same place.
+ * The authority record page for a single place (spec §5 redesign,
+ * mockup 2026-07-11): a ~420px left column carries the record itself —
+ * Identity, Geography (the shipped map preview ALWAYS on screen; the
+ * shipped coordinate editor plus a geocoding search in edit mode), and
+ * Linked open data (TGN/HGIS/WHG as external links) — while the right
+ * column serves the linked descriptions as a WORKLIST: server-side
+ * search over title/reference code (`?dq=`), role pills with real
+ * GROUP BY counts (spec §11's per-record role filter), sort by
+ * date/title/reference code, and honest offset pagination with a
+ * user-selectable page size (25/50/100). The loader ships ONE filtered
+ * page, never the whole link set. Narrow screens stack record-first.
  *
- * The linked-descriptions panel lists every archival record that
- * references this place and lets curators unlink or retarget links in
- * place. The merge workflow mirrors the entity merge: pick a canonical
- * target, confirm direction, server moves every `description_places`
- * row onto the canonical place.
+ * Edit swaps the left column to the existing inline form in place —
+ * same fields, same autosave drafts, same optimistic lock, the
+ * coordinate editor replacing the preview — without remounting the
+ * right column. Merge and split live on their own workbench routes;
+ * this action handles update/delete/autosave and the description-link
+ * intents.
  *
- * Tenant attribution comes from request context, populated by
- * `authMiddleware`. Every read/update/delete of `places` is filtered
- * by `tenant.id`; the split-action insert attributes the new place
- * to `tenant.id` rather than a single-tenant hard-code.
+ * Authority scope is the federation (migrations 0045-0048). Every
+ * read/update/delete of `places` is filtered by `tenant.federationId`.
+ * The description-search subquery stays `tenant.id`-scoped
+ * (descriptions remain tenant-scoped).
  *
- * @version v0.4.0
+ * @version v0.4.3
  */
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import {
-  Form,
-  useLoaderData,
-  useActionData,
-  useFetcher,
-  redirect,
-  Link,
-} from "react-router";
+import { useState, useEffect } from "react";
+import { Form, useActionData, redirect } from "react-router";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, Pencil, Trash2, Merge, Split, Plus } from "lucide-react";
+import { MapPin } from "lucide-react";
 import { tenantContext, userContext } from "../context";
-import { CollapsibleSection } from "~/components/admin/collapsible-section";
-import { MergeDialog } from "~/components/admin/merge-dialog";
-import { SplitDialog } from "~/components/admin/split-dialog";
+import { requireCapability } from "../lib/tenant";
+import { StatusBand } from "~/components/admin/status-band";
+import {
+  PlaceMapPreview,
+  CoordinateMapEditor,
+  NoCoordinatesWell,
+} from "~/components/admin/place-maps";
 import { NameVariantInput } from "~/components/forms/name-variant-input";
-import { LodLinkField } from "~/components/forms/lod-link-field";
-import { CoordinateInput } from "~/components/forms/coordinate-input";
+import { LodLinkField, SERVICE_URLS } from "~/components/forms/lod-link-field";
 import { DraftsBanner } from "~/components/admin/drafts-banner";
-import { LinkedDescriptionsCard } from "~/components/admin/linked-descriptions-card";
-import { LinkDescriptionDialog } from "~/components/admin/link-description-dialog";
-import { EditDescriptionLinkDialog } from "~/components/admin/edit-description-link-dialog";
-import { PLACE_TYPES, PLACE_ROLES } from "~/lib/validation/enums";
+import {
+  AdminBreadcrumb,
+  AuthorityDetailHeader,
+} from "~/components/admin/authority-detail-header";
+import { ConflictDialog } from "~/components/admin/conflict-dialog";
+import { useAutosaveDraft } from "~/components/admin/use-autosave-draft";
+import { FieldDisplay } from "~/components/admin/field-display";
+import { EditField } from "~/components/admin/edit-field";
+import {
+  TwoColumnDetail,
+  DetailCard,
+  VariantChips,
+  NotesCards,
+  NotesEditFields,
+} from "~/components/admin/authority-detail-layout";
+import { LinkedDescriptionsWorklist } from "~/components/admin/linked-descriptions-worklist";
+import { GeocodeSearch } from "~/components/admin/geocode-search";
+import { parseWorklistParams } from "~/lib/worklist-params";
+import {
+  PLACE_TYPES,
+  PLACE_ROLES,
+  COORDINATE_PRECISIONS,
+} from "~/lib/validation/enums";
 import type { Route } from "./+types/_auth.admin.places.$id";
 
 // ---------------------------------------------------------------------------
 // Loader
 // ---------------------------------------------------------------------------
 
-export async function loader({ params, context }: Route.LoaderArgs) {
+export async function loader({ params, request, context }: Route.LoaderArgs) {
   const { requireAdmin } = await import("~/lib/permissions.server");
   const { drizzle } = await import("drizzle-orm/d1");
-  const { and, eq, sql } = await import("drizzle-orm");
-  const { places, descriptionPlaces, descriptions } = await import(
-    "~/db/schema"
-  );
+  const { and, eq, or, like, asc, sql } = await import("drizzle-orm");
+  const { places, descriptionPlaces, descriptions, repositories } =
+    await import("~/db/schema");
 
   const user = context.get(userContext);
   requireAdmin(user);
   const tenant = context.get(tenantContext);
+  requireCapability(tenant, "authorities");
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -71,50 +91,169 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   const place = await db
     .select()
     .from(places)
-    .where(and(eq(places.tenantId, tenant.id), eq(places.id, id)))
+    .where(and(eq(places.federationId, tenant.federationId), eq(places.id, id)))
     .get();
 
   if (!place) {
     throw new Response("Not found", { status: 404 });
   }
 
-  // Count linked descriptions via junction table
+  // Click-to-unfold context card (spec §5 worklist enhancement):
+  // fetched on demand by junction id, never eager-loaded for the page.
+  // Ownership is enforced in the helper — a junction id belonging to
+  // another place resolves to null (an IDOR surface), so the response
+  // carries `card: null` rather than a foreign record's scope text.
+  const cardUrl = new URL(request.url);
+  const cardJunctionId = cardUrl.searchParams.get("card");
+  if (cardJunctionId) {
+    // "Show all" (`&full=1`): the full OCR transcript for that junction,
+    // fetched only on that click — never eager-shipped (transcripts reach
+    // 89 KB). Ownership is enforced in the helper identically to the card.
+    if (cardUrl.searchParams.get("full") === "1") {
+      const { loadJunctionOcrText } = await import(
+        "~/lib/authority-linked-context.server"
+      );
+      const ocrFull = await loadJunctionOcrText(db, {
+        recordType: "place",
+        ownerId: id,
+        junctionId: cardJunctionId,
+      });
+      return Response.json({ ocrFull });
+    }
+    const { loadLinkedDescriptionCard } = await import(
+      "~/lib/authority-linked-context.server"
+    );
+    const card = await loadLinkedDescriptionCard(db, {
+      recordType: "place",
+      ownerId: id,
+      displayName: place.displayName,
+      junctionId: cardJunctionId,
+    });
+    return Response.json({ card });
+  }
+
+  // Unfiltered link total — drives the header count and the
+  // delete-blocked affordance.
   const [{ count: descLinkCount }] = await db
     .select({ count: sql<number>`count(*)` })
     .from(descriptionPlaces)
     .where(eq(descriptionPlaces.placeId, id))
     .all();
 
-  // Fetch first 5 description titles if any exist
-  let descExamples: { title: string }[] = [];
-  if (descLinkCount > 0) {
-    descExamples = await db
-      .select({ title: descriptions.title })
-      .from(descriptionPlaces)
-      .innerJoin(
-        descriptions,
-        eq(descriptionPlaces.descriptionId, descriptions.id)
-      )
-      .where(eq(descriptionPlaces.placeId, id))
-      .limit(5)
-      .all();
+  // ---- Linked-descriptions worklist (spec §5 redesign; round-3 filters) ----
+  const sp = new URL(request.url).searchParams;
+  const wl = parseWorklistParams(sp);
+  // An off-vocabulary role param is ignored, never an empty worklist.
+  const role =
+    wl.role && (PLACE_ROLES as readonly string[]).includes(wl.role)
+      ? (wl.role as (typeof PLACE_ROLES)[number])
+      : null;
+
+  // The record's OWN repository ids (unfiltered): drives repo-pill
+  // progressive disclosure (shown only when the links span > 1 repo) and
+  // validates the `?repo=` param — an id that is not one of the record's
+  // is ignored, never an empty worklist. Keyed by id, not label.
+  const recordRepoRows = await db
+    .select({ repositoryId: descriptions.repositoryId })
+    .from(descriptionPlaces)
+    .innerJoin(
+      descriptions,
+      eq(descriptionPlaces.descriptionId, descriptions.id),
+    )
+    .where(eq(descriptionPlaces.placeId, id))
+    .groupBy(descriptions.repositoryId)
+    .all();
+  const recordRepoIds = new Set(recordRepoRows.map((r) => r.repositoryId));
+  const repoSpan = recordRepoIds.size;
+  const repo = wl.repo && recordRepoIds.has(wl.repo) ? wl.repo : null;
+
+  // Search predicate over the joined description (title + reference
+  // code), shared by the counts, the filtered total, and the page.
+  const dqConditions: any[] = [eq(descriptionPlaces.placeId, id)];
+  if (wl.dq) {
+    const pat = `%${wl.dq}%`;
+    dqConditions.push(
+      or(
+        like(descriptions.title, pat),
+        like(descriptions.referenceCode, pat),
+      )!,
+    );
   }
 
-  // Fetch merge target label if merged
-  let mergeTarget: { id: string; label: string } | null = null;
-  if (place.mergedInto) {
-    const target = await db
-      .select({ id: places.id, label: places.label })
-      .from(places)
-      .where(
-        and(eq(places.tenantId, tenant.id), eq(places.id, place.mergedInto))
-      )
-      .get();
-    if (target) mergeTarget = target;
-  }
+  // Cross-honest counts (spec §3): role counts are computed under the
+  // search AND the repository filter; repo counts under the search AND
+  // the role filter — each pill shows what selecting it would yield given
+  // everything else already chosen.
+  const roleCountConditions = repo
+    ? [...dqConditions, eq(descriptions.repositoryId, repo)]
+    : dqConditions;
+  const roleCounts = await db
+    .select({
+      role: descriptionPlaces.role,
+      count: sql<number>`count(*)`,
+    })
+    .from(descriptionPlaces)
+    .innerJoin(
+      descriptions,
+      eq(descriptionPlaces.descriptionId, descriptions.id),
+    )
+    .where(and(...roleCountConditions))
+    .groupBy(descriptionPlaces.role)
+    .orderBy(sql`count(*) DESC`)
+    .all();
+  const allCount = roleCounts.reduce((sum, rc) => sum + rc.count, 0);
 
-  // Fetch all description links for display and merge/split dialogs
-  const descLinks = await db
+  // Repo pills: GROUP BY repository id, labelled short_name → code → name
+  // (COALESCE(NULLIF(...)) — the AHRB repository's short_name is empty at
+  // 13k-link scale), under the search + role filter.
+  const repoCountConditions = role
+    ? [...dqConditions, eq(descriptionPlaces.role, role)]
+    : dqConditions;
+  const repoCounts = await db
+    .select({
+      repositoryId: descriptions.repositoryId,
+      label: sql<string>`COALESCE(NULLIF(${repositories.shortName}, ''), NULLIF(${repositories.code}, ''), ${repositories.name})`,
+      count: sql<number>`count(*)`,
+    })
+    .from(descriptionPlaces)
+    .innerJoin(
+      descriptions,
+      eq(descriptionPlaces.descriptionId, descriptions.id),
+    )
+    .innerJoin(repositories, eq(descriptions.repositoryId, repositories.id))
+    .where(and(...repoCountConditions))
+    .groupBy(descriptions.repositoryId)
+    .orderBy(sql`count(*) DESC`)
+    .all();
+
+  // Honest filtered total (search + role + repo) from a real COUNT.
+  const filterConditions: any[] = [...dqConditions];
+  if (role) filterConditions.push(eq(descriptionPlaces.role, role));
+  if (repo) filterConditions.push(eq(descriptions.repositoryId, repo));
+  const [{ count: total }] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(descriptionPlaces)
+    .innerJoin(
+      descriptions,
+      eq(descriptionPlaces.descriptionId, descriptions.id),
+    )
+    .where(and(...filterConditions))
+    .all();
+
+  // One page, sorted server-side. Date sorts newest-first with undated
+  // rows last; title and reference code sort ascending. The junction id
+  // breaks ties so paging is stable.
+  const orderBy =
+    wl.sort === "title"
+      ? [asc(descriptions.title), asc(descriptionPlaces.id)]
+      : wl.sort === "code"
+        ? [asc(descriptions.referenceCode), asc(descriptionPlaces.id)]
+        : [
+            sql`${descriptions.dateStart} IS NULL`,
+            sql`${descriptions.dateStart} DESC`,
+            asc(descriptionPlaces.id),
+          ];
+  const links = await db
     .select({
       id: descriptionPlaces.id,
       descriptionId: descriptionPlaces.descriptionId,
@@ -123,25 +262,141 @@ export async function loader({ params, context }: Route.LoaderArgs) {
       descriptionTitle: descriptions.title,
       referenceCode: descriptions.referenceCode,
       descriptionLevel: descriptions.descriptionLevel,
+      dateExpression: descriptions.dateExpression,
+      dateStart: descriptions.dateStart,
+      dateEnd: descriptions.dateEnd,
+      creatorDisplay: descriptions.creatorDisplay,
+      placeDisplay: descriptions.placeDisplay,
     })
     .from(descriptionPlaces)
     .innerJoin(
       descriptions,
-      eq(descriptionPlaces.descriptionId, descriptions.id)
+      eq(descriptionPlaces.descriptionId, descriptions.id),
     )
-    .where(eq(descriptionPlaces.placeId, id))
+    .where(and(...filterConditions))
+    .orderBy(...orderBy)
+    .limit(wl.size)
+    .offset((wl.page - 1) * wl.size)
     .all();
 
-  // Check for another user's draft on this record
+  // Fetch merge target label if merged
+  let mergeTarget: { id: string; label: string } | null = null;
+  let mergeBand: { date: string; user: string } | null = null;
+  if (place.mergedInto) {
+    const target = await db
+      .select({ id: places.id, label: places.label })
+      .from(places)
+      .where(
+        and(eq(places.federationId, tenant.federationId), eq(places.id, place.mergedInto))
+      )
+      .get();
+    if (target) mergeTarget = target;
+    const { getOperationActor, bandDate } = await import(
+      "~/lib/authority-workbench.server"
+    );
+    const actor = await getOperationActor(db, {
+      recordType: "place",
+      operation: "merge",
+      sourceId: params.id,
+      targetId: place.mergedInto,
+    });
+    if (actor) {
+      mergeBand = { date: bandDate(actor.createdAt), user: actor.userName ?? "" };
+    }
+  }
+
+  // Informational split bands (spec §4 — both halves stay live and
+  // editable). The merged band takes precedence when the record was
+  // later merged away.
+  let splitIntoBand: {
+    date: string;
+    user: string;
+    targets: { id: string; label: string }[];
+  } | null = null;
+  let splitFromBand: {
+    date: string;
+    user: string;
+    parent: { id: string; label: string };
+  } | null = null;
+  if (!place.mergedInto) {
+    const { getOperationActor, getSplitTargets, bandDate } = await import(
+      "~/lib/authority-workbench.server"
+    );
+    const { inArray } = await import("drizzle-orm");
+
+    const targetIds = await getSplitTargets(db, "place", id);
+    if (targetIds.length > 0) {
+      const targets = await db
+        .select({ id: places.id, label: places.label })
+        .from(places)
+        .where(
+          and(
+            eq(places.federationId, tenant.federationId),
+            inArray(places.id, targetIds),
+          ),
+        )
+        .all();
+      const actor = await getOperationActor(db, {
+        recordType: "place",
+        operation: "split",
+        sourceId: id,
+      });
+      if (targets.length > 0 && actor) {
+        splitIntoBand = {
+          date: bandDate(actor.createdAt),
+          user: actor.userName ?? "",
+          targets,
+        };
+      }
+    }
+
+    const fromActor = await getOperationActor(db, {
+      recordType: "place",
+      operation: "split",
+      targetId: id,
+    });
+    if (fromActor) {
+      const parent = await db
+        .select({ id: places.id, label: places.label })
+        .from(places)
+        .where(
+          and(
+            eq(places.federationId, tenant.federationId),
+            eq(places.id, fromActor.sourceId),
+          ),
+        )
+        .get();
+      if (parent) {
+        splitFromBand = {
+          date: bandDate(fromActor.createdAt),
+          user: fromActor.userName ?? "",
+          parent,
+        };
+      }
+    }
+  }
+
+  // Check for another user's draft on this record. Places are
+  // federation-shared (migrations 0045-0048), so the conflicting editor may
+  // legitimately live in ANY tenant of the session tenant's federation —
+  // resolve their name through the tenants join scoped to the
+  // federation, not to the session tenant alone (a same-federation
+  // cross-tenant editor must not render as "Unknown").
   const { getConflictDraft } = await import("~/lib/drafts.server");
-  const { users } = await import("~/db/schema");
-  const conflictRaw = await getConflictDraft(db, id, "place", user.id);
+  const { users, tenants } = await import("~/db/schema");
+  const conflictRaw = await getConflictDraft(db, tenant.id, id, "place", user.id);
   let conflictDraft: { userName: string; updatedAt: number } | null = null;
   if (conflictRaw) {
     const conflictUser = await db
       .select({ name: users.name })
       .from(users)
-      .where(eq(users.id, conflictRaw.userId))
+      .innerJoin(tenants, eq(users.tenantId, tenants.id))
+      .where(
+        and(
+          eq(tenants.federationId, tenant.federationId),
+          eq(users.id, conflictRaw.userId)
+        )
+      )
       .get();
     conflictDraft = {
       userName: conflictUser?.name || "Unknown",
@@ -152,12 +407,33 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   return {
     place,
     descLinkCount,
-    descExamples,
     mergeTarget,
-    descLinks,
+    mergeBand,
+    splitIntoBand,
+    splitFromBand,
+    links,
+    total,
+    allCount,
+    roleCounts,
+    repoCounts,
+    repoSpan,
+    wl: {
+      dq: wl.dq,
+      role,
+      repo,
+      sort: wl.sort,
+      size: wl.size,
+      page: wl.page,
+    },
     conflictDraft,
+    maptilerKey: env.MAPTILER_KEY,
   };
 }
+
+// The loader has two shapes: the full page payload and the on-demand
+// card JSON (`?card=`). The card branch returns a bare Response, so the
+// page-render helpers narrow to the object form.
+type PlaceLoaderData = Exclude<Awaited<ReturnType<typeof loader>>, Response>;
 
 // ---------------------------------------------------------------------------
 // Action
@@ -169,15 +445,25 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   const { eq, and, sql } = await import("drizzle-orm");
   const { places, descriptionPlaces } = await import("~/db/schema");
   const { updatePlaceSchema } = await import("~/lib/validation/place");
-  const { generateUniqueCode } = await import("~/lib/codes.server");
+  const { logAuthorityOperation } = await import(
+    "~/lib/authority-operations.server"
+  );
 
   const user = context.get(userContext);
   requireAdmin(user);
   const tenant = context.get(tenantContext);
+  requireCapability(tenant, "authorities");
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
   const id = params.id;
+
+  // Authority mutation gate helper (ruled 2026-07-08). Applied per-intent
+  // below to the canonical place mutations (update, delete, merge, split)
+  // — each requires a federation steward. NOT applied to autosave
+  // (drafts), the read search, or the description-link intents, which
+  // stay open to member-tenant admins (READ + member-side junction ops).
+  const { requireFederationSteward } = await import("~/lib/federation.server");
 
   const formData = await request.formData();
   const intent = formData.get("_action") as string;
@@ -187,12 +473,13 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const { saveDraft } = await import("~/lib/drafts.server");
       const snapshot = formData.get("snapshot") as string;
       if (snapshot) {
-        await saveDraft(db, id, "place", user.id, snapshot);
+        await saveDraft(db, tenant.id, id, "place", user.id, snapshot);
       }
       return { ok: true as const, autosaved: true };
     }
 
     case "update": {
+      await requireFederationSteward(db, user, tenant);
       const label = (formData.get("label") as string)?.trim() || undefined;
       const displayName =
         (formData.get("displayName") as string)?.trim() || undefined;
@@ -204,14 +491,34 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       // historical_gobernacion, historical_partido, historical_region,
       // country_code, admin_level_1, admin_level_2 all dropped in 0036
       // (0% populated in production audit).
+      // Empty-string → null coercion at the form boundary: the select's
+      // unset option submits "", which is NOT a vocabulary member, so it
+      // must reach the z.enum as null (not recorded).
       const coordinatePrecision =
-        (formData.get("coordinatePrecision") as string)?.trim() || undefined;
+        (formData.get("coordinatePrecision") as string)?.trim() || null;
+      const notes = (formData.get("notes") as string)?.trim() || null;
+      const internalNotes =
+        (formData.get("internalNotes") as string)?.trim() || null;
 
-      // Parse coordinates
+      // Parse coordinates. A present-but-unparseable value is a
+      // FIELD ERROR, never a silent null — dropping a mistyped
+      // coordinate would masquerade as a deliberate removal. Range
+      // bounds (lat -90..90, lng -180..180) are enforced by the Zod
+      // schema below.
       const latStr = (formData.get("latitude") as string)?.trim();
       const lngStr = (formData.get("longitude") as string)?.trim();
       const latitude = latStr ? parseFloat(latStr) : null;
       const longitude = lngStr ? parseFloat(lngStr) : null;
+      const coordErrors: Record<string, string[]> = {};
+      if (latStr && isNaN(latitude!)) {
+        coordErrors.latitude = ["Latitude must be a number"];
+      }
+      if (lngStr && isNaN(longitude!)) {
+        coordErrors.longitude = ["Longitude must be a number"];
+      }
+      if (Object.keys(coordErrors).length > 0) {
+        return { ok: false as const, errors: coordErrors };
+      }
 
       // LOD identifiers
       const tgnId =
@@ -229,12 +536,14 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         placeType: placeType || null,
         nameVariants: nameVariantsRaw || "[]",
         parentId: parentId || null,
-        latitude: latitude != null && !isNaN(latitude) ? latitude : null,
-        longitude: longitude != null && !isNaN(longitude) ? longitude : null,
+        latitude,
+        longitude,
         coordinatePrecision,
         tgnId: tgnId || null,
         hgisId: hgisId || null,
         whgId: whgId || null,
+        notes,
+        internalNotes,
       });
 
       if (!parsed.success) {
@@ -248,7 +557,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const original = await db
         .select()
         .from(places)
-        .where(and(eq(places.tenantId, tenant.id), eq(places.id, id)))
+        .where(and(eq(places.federationId, tenant.federationId), eq(places.id, id)))
         .get();
 
       // Optimistic lock check
@@ -268,15 +577,18 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       }
 
       const { id: _id, ...updates } = parsed.data;
-      const updatedFields = {
+      const updatedFields: Record<string, unknown> = {
         ...updates,
         nameVariants: updates.nameVariants ?? "[]",
         parentId: updates.parentId ?? null,
         latitude: updates.latitude ?? null,
         longitude: updates.longitude ?? null,
+        coordinatePrecision: updates.coordinatePrecision ?? null,
         tgnId: updates.tgnId ?? null,
         hgisId: updates.hgisId ?? null,
         whgId: updates.whgId ?? null,
+        notes: updates.notes ?? null,
+        internalNotes: updates.internalNotes ?? null,
       };
 
       try {
@@ -286,7 +598,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
             ...updatedFields,
             updatedAt: Date.now(),
           })
-          .where(and(eq(places.tenantId, tenant.id), eq(places.id, id)));
+          .where(and(eq(places.federationId, tenant.federationId), eq(places.id, id)));
       } catch (e) {
         if (String(e).includes("UNIQUE constraint failed")) {
           return { ok: false as const, error: "duplicate_code" };
@@ -312,12 +624,13 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 
       // Delete draft after successful save
       const { deleteDraft } = await import("~/lib/drafts.server");
-      await deleteDraft(db, id, "place");
+      await deleteDraft(db, tenant.id, id, "place");
 
       return { ok: true as const, message: "updated" };
     }
 
     case "delete": {
+      await requireFederationSteward(db, user, tenant);
       // Server-side cascade check
       const [{ count }] = await db
         .select({ count: sql<number>`count(*)` })
@@ -329,152 +642,33 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         return { ok: false as const, error: "has_descriptions" };
       }
 
-      await db
-        .delete(places)
-        .where(and(eq(places.tenantId, tenant.id), eq(places.id, id)));
+      // Snapshot the full row before deletion so the ledger row makes the
+      // hard delete reconstructible (delete is unrecorded and
+      // unrecoverable today). Delete + ledger insert share one batch.
+      const original = await db
+        .select()
+        .from(places)
+        .where(and(eq(places.federationId, tenant.federationId), eq(places.id, id)))
+        .get();
+      if (!original) {
+        return redirect("/admin/places");
+      }
+
+      await db.batch([
+        db
+          .delete(places)
+          .where(and(eq(places.federationId, tenant.federationId), eq(places.id, id))),
+        logAuthorityOperation(db, {
+          federationId: tenant.federationId,
+          recordType: "place",
+          operation: "delete",
+          sourceId: id,
+          targetId: null,
+          userId: user.id,
+          detail: { snapshot: original },
+        }),
+      ] as any);
       return redirect("/admin/places");
-    }
-
-    case "merge": {
-      const targetId = formData.get("targetId") as string;
-      let linkIds: string[] = [];
-      try {
-        linkIds = JSON.parse((formData.get("linkIds") as string) || "[]");
-      } catch {
-        linkIds = [];
-      }
-
-      // Validate target exists
-      const target = await db
-        .select()
-        .from(places)
-        .where(and(eq(places.tenantId, tenant.id), eq(places.id, targetId)))
-        .get();
-      if (!target) {
-        return { ok: false as const, error: "generic" };
-      }
-
-      // Reassign each selected link
-      for (const linkId of linkIds) {
-        const link = await db
-          .select()
-          .from(descriptionPlaces)
-          .where(eq(descriptionPlaces.id, linkId))
-          .get();
-        if (!link) continue;
-
-        // Check for unique constraint conflict (dp_unique_idx)
-        const conflict = await db
-          .select({ id: descriptionPlaces.id })
-          .from(descriptionPlaces)
-          .where(
-            and(
-              eq(descriptionPlaces.descriptionId, link.descriptionId),
-              eq(descriptionPlaces.placeId, targetId),
-              eq(descriptionPlaces.role, link.role)
-            )
-          )
-          .get();
-
-        if (conflict) {
-          // Delete redundant link
-          await db
-            .delete(descriptionPlaces)
-            .where(eq(descriptionPlaces.id, linkId));
-        } else {
-          // Reassign to target
-          await db
-            .update(descriptionPlaces)
-            .set({ placeId: targetId })
-            .where(eq(descriptionPlaces.id, linkId));
-        }
-      }
-
-      // Fetch source for audit notes
-      const source = await db
-        .select()
-        .from(places)
-        .where(and(eq(places.tenantId, tenant.id), eq(places.id, id)))
-        .get();
-
-      const now = new Date().toISOString().slice(0, 10);
-
-      // Set mergedInto on source + audit note (places don't have a sources field -- use label-level note approach)
-      // Actually, the places schema doesn't have a sources field. We'll track merge in the existing fields.
-      // For now, set mergedInto which is the canonical tracking field.
-      await db
-        .update(places)
-        .set({
-          mergedInto: targetId,
-          updatedAt: Date.now(),
-        })
-        .where(and(eq(places.tenantId, tenant.id), eq(places.id, id)));
-
-      return redirect(`/admin/places/${targetId}`);
-    }
-
-    case "split": {
-      let linkIds: string[] = [];
-      try {
-        linkIds = JSON.parse((formData.get("linkIds") as string) || "[]");
-      } catch {
-        linkIds = [];
-      }
-
-      // Fetch source place
-      const source = await db
-        .select()
-        .from(places)
-        .where(and(eq(places.tenantId, tenant.id), eq(places.id, id)))
-        .get();
-      if (!source) {
-        return { ok: false as const, error: "generic" };
-      }
-
-      // Generate fresh code
-      const newCode = await generateUniqueCode(
-        db,
-        "nl",
-        places,
-        places.placeCode
-      );
-
-      const newId = crypto.randomUUID();
-      const timestamp = Date.now();
-
-      // Create new place (copy all fields from source)
-      await db.insert(places).values({
-        tenantId: tenant.id,
-        id: newId,
-        placeCode: newCode,
-        label: source.label,
-        displayName: source.displayName,
-        placeType: source.placeType,
-        nameVariants: source.nameVariants,
-        parentId: source.parentId,
-        latitude: source.latitude,
-        longitude: source.longitude,
-        coordinatePrecision: source.coordinatePrecision,
-        // historical_*, country_code, admin_level_*, wikidata_id all
-        // dropped on places in 0036.
-        needsGeocoding: source.needsGeocoding,
-        mergedInto: null,
-        tgnId: null,
-        hgisId: null,
-        whgId: null,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      });
-
-      // Move selected links to new place
-      for (const linkId of linkIds) {
-        await db
-          .update(descriptionPlaces)
-          .set({ placeId: newId })
-          .where(eq(descriptionPlaces.id, linkId));
-      }
-
-      return redirect(`/admin/places/${newId}`);
     }
 
     case "search_descriptions": {
@@ -573,26 +767,29 @@ export default function PlaceDetailPage({
   const {
     place,
     descLinkCount,
-    descExamples,
     mergeTarget,
-    descLinks,
+    mergeBand,
+    splitIntoBand,
+    splitFromBand,
+    links,
+    total,
+    allCount,
+    roleCounts,
+    repoCounts,
+    repoSpan,
+    wl,
     conflictDraft,
+    maptilerKey,
   } = loaderData;
   const actionData = useActionData<typeof action>();
   const { t } = useTranslation("places");
+  const { t: ta } = useTranslation("authorities");
 
   const [isEditing, setIsEditing] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [showMergeDialog, setShowMergeDialog] = useState(false);
-  const [showSplitDialog, setShowSplitDialog] = useState(false);
   const [showConflictDialog, setShowConflictDialog] = useState(false);
-  const [showLinkDialog, setShowLinkDialog] = useState(false);
-  const [editingLinkId, setEditingLinkId] = useState<string | null>(null);
-  const [confirmRemoveLinkId, setConfirmRemoveLinkId] = useState<string | null>(null);
-  const unlinkFetcher = useFetcher();
 
   const isMerged = !!place.mergedInto;
-
   const hasDescriptions = descLinkCount > 0;
 
   // Show conflict dialog when server returns optimistic lock error
@@ -602,44 +799,8 @@ export default function PlaceDetailPage({
     }
   }, [actionData]);
 
-  // Autosave via useFetcher
-  const draftFetcher = useFetcher();
-  const formRef = useRef<HTMLFormElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
-
-  const triggerAutosave = useCallback(() => {
-    if (!formRef.current || !isEditing) return;
-    const fd = new FormData(formRef.current);
-    const snapshot: Record<string, string> = {};
-    for (const [key, value] of fd.entries()) {
-      if (!key.startsWith("_")) {
-        snapshot[key] = value as string;
-      }
-    }
-    draftFetcher.submit(
-      { _action: "autosave", snapshot: JSON.stringify(snapshot) },
-      { method: "post" }
-    );
-  }, [isEditing, draftFetcher]);
-
-  const handleFormChange = useCallback(() => {
-    if (!isEditing) return;
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(triggerAutosave, 2000);
-  }, [isEditing, triggerAutosave]);
-
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [isEditing]);
-
-  const draftStatus =
-    draftFetcher.state === "submitting"
-      ? "saving"
-      : draftFetcher.data && "autosaved" in draftFetcher.data
-        ? "saved"
-        : null;
+  // Autosave via shared debounced-draft hook
+  const { formRef, handleFormChange, draftStatus } = useAutosaveDraft(isEditing);
 
   const globalError =
     actionData && "error" in actionData ? actionData.error : undefined;
@@ -650,79 +811,44 @@ export default function PlaceDetailPage({
       ? actionData.message
       : undefined;
 
+  // Parse name variants for display
+  let nameVariantsList: string[] = [];
+  try {
+    nameVariantsList = JSON.parse(place.nameVariants || "[]");
+  } catch {
+    nameVariantsList = [];
+  }
+
   return (
-    <div className="mx-auto max-w-3xl px-8 py-12">
+    <div className="mx-auto max-w-7xl px-8 py-12">
       {/* Breadcrumb */}
-      <nav aria-label="Breadcrumb" className="mb-4 text-sm">
-        <ol className="flex items-center gap-1">
-          <li>
-            <Link
-              to="/admin/places"
-              className="text-stone-500 hover:text-stone-700"
-            >
-              {t("title")}
-            </Link>
-          </li>
-          <li>
-            <ChevronRight className="h-4 w-4 text-stone-400" />
-          </li>
-          <li className="text-stone-700">{place.label}</li>
-        </ol>
-      </nav>
+      <AdminBreadcrumb
+        rootTo="/admin/places"
+        rootLabel={t("title")}
+        current={place.label}
+      />
 
-      {/* Title row */}
-      <div className="flex items-center justify-between">
-        <h1 className="font-serif text-2xl font-semibold text-stone-700">
-          {place.label}
-        </h1>
-
-        {!isEditing && !isMerged ? (
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setShowMergeDialog(true)}
-              className="inline-flex items-center gap-2 rounded-md border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50"
-            >
-              <Merge className="h-4 w-4" />
-              {t("mergeButton")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowSplitDialog(true)}
-              className="inline-flex items-center gap-2 rounded-md border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50"
-            >
-              <Split className="h-4 w-4" />
-              {t("splitButton")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsEditing(true)}
-              className="inline-flex items-center gap-2 rounded-md border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50"
-            >
-              <Pencil className="h-4 w-4" />
-              {t("editButton")}
-            </button>
-            <button
-              type="button"
-              onClick={() => !hasDescriptions && setShowDeleteModal(true)}
-              disabled={hasDescriptions}
-              aria-disabled={hasDescriptions ? "true" : undefined}
-              title={
-                hasDescriptions
-                  ? t("deleteBlocked", { count: descLinkCount })
-                  : undefined
-              }
-              className={
-                hasDescriptions
-                  ? "inline-flex cursor-not-allowed items-center gap-2 rounded-lg bg-madder px-4 py-2 text-sm font-semibold text-parchment opacity-50"
-                  : "inline-flex items-center gap-2 rounded-lg bg-madder px-4 py-2 text-sm font-semibold text-parchment hover:bg-madder-deep"
-              }
-            >
-              <Trash2 className="h-4 w-4" />
-              {t("deleteButton")}
-            </button>
-          </div>
-        ) : null}
+      {/* Title row: name + code + type, and the record actions */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <AuthorityDetailHeader
+            title={place.label}
+            isEditing={isEditing}
+            isMerged={isMerged}
+            hasDescriptions={hasDescriptions}
+            descLinkCount={descLinkCount}
+            mergeTo={`/admin/places/${place.id}/merge`}
+            splitTo={`/admin/places/${place.id}/split`}
+            onEdit={() => setIsEditing(true)}
+            onDelete={() => setShowDeleteModal(true)}
+            t={t}
+          />
+          <p className="mt-0.5 font-mono text-12 text-stone-500">
+            {[place.placeCode, place.placeType ? t(place.placeType) : null]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+        </div>
       </div>
 
       {/* Draft conflict banner */}
@@ -745,19 +871,55 @@ export default function PlaceDetailPage({
         </p>
       )}
 
-      {/* Merge banner */}
+      {/* Superseded status band (ledger-derived) */}
       {place.mergedInto && mergeTarget && (
-        <div className="mt-4 rounded-lg border border-saffron bg-saffron-tint px-4 py-3 text-sm text-saffron-deep">
-          <p>
-            {t("mergedBanner", { target: mergeTarget.label })}
-            {" "}
-            <Link
-              to={`/admin/places/${mergeTarget.id}`}
-              className="font-semibold text-indigo-deep hover:underline"
-            >
-              {t("mergedBannerLink")}
-            </Link>
-          </p>
+        <div className="mt-4 overflow-hidden rounded-md">
+          <StatusBand
+            variant="merged"
+            date={mergeBand?.date ?? ""}
+            user={mergeBand?.user || ta("bandUnknownUser")}
+            survivor={{
+              id: mergeTarget.id,
+              name: mergeTarget.label,
+              href: `/admin/places/${mergeTarget.id}`,
+            }}
+            ledgerHref={`/admin/places/${place.id}/history`}
+            t={ta}
+          />
+        </div>
+      )}
+
+      {/* Informational split bands — the record stays live and editable */}
+      {splitIntoBand && (
+        <div className="mt-4 overflow-hidden rounded-md">
+          <StatusBand
+            variant="split"
+            date={splitIntoBand.date}
+            user={splitIntoBand.user || ta("bandUnknownUser")}
+            records={splitIntoBand.targets.map((r) => ({
+              id: r.id,
+              name: r.label,
+              href: `/admin/places/${r.id}`,
+            }))}
+            ledgerHref={`/admin/places/${place.id}/history`}
+            t={ta}
+          />
+        </div>
+      )}
+      {splitFromBand && (
+        <div className="mt-4 overflow-hidden rounded-md">
+          <StatusBand
+            variant="splitFrom"
+            date={splitFromBand.date}
+            user={splitFromBand.user || ta("bandUnknownUser")}
+            parent={{
+              id: splitFromBand.parent.id,
+              name: splitFromBand.parent.label,
+              href: `/admin/places/${splitFromBand.parent.id}`,
+            }}
+            ledgerHref={`/admin/places/${place.id}/history`}
+            t={ta}
+          />
         </div>
       )}
 
@@ -779,118 +941,63 @@ export default function PlaceDetailPage({
         </div>
       )}
 
-      {/* Linked descriptions section */}
-      <div className="mt-6">
-        <div className="flex items-center justify-between">
-          <h2 className="font-sans text-sm font-semibold uppercase tracking-wide text-stone-500">
-            {t("linked_descriptions")}
-          </h2>
-          <button
-            type="button"
-            onClick={() => setShowLinkDialog(true)}
-            className="inline-flex items-center gap-1 text-sm font-semibold text-indigo-deep hover:text-indigo"
-          >
-            <Plus className="h-4 w-4" />
-            {t("add_description_link")}
-          </button>
-        </div>
-        {descLinks.length === 0 ? (
-          <p className="mt-3 text-sm text-stone-400">
-            {t("no_linked_descriptions")}
-          </p>
-        ) : (
-          <div className="mt-3 space-y-2">
-            {descLinks.map((link) => (
-              <div key={link.id}>
-                {confirmRemoveLinkId === link.id ? (
-                  <div className="flex items-center gap-3 rounded-md border border-madder bg-madder-tint px-4 py-3 text-sm">
-                    <span className="text-stone-700">{t("remove_link_confirm")}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        unlinkFetcher.submit(
-                          { _action: "unlink_description", linkId: link.id },
-                          { method: "post" }
-                        );
-                        setConfirmRemoveLinkId(null);
-                      }}
-                      className="font-semibold text-madder hover:underline"
-                    >
-                      {t("remove_link")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmRemoveLinkId(null)}
-                      className="text-stone-500 hover:text-stone-700"
-                    >
-                      {t("mergeCancel")}
-                    </button>
-                  </div>
-                ) : (
-                  <LinkedDescriptionsCard
-                    linkId={link.id}
-                    descriptionId={link.descriptionId}
-                    descriptionTitle={link.descriptionTitle}
-                    referenceCode={link.referenceCode}
-                    descriptionLevel={link.descriptionLevel}
-                    role={link.role}
-                    roleNote={link.roleNote}
-                    onEdit={(id) => setEditingLinkId(id)}
-                    onRemove={(id) => setConfirmRemoveLinkId(id)}
-                    t={t}
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Link description dialog */}
-      <LinkDescriptionDialog
-        isOpen={showLinkDialog}
-        onClose={() => setShowLinkDialog(false)}
-        roles={PLACE_ROLES}
-        entityOrPlaceId={place.id}
-        recordType="place"
-        t={t}
-      />
-
-      {/* Edit description link dialog */}
-      {editingLinkId && (() => {
-        const editLink = descLinks.find((l) => l.id === editingLinkId);
-        if (!editLink) return null;
-        return (
-          <EditDescriptionLinkDialog
-            isOpen={true}
-            onClose={() => setEditingLinkId(null)}
-            linkId={editingLinkId}
-            currentValues={{
-              role: editLink.role,
-              roleNote: editLink.roleNote,
-            }}
+      {/* Two columns: the record on the left (always visible), the
+          linked-descriptions worklist on the right. Toggling edit swaps
+          only the left column's content — the worklist keeps its
+          position in the tree and never remounts. */}
+      <TwoColumnDetail
+        left={
+          isEditing ? (
+            <div className="rounded-lg border border-stone-200 bg-white p-4">
+              <EditMode
+                place={place}
+                nameVariantsList={nameVariantsList}
+                errors={errors}
+                maptilerKey={maptilerKey}
+                t={t}
+                onDiscard={() => setIsEditing(false)}
+                formRef={formRef}
+                onFormChange={handleFormChange}
+              />
+            </div>
+          ) : (
+            <ViewCards
+              place={place}
+              nameVariantsList={nameVariantsList}
+              maptilerKey={maptilerKey}
+              isMerged={isMerged}
+              onSetCoords={() => setIsEditing(true)}
+              t={t}
+            />
+          )
+        }
+        right={
+          <LinkedDescriptionsWorklist
+            links={links}
+            total={total}
+            allCount={allCount}
+            recordTotal={descLinkCount}
+            roleCounts={roleCounts}
+            repoCounts={repoCounts}
+            repoSpan={repoSpan}
+            dq={wl.dq}
+            role={wl.role}
+            repo={wl.repo}
+            sort={wl.sort}
+            size={wl.size}
+            page={wl.page}
+            isMerged={isMerged}
             roles={PLACE_ROLES}
+            recordId={place.id}
+            recordType="place"
             showEntityFields={false}
+            roleLabel={(r) => t(`role_${r}`)}
+            placeRoleLabel={(r) => t(`role_${r}`)}
             t={t}
+            ta={ta}
           />
-        );
-      })()}
-
-      {/* Detail card */}
-      <div className="mt-6 rounded-lg border border-stone-200 bg-white p-6">
-        {isEditing ? (
-          <EditMode
-            place={place}
-            errors={errors}
-            t={t}
-            onDiscard={() => setIsEditing(false)}
-            formRef={formRef}
-            onFormChange={handleFormChange}
-          />
-        ) : (
-          <ViewMode place={place} t={t} />
-        )}
-      </div>
+        }
+      />
 
       {/* Delete confirmation modal */}
       {showDeleteModal && (
@@ -913,7 +1020,7 @@ export default function PlaceDetailPage({
             </h2>
             <p
               id="delete-modal-body"
-              className="mt-2 font-serif text-[15px] text-stone-500 max-w-[36ch] mx-auto"
+              className="mt-2 font-serif text-15 text-stone-500 max-w-measure mx-auto"
             >
               {t("deleteBody", { name: place.label })}
             </p>
@@ -939,183 +1046,171 @@ export default function PlaceDetailPage({
         </div>
       )}
 
-      {/* Merge dialog */}
-      <MergeDialog
-        isOpen={showMergeDialog}
-        onClose={() => setShowMergeDialog(false)}
-        sourceId={place.id}
-        sourceName={place.label}
-        entityType="place"
-        links={descLinks}
-        searchEndpoint="/admin/places"
-        i18nNamespace="places"
-      />
-
-      {/* Split dialog */}
-      <SplitDialog
-        isOpen={showSplitDialog}
-        onClose={() => setShowSplitDialog(false)}
-        sourceId={place.id}
-        sourceName={place.label}
-        entityType="place"
-        links={descLinks}
-        i18nNamespace="places"
-      />
-
       {/* Optimistic lock conflict dialog */}
       {showConflictDialog &&
         actionData &&
         "error" in actionData &&
         actionData.error === "conflict" && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-lg">
-              <h2 className="text-lg font-semibold text-stone-700">
-                {t("overwrite_confirm", {
-                  name: "",
-                  time:
-                    "modifiedAt" in actionData
-                      ? new Date(
-                          actionData.modifiedAt as number
-                        ).toLocaleString()
-                      : "",
-                })}
-              </h2>
-              <div className="mt-4 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowConflictDialog(false)}
-                  className="rounded-md border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50"
-                >
-                  {t("overwrite_cancel")}
-                </button>
-                <Form method="post">
-                  <input type="hidden" name="_action" value="update" />
-                  <input type="hidden" name="_force" value="true" />
-                  <input
-                    type="hidden"
-                    name="_updatedAt"
-                    value={String(place.updatedAt)}
-                  />
-                  <button
-                    type="submit"
-                    className="rounded-md bg-indigo px-4 py-2 text-sm font-semibold text-parchment hover:bg-indigo-deep"
-                  >
-                    {t("overwrite_button")}
-                  </button>
-                </Form>
-              </div>
-            </div>
-          </div>
+          <ConflictDialog
+            modifiedByName=""
+            modifiedAt={
+              "modifiedAt" in actionData
+                ? (actionData.modifiedAt as number)
+                : null
+            }
+            recordUpdatedAt={place.updatedAt}
+            onCancel={() => setShowConflictDialog(false)}
+            t={t}
+          />
         )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// View mode
+// View mode — three always-visible cards with real values
 // ---------------------------------------------------------------------------
 
-function ViewMode({
+function ViewCards({
   place,
+  nameVariantsList,
+  maptilerKey,
+  isMerged,
+  onSetCoords,
   t,
 }: {
-  place: Awaited<ReturnType<typeof loader>>["place"];
-  t: (key: string) => string;
+  place: PlaceLoaderData["place"];
+  nameVariantsList: string[];
+  maptilerKey: string;
+  isMerged: boolean;
+  onSetCoords: () => void;
+  t: (key: string, opts?: Record<string, unknown>) => string;
 }) {
-  const nameVariants: string[] = (() => {
-    try {
-      return JSON.parse(place.nameVariants || "[]");
-    } catch {
-      return [];
-    }
-  })();
-
+  const lodLinks: Array<{
+    label: string;
+    value: string | null;
+    href: ((id: string) => string) | null;
+  }> = [
+    { label: t("field.tgnId"), value: place.tgnId, href: SERVICE_URLS.tgn },
+    { label: t("field.hgisId"), value: place.hgisId, href: SERVICE_URLS.hgis },
+    { label: t("field.whgId"), value: place.whgId, href: SERVICE_URLS.whg },
+  ];
   return (
     <div>
       {/* Identity */}
-      <CollapsibleSection title={t("sectionIdentity")}>
-        <div className="space-y-3">
+      <DetailCard title={t("sectionIdentity")} dimmed={isMerged}>
+        <div className="space-y-2.5">
           <FieldDisplay label={t("field.label")} value={place.label} />
           <FieldDisplay
             label={t("field.displayName")}
             value={place.displayName}
           />
           <FieldDisplay
-            label={t("field.placeCode")}
-            value={place.placeCode}
-          />
-          <FieldDisplay
             label={t("field.placeType")}
             value={place.placeType ? t(place.placeType) : null}
           />
+          <FieldDisplay label={t("field.parentId")} value={place.parentId} />
           <div>
             <p className="text-xs text-stone-500">{t("field.nameVariants")}</p>
-            {nameVariants.length > 0 ? (
-              <div className="mt-1 flex flex-wrap gap-2">
-                {nameVariants.map((v, i) => (
-                  <span
-                    key={i}
-                    className="inline-block rounded bg-stone-100 px-2 py-1 text-xs text-stone-700"
-                  >
-                    {v}
-                  </span>
-                ))}
+            <VariantChips variants={nameVariantsList} />
+          </div>
+        </div>
+      </DetailCard>
+
+      {/* Geography — the map is ALWAYS on screen (spec §5 redesign) */}
+      <DetailCard title={t("sectionGeography")} dimmed={isMerged}>
+        {place.latitude != null && place.longitude != null ? (
+          <>
+            <PlaceMapPreview
+              lat={place.latitude}
+              lng={place.longitude}
+              maptilerKey={maptilerKey}
+            />
+            <div className="mt-3 space-y-2">
+              <div>
+                <p className="text-xs text-stone-500">
+                  {t("field.coordinates")}
+                </p>
+                <p className="font-mono text-13 nums text-stone-700">
+                  {place.latitude}, {place.longitude}
+                </p>
               </div>
-            ) : (
-              <p className="text-sm text-stone-700">{"\u2014"}</p>
-            )}
-          </div>
-          <FieldDisplay
-            label={t("field.parentId")}
-            value={place.parentId}
-          />
-        </div>
-      </CollapsibleSection>
+              <FieldDisplay
+                label={t("coordPrecisionLabel")}
+                value={precisionDisplayLabel(place.coordinatePrecision, t)}
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <NoCoordinatesWell title={t("previewNoCoords")} />
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={onSetCoords}
+                className="inline-flex items-center gap-2 rounded-md border border-stone-300 bg-white px-3 py-1.5 text-13 font-semibold text-stone-700 hover:bg-stone-50"
+              >
+                <MapPin className="h-4 w-4" strokeWidth={1.5} />
+                {t("previewSetCoords")}
+              </button>
+            </div>
+          </>
+        )}
+      </DetailCard>
 
-      {/* Historical Context section removed alongside the column
-          drops in drizzle/0036_union_schema.sql \u2014
-          historicalGobernacion, historicalPartido, historicalRegion
-          all dropped (0% populated in production audit). */}
-
-      {/* Modern Geography & LOD */}
-      <CollapsibleSection title={t("sectionGeography")}>
-        <div className="space-y-3">
-          {/* countryCode, adminLevel1, adminLevel2, wikidataId all
-              dropped on places in 0036 (0% populated). */}
-          <div>
-            <p className="text-xs text-stone-500">
-              {t("field.latitude")} / {t("field.longitude")}
-            </p>
-            <p className="text-sm text-stone-700">
-              {place.latitude != null && place.longitude != null
-                ? `${place.latitude}, ${place.longitude} (${place.coordinatePrecision || "\u2014"})`
-                : "\u2014"}
-            </p>
-          </div>
-          <FieldDisplay label={t("field.tgnId")} value={place.tgnId} />
-          <FieldDisplay label={t("field.hgisId")} value={place.hgisId} />
-          <FieldDisplay label={t("field.whgId")} value={place.whgId} />
+      {/* Linked open data */}
+      <DetailCard title={t("sectionLod")} dimmed={isMerged}>
+        <div className="space-y-2.5">
+          {lodLinks.map(({ label, value, href }) => (
+            <div key={label}>
+              <p className="text-xs text-stone-500">{label}</p>
+              {value ? (
+                href ? (
+                  <a
+                    href={href(value)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-13 font-semibold text-verdigris-deep hover:underline"
+                  >
+                    {value}
+                  </a>
+                ) : (
+                  <p className="font-mono text-13 text-stone-700">{value}</p>
+                )
+              ) : (
+                <p className="text-sm text-stone-700">{"—"}</p>
+              )}
+            </div>
+          ))}
         </div>
-      </CollapsibleSection>
+      </DetailCard>
+
+      {/* Notes — each card shows only when its value is non-empty. */}
+      <NotesCards
+        notes={place.notes}
+        internalNotes={place.internalNotes}
+        notesLabel={t("sectionNotes")}
+        internalNotesLabel={t("sectionInternalNotes")}
+        internalBadge={t("internalBadge")}
+      />
     </div>
   );
 }
 
-function FieldDisplay({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | number | null | undefined;
-}) {
-  return (
-    <div>
-      <p className="text-xs text-stone-500">{label}</p>
-      <p className="text-sm text-stone-700">
-        {value != null && value !== "" ? String(value) : "\u2014"}
-      </p>
-    </div>
-  );
+/** Localise a known coordinate-precision value; unknown/legacy values
+ * (rows predating the vocabulary) render verbatim. */
+function precisionDisplayLabel(
+  value: string | null,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string | null {
+  if (!value) return null;
+  const known: Record<string, string> = {
+    exact: "precisionExact",
+    approximate: "precisionApproximate",
+    centroid: "precisionCentroid",
+    uncertain: "precisionUncertain",
+  };
+  return known[value] ? t(known[value]) : value;
 }
 
 // ---------------------------------------------------------------------------
@@ -1124,37 +1219,45 @@ function FieldDisplay({
 
 function EditMode({
   place,
+  nameVariantsList,
   errors,
+  maptilerKey,
   t,
   onDiscard,
   formRef,
   onFormChange,
 }: {
-  place: Awaited<ReturnType<typeof loader>>["place"];
+  place: PlaceLoaderData["place"];
+  nameVariantsList: string[];
   errors?: Record<string, string[]> | undefined;
-  t: (key: string) => string;
+  maptilerKey: string;
+  t: (key: string, opts?: Record<string, unknown>) => string;
   onDiscard: () => void;
   formRef?: React.Ref<HTMLFormElement>;
   onFormChange?: () => void;
 }) {
-  const initialVariants: string[] = (() => {
-    try {
-      return JSON.parse(place.nameVariants || "[]");
-    } catch {
-      return [];
-    }
-  })();
-
-  const [nameVariants, setNameVariants] = useState<string[]>(initialVariants);
+  const [nameVariants, setNameVariants] = useState<string[]>(nameVariantsList);
   const [latitude, setLatitude] = useState<number | null>(place.latitude);
   const [longitude, setLongitude] = useState<number | null>(place.longitude);
-  const [precision, setPrecision] = useState(
-    place.coordinatePrecision || "approximate"
-  );
+  const [precision, setPrecision] = useState(place.coordinatePrecision || "");
   const [tgnId, setTgnId] = useState(place.tgnId || "");
   const [hgisId, setHgisId] = useState(place.hgisId || "");
   const [whgId, setWhgId] = useState(place.whgId || "");
+  // A geocode pick flies the editor map (token-keyed so ordinary
+  // coordinate syncs — typed inputs, pin drags — never move the camera).
+  const [flyTo, setFlyTo] = useState<{
+    lat: number;
+    lng: number;
+    token: number;
+  } | null>(null);
   // wikidataId dropped on places in 0036 (0% populated).
+
+  // Any user gesture that sets coordinates (geocode pick, pin drag, map
+  // click, manual entry) defaults an UNSET precision to 'approximate' —
+  // a located place should not stay precision-less — but never overrides
+  // a value the user already chose. Only "" (unset) is bumped.
+  const defaultPrecisionOnCoordSet = () =>
+    setPrecision((prev) => (prev === "" ? "approximate" : prev));
 
   return (
     <Form method="post" ref={formRef} onChange={onFormChange}>
@@ -1189,115 +1292,240 @@ function EditMode({
       <input type="hidden" name="whgId" value={whgId} />
 
       {/* Identity */}
-      <CollapsibleSection title={t("sectionIdentity")}>
-        <div className="space-y-4">
-          <EditField
-            name="label"
-            label={t("field.label")}
-            defaultValue={place.label}
-            required
-            error={errors?.label?.[0]}
+      <h3 className="mb-2.5 text-11 font-bold uppercase tracking-[0.12em] text-stone-500">
+        {t("sectionIdentity")}
+      </h3>
+      <div className="space-y-4">
+        <EditField
+          name="label"
+          label={t("field.label")}
+          defaultValue={place.label}
+          required
+          error={errors?.label?.[0]}
+        />
+        <EditField
+          name="displayName"
+          label={t("field.displayName")}
+          defaultValue={place.displayName}
+          required
+          error={errors?.displayName?.[0]}
+        />
+        <div>
+          <label className="mb-1 block text-xs font-medium text-indigo">
+            {t("field.placeCode")}
+          </label>
+          <input
+            type="text"
+            disabled
+            value={place.placeCode || ""}
+            className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-400 disabled:cursor-not-allowed disabled:bg-stone-50"
           />
-          <EditField
-            name="displayName"
-            label={t("field.displayName")}
-            defaultValue={place.displayName}
-            required
-            error={errors?.displayName?.[0]}
+        </div>
+        <div>
+          <label
+            htmlFor="placeType"
+            className="mb-1 block text-xs font-medium text-indigo"
+          >
+            {t("field.placeType")}
+            <span className="text-madder"> *</span>
+          </label>
+          <select
+            id="placeType"
+            name="placeType"
+            defaultValue={place.placeType || ""}
+            className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
+          >
+            <option value="">--</option>
+            {PLACE_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {t(type)}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-indigo">
+            {t("field.nameVariants")}
+          </label>
+          <NameVariantInput
+            value={nameVariants}
+            onChange={setNameVariants}
+            addLabel={t("addVariant")}
           />
+        </div>
+        <EditField
+          name="parentId"
+          label={t("field.parentId")}
+          defaultValue={place.parentId || ""}
+          error={errors?.parentId?.[0]}
+        />
+      </div>
+
+      {/* Geography — geocoding search + the shipped coordinate editor */}
+      <h3 className="mb-2.5 mt-6 text-11 font-bold uppercase tracking-[0.12em] text-stone-500">
+        {t("sectionGeography")}
+      </h3>
+      <div className="space-y-4">
+        {/* Geocoding search (Juan's ruling): pick a modern place name to
+            fly the map and set the pin — still draggable, still synced
+            with the inputs below, never auto-saved. */}
+        <GeocodeSearch
+          maptilerKey={maptilerKey}
+          onPick={(r) => {
+            const lat = Math.round(r.lat * 1e6) / 1e6;
+            const lng = Math.round(r.lng * 1e6) / 1e6;
+            setLatitude(lat);
+            setLongitude(lng);
+            defaultPrecisionOnCoordSet();
+            setFlyTo((prev) => ({
+              lat,
+              lng,
+              token: (prev?.token ?? 0) + 1,
+            }));
+            onFormChange?.();
+          }}
+          t={t}
+        />
+        {/* Coordinate editor (design surface 10): click-to-set /
+            drag-to-adjust map, mono inputs two-way synced with the
+            pin, free-text precision with suggested values. */}
+        <CoordinateMapEditor
+          lat={latitude}
+          lng={longitude}
+          onChange={(newLat, newLng) => {
+            setLatitude(newLat);
+            setLongitude(newLng);
+            defaultPrecisionOnCoordSet();
+            onFormChange?.();
+          }}
+          maptilerKey={maptilerKey}
+          flyTo={flyTo}
+          t={t}
+        />
+        <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="mb-1 block text-xs font-medium text-indigo">
-              {t("field.placeCode")}
+            <label
+              htmlFor="coord-lat"
+              className="mb-1 block text-11 font-semibold uppercase tracking-wide text-indigo"
+            >
+              {t("field.latitude")}
             </label>
             <input
+              id="coord-lat"
               type="text"
-              disabled
-              value={place.placeCode || ""}
-              className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-400 disabled:cursor-not-allowed disabled:bg-stone-50"
+              inputMode="decimal"
+              placeholder={"—"}
+              value={latitude != null ? String(latitude) : ""}
+              onChange={(e) => {
+                const v = e.target.value.trim();
+                if (v === "") return setLatitude(null);
+                const num = parseFloat(v);
+                if (!isNaN(num)) {
+                  setLatitude(num);
+                  defaultPrecisionOnCoordSet();
+                }
+              }}
+              className="w-full rounded-lg border border-stone-200 px-3 py-2 font-mono text-13 nums text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
             />
+            {errors?.latitude?.[0] && (
+              <p className="mt-1 text-11 text-madder-deep">
+                {errors.latitude[0]}
+              </p>
+            )}
           </div>
           <div>
             <label
-              htmlFor="placeType"
-              className="mb-1 block text-xs font-medium text-indigo"
+              htmlFor="coord-lng"
+              className="mb-1 block text-11 font-semibold uppercase tracking-wide text-indigo"
             >
-              {t("field.placeType")}
-              <span className="text-madder"> *</span>
+              {t("field.longitude")}
             </label>
-            <select
-              id="placeType"
-              name="placeType"
-              defaultValue={place.placeType || ""}
-              className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
-            >
-              <option value="">--</option>
-              {PLACE_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {t(type)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-indigo">
-              {t("field.nameVariants")}
-            </label>
-            <NameVariantInput
-              value={nameVariants}
-              onChange={setNameVariants}
-              addLabel={t("addVariant")}
+            <input
+              id="coord-lng"
+              type="text"
+              inputMode="decimal"
+              placeholder={"—"}
+              value={longitude != null ? String(longitude) : ""}
+              onChange={(e) => {
+                const v = e.target.value.trim();
+                if (v === "") return setLongitude(null);
+                const num = parseFloat(v);
+                if (!isNaN(num)) {
+                  setLongitude(num);
+                  defaultPrecisionOnCoordSet();
+                }
+              }}
+              className="w-full rounded-lg border border-stone-200 px-3 py-2 font-mono text-13 nums text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
             />
+            {errors?.longitude?.[0] && (
+              <p className="mt-1 text-11 text-madder-deep">
+                {errors.longitude[0]}
+              </p>
+            )}
           </div>
-          <EditField
-            name="parentId"
-            label={t("field.parentId")}
-            defaultValue={place.parentId || ""}
-            error={errors?.parentId?.[0]}
-          />
         </div>
-      </CollapsibleSection>
-
-      {/* Historical Context section removed alongside the column
-          drops in drizzle/0036_union_schema.sql —
-          historicalGobernacion, historicalPartido, historicalRegion
-          all dropped (0% populated). */}
-
-      {/* Modern Geography & LOD */}
-      <CollapsibleSection title={t("sectionGeography")}>
-        <div className="space-y-4">
-          {/* countryCode, adminLevel1, adminLevel2 dropped on places
-              in 0036 (0% populated). */}
-          <CoordinateInput
-            latitude={latitude}
-            longitude={longitude}
-            precision={precision}
-            onLatChange={setLatitude}
-            onLngChange={setLongitude}
-            onPrecisionChange={setPrecision}
-          />
-          <LodLinkField
-            label={t("field.tgnId")}
-            value={tgnId}
-            onChange={setTgnId}
-            service="tgn"
-          />
-          <LodLinkField
-            label={t("field.hgisId")}
-            value={hgisId}
-            onChange={setHgisId}
-            service="hgis"
-          />
-          <LodLinkField
-            label={t("field.whgId")}
-            value={whgId}
-            onChange={setWhgId}
-            service="whg"
-          />
-          {/* wikidataId dropped on places in 0036 (0% populated). */}
+        <div>
+          <label
+            htmlFor="coord-precision"
+            className="mb-1 block text-11 font-semibold uppercase tracking-wide text-indigo"
+          >
+            {t("coordPrecisionLabel")}
+          </label>
+          <select
+            id="coord-precision"
+            value={precision}
+            onChange={(e) => setPrecision(e.target.value)}
+            className="w-full rounded-lg border border-stone-200 px-3 py-2 font-sans text-sm text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
+          >
+            <option value="">{t("coordPrecisionUnset")}</option>
+            {COORDINATE_PRECISIONS.map((v) => (
+              <option key={v} value={v}>
+                {precisionDisplayLabel(v, t)}
+              </option>
+            ))}
+          </select>
         </div>
-      </CollapsibleSection>
+      </div>
 
-      {/* Actions */}
+      {/* Linked open data */}
+      <h3 className="mb-2.5 mt-6 text-11 font-bold uppercase tracking-[0.12em] text-stone-500">
+        {t("sectionLod")}
+      </h3>
+      <div className="space-y-4">
+        <LodLinkField
+          label={t("field.tgnId")}
+          value={tgnId}
+          onChange={setTgnId}
+          service="tgn"
+        />
+        <LodLinkField
+          label={t("field.hgisId")}
+          value={hgisId}
+          onChange={setHgisId}
+          service="hgis"
+        />
+        <LodLinkField
+          label={t("field.whgId")}
+          value={whgId}
+          onChange={setWhgId}
+          service="whg"
+        />
+        {/* wikidataId dropped on places in 0036 (0% populated). */}
+      </div>
+
+      {/* Notes */}
+      <h3 className="mb-2.5 mt-6 text-11 font-bold uppercase tracking-[0.12em] text-stone-500">
+        {t("sectionNotes")}
+      </h3>
+      <NotesEditFields
+        notes={place.notes}
+        internalNotes={place.internalNotes}
+        notesLabel={t("field.notes")}
+        internalNotesLabel={t("field.internalNotes")}
+        internalBadge={t("internalBadge")}
+      />
+
+      {/* Actions — Save/Discard + commit note at the column's end */}
       <div className="mt-6 space-y-3 border-t border-stone-200 pt-4">
         <input
           type="text"
@@ -1322,43 +1550,5 @@ function EditMode({
         </div>
       </div>
     </Form>
-  );
-}
-
-function EditField({
-  name,
-  label,
-  defaultValue,
-  required,
-  error,
-}: {
-  name: string;
-  label: string;
-  defaultValue: string;
-  required?: boolean;
-  error?: string;
-}) {
-  const errorId = error ? `${name}-error` : undefined;
-  return (
-    <div>
-      <label htmlFor={name} className="mb-1 block text-xs font-medium text-indigo">
-        {label}
-        {required && <span className="text-madder"> *</span>}
-      </label>
-      <input
-        type="text"
-        id={name}
-        name={name}
-        defaultValue={defaultValue}
-        aria-required={required ? "true" : undefined}
-        aria-describedby={errorId}
-        className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
-      />
-      {error && (
-        <p id={errorId} className="mt-1 text-xs text-madder">
-          {error}
-        </p>
-      )}
-    </div>
   );
 }

@@ -27,11 +27,17 @@
  * in `wrangler dev`; the component is mostly markup over loader
  * data, with no branching the loader doesn't test.
  *
- * @version v0.4.1
+ * @version v0.4.2
  */
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
 import { applyMigrations, cleanDatabase } from "../helpers/db";
+// Instantiate the route module graph at file load so the in-test
+// `await import()` resolves from a warm module cache. A cold route-graph
+// import inside a timed test body can exceed testTimeout when this file
+// is scheduled late against a saturated Workers-pool module runner on a
+// resource-constrained (2-core CI) runner.
+import "../../app/routes/wrong-workspace";
 
 function makeLoaderArgs(url: string, init: RequestInit = {}) {
   const request = new Request(url, init);

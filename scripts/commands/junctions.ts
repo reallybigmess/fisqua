@@ -27,7 +27,7 @@
  * `role_note` and the next column. Migration `0040_role_raw.sql` adds
  * the column to both junction tables (nullable text, no CHECK).
  *
- * @version v0.4.0
+ * @version v0.4.1
  */
 import * as fs from "node:fs/promises";
 import * as crypto from "node:crypto";
@@ -65,6 +65,9 @@ const DP_COLUMNS = [
  * English value mapped from the raw Django string (Spanish historical
  * roles map; English passes through). Unmapped values produce a soft-
  * skip with `validationMessages` pointing to scripts/lib/role-map.ts.
+ *
+ * SQL is written under `outputDir` (default `.import/`, the
+ * production CLI's unchanged root; tests pass a per-suite temp dir).
  */
 export async function importDescriptionEntities(
   inputPath: string,
@@ -72,6 +75,7 @@ export async function importDescriptionEntities(
   entityIdMap: IdMap,
   descSkippedPks: Set<number> = new Set(),
   entitySkippedPks: Set<number> = new Set(),
+  outputDir = ".import",
 ): Promise<ImportResult> {
   // Forward-compat parameters; referenced here so unused-arg lints stay quiet.
   void descSkippedPks;
@@ -160,7 +164,7 @@ export async function importDescriptionEntities(
   }
 
   const statements = generateInserts("description_entities", DE_COLUMNS, rows, 100);
-  const sqlFiles = await writeSqlFiles("description_entities", statements);
+  const sqlFiles = await writeSqlFiles("description_entities", statements, 50, outputDir);
 
   return {
     table: "description_entities",
@@ -181,6 +185,9 @@ export async function importDescriptionEntities(
  * See `importDescriptionEntities` for cascade-skip attribution and
  * dual-track role mapping notes — the same shape applies here with
  * `mapRolePlaceToCanonical` for the smaller place-roles enum.
+ *
+ * SQL is written under `outputDir` (default `.import/`, the
+ * production CLI's unchanged root; tests pass a per-suite temp dir).
  */
 export async function importDescriptionPlaces(
   inputPath: string,
@@ -188,6 +195,7 @@ export async function importDescriptionPlaces(
   placeIdMap: IdMap,
   descSkippedPks: Set<number> = new Set(),
   placeSkippedPks: Set<number> = new Set(),
+  outputDir = ".import",
 ): Promise<ImportResult> {
   // Forward-compat parameters; referenced here so unused-arg lints stay quiet.
   void descSkippedPks;
@@ -267,7 +275,7 @@ export async function importDescriptionPlaces(
   }
 
   const statements = generateInserts("description_places", DP_COLUMNS, rows, 100);
-  const sqlFiles = await writeSqlFiles("description_places", statements);
+  const sqlFiles = await writeSqlFiles("description_places", statements, 50, outputDir);
 
   return {
     table: "description_places",
@@ -279,4 +287,4 @@ export async function importDescriptionPlaces(
   };
 }
 
-// Version: v0.4.0
+// Version: v0.4.1

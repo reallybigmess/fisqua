@@ -6,7 +6,7 @@
  * flight, and surfaces the mention-picker popover when the cataloguer
  * types an `@`.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 import { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
@@ -90,7 +90,7 @@ export function CommentInput({
   return (
  <div className={isReply ? "" : "rounded-lg bg-indigo-tint p-3"}>
  <textarea
- className={`w-full resize-y rounded border border-stone-200 bg-white p-2 font-serif text-[0.9375rem] italic text-stone-700 placeholder:text-stone-400 focus:border-indigo focus:outline-none ${minHeight}`}
+ className={`w-full resize-y rounded border border-stone-200 bg-white p-2 font-serif text-15 italic text-stone-700 placeholder:text-stone-400 focus:border-indigo focus:outline-none ${minHeight}`}
  value={text}
  onChange={(e) => setText(e.target.value)}
  onKeyDown={handleKeyDown}

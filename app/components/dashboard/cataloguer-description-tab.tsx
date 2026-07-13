@@ -10,7 +10,7 @@
  * reviewed, or approved). The grouping mirrors the cataloguer dashboard
  * tab on the segmentation side so the two registers feel like siblings.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { Link } from "react-router";
@@ -128,11 +128,11 @@ function SentBackCard({ entry }: { entry: DescriptionEntryCardData }) {
               <line x1="12" y1="8" x2="12" y2="12" />
               <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
-            <span className="text-[0.8125rem] font-semibold text-indigo-deep">
+            <span className="text-13 font-semibold text-indigo-deep">
               {t("dashboard.reviewer_feedback_label")}
             </span>
           </div>
-          <p className="mt-1 font-serif text-[0.9375rem] italic text-stone-700">
+          <p className="mt-1 font-serif text-15 italic text-stone-700">
             {entry.reviewerFeedback}
           </p>
         </div>
@@ -154,10 +154,10 @@ export function CataloguerDescriptionTab({ entries }: CataloguerDescriptionTabPr
               <polyline points="14 2 14 8 20 8" />
             </svg>
           </div>
-          <h3 className="mt-4 font-serif text-[18px] font-semibold text-indigo">
+          <h3 className="mt-4 font-serif text-lg font-semibold text-indigo">
             {t("dashboard:empty.no_description_entries_title")}
           </h3>
-          <p className="mt-2 font-serif text-[15px] text-stone-500 max-w-[36ch] mx-auto">
+          <p className="mt-2 font-serif text-15 text-stone-500 max-w-measure mx-auto">
             {t("dashboard:empty.no_description_entries_body")}
           </p>
         </div>
@@ -218,7 +218,7 @@ export function CataloguerDescriptionTab({ entries }: CataloguerDescriptionTabPr
             {[...inProgressByVolume.entries()].map(([volumeId, group]) => (
               <div key={volumeId}>
                 <div className="flex items-center gap-2 text-stone-500">
-                  <span className="font-serif text-[0.9375rem] font-semibold">
+                  <span className="font-serif text-15 font-semibold">
                     {group.volumeTitle}
                   </span>
                   <span className="font-mono text-xs">{group.referenceCode}</span>

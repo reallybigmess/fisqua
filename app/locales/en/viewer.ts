@@ -27,7 +27,7 @@
  * verbatim so cataloguers see the same dialog in both editors. The
  * legacy `unsaved_confirm_leave` key stays in place.
  *
- * @version v0.4.1
+ * @version v0.4.2
  */
 export default {
   toolbar: {
@@ -135,6 +135,11 @@ export default {
     error_empty: "Comment cannot be empty.",
     error_server: "Could not save. Please try again.",
   },
+  // Banner shown when the OpenSeadragon script fails to load.
+  load_error: {
+    message: "The image viewer failed to load. Check your connection and try again.",
+    retry: "Retry",
+  },
 } as const;
 
-/* @version v0.4.1 */
+/* @version v0.4.2 */

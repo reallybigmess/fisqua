@@ -6,7 +6,7 @@
  * map in one place so every vocabularies admin surface shows the same
  * visual vocabulary.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { useTranslation } from "react-i18next";
@@ -28,7 +28,7 @@ export function VocabularyStatusBadge({ status }: VocabularyStatusBadgeProps) {
 
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2.5 py-0.5 font-sans text-[11px] font-semibold uppercase tracking-[0.02em] ${style}`}
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 font-sans text-11 font-semibold uppercase tracking-[0.02em] ${style}`}
     >
       {label}
     </span>
