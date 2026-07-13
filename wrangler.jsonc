@@ -55,7 +55,8 @@
   "vars": {
     "APP_NAME": "Fisqua",
     "SENDER_EMAIL": "noreply@zasqua.org",
-    "ALLOWED_MANIFEST_HOSTS": "manifests.zasqua.org"
+    "ALLOWED_MANIFEST_HOSTS": "manifests.zasqua.org",
+    "MAPTILER_KEY": ""
   },
   "d1_databases": [
     {
@@ -102,7 +103,8 @@
       "vars": {
         "APP_NAME": "Fisqua [Staging]",
         "SENDER_EMAIL": "noreply@zasqua.org",
-        "ALLOWED_MANIFEST_HOSTS": "manifests.zasqua.org"
+        "ALLOWED_MANIFEST_HOSTS": "manifests.zasqua.org",
+        "MAPTILER_KEY": ""
       },
       "d1_databases": [
         {
