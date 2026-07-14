@@ -48,7 +48,7 @@ export async function generateMagicLink(
   email: string,
   origin: string,
   resendApiKey: string,
-  env: { APP_NAME?: string; SENDER_EMAIL?: string } = {}
+  env: { APP_NAME?: string; SENDER_EMAIL?: string; SKIP_MAGIC_LINK_EMAIL?: boolean } = {}
 ): Promise<{ success?: boolean; error?: string }> {
   // Look up user by email
   const user = await db
@@ -78,11 +78,16 @@ export async function generateMagicLink(
   const verifyUrl = new URL("/auth/verify", origin);
   verifyUrl.searchParams.set("token", token);
 
-  // Send email
-  const appConfig = getAppConfig(env);
-  await sendMagicLinkEmail(resendApiKey, email, verifyUrl.toString(), appConfig);
-
-  return { success: true };
+  if (env.SKIP_MAGIC_LINK_EMAIL == true){
+    console.log("SKIP_MAGIC_LINK_EMAIL is true. Printing the magic link directly to the console:\n"+verifyUrl.toString())
+    return { success: true };
+  }
+  else if (env.SKIP_MAGIC_LINK_EMAIL == false){
+    // Send email
+    const appConfig = getAppConfig(env);
+    await sendMagicLinkEmail(resendApiKey, email, verifyUrl.toString(), appConfig);
+    return { success: true };
+  }
 }
 
 /**
