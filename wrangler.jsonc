@@ -57,7 +57,7 @@
     "SENDER_EMAIL": "noreply@zasqua.org",
     "ALLOWED_MANIFEST_HOSTS": "manifests.zasqua.org",
     "MAPTILER_KEY": "",
-    "SKIP_MAGIC_LINK_EMAIL": true
+    "SKIP_MAGIC_LINK_EMAIL": true	
   }
     ,
   "d1_databases": [
