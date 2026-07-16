@@ -6,7 +6,7 @@
  * segmentation status so the cataloguer can see at a glance which
  * boundaries are still provisional.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 import { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
@@ -128,7 +128,7 @@ export function BoundaryMarker({
  onPointerUp={handlePointerUp}
  >
  {/* Sequence badge */}
- <div className={`absolute left-2 top-1/2 z-30 flex -translate-y-1/2 items-center justify-center rounded-full ${styles.badge} px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm`}>
+ <div className={`absolute left-2 top-1/2 z-30 flex -translate-y-1/2 items-center justify-center rounded-full ${styles.badge} px-2 py-0.5 text-10 font-semibold text-white shadow-sm`}>
  {sequenceLabel}
  {/* Lock indicator for first entry */}
  {isFirstEntry && (

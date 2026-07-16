@@ -11,7 +11,7 @@
  * carries tenant_id = NEOGRANADINA_TENANT_ID after `wrangler d1
  * migrations apply`) was verified at migration time.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { describe, it, beforeAll, beforeEach, expect } from "vitest";
@@ -153,11 +153,11 @@ describe("tenant_id FKs", () => {
       }),
     ).rejects.toThrow();
 
-    // entities: bogus tenant rejects.
+    // entities: bogus federation rejects.
     await expect(
       db.insert(schema.entities).values({
         id: crypto.randomUUID(),
-        tenantId: bogusTenant,
+        federationId: bogusTenant,
         displayName: "Bogus Entity",
         sortName: "Entity, Bogus",
         entityType: "person",
@@ -166,11 +166,11 @@ describe("tenant_id FKs", () => {
       }),
     ).rejects.toThrow();
 
-    // places: bogus tenant rejects.
+    // places: bogus federation rejects.
     await expect(
       db.insert(schema.places).values({
         id: crypto.randomUUID(),
-        tenantId: bogusTenant,
+        federationId: bogusTenant,
         label: "Bogus Place",
         displayName: "Bogus Place",
         createdAt: now,

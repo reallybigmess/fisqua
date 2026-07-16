@@ -8,7 +8,7 @@
  * (segmented or approved) — so the cataloguer always sees first what
  * needs their hand before they scroll to anything else.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { useTranslation } from "react-i18next";
@@ -75,8 +75,8 @@ export function CataloguerDashboard({ groups }: CataloguerDashboardProps) {
               <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
             </svg>
           </div>
-          <h3 className="mt-4 font-serif text-[18px] font-semibold text-indigo">{t("empty.no_assignments_title")}</h3>
-          <p className="mt-2 font-serif text-[15px] text-stone-500 max-w-[36ch] mx-auto">
+          <h3 className="mt-4 font-serif text-lg font-semibold text-indigo">{t("empty.no_assignments_title")}</h3>
+          <p className="mt-2 font-serif text-15 text-stone-500 max-w-measure mx-auto">
             {t("empty.no_assignments_body")}
           </p>
         </div>

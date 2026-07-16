@@ -7,7 +7,7 @@
  * so the component can render anywhere an open QC flag needs to surface
  * (viewer sidebar, outline, manage page).
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 import { useTranslation } from "react-i18next";
 import { CheckCircle } from "lucide-react";
@@ -95,7 +95,7 @@ export function QcFlagCard({ flag, onResolveClick }: QcFlagCardProps) {
  >
  {statusLabel}
  </span>
- <span className="ml-auto font-sans text-[0.75rem] text-stone-400">
+ <span className="ml-auto font-sans text-xs text-stone-400">
  {formatIsoDateTime(flag.createdAt)}
  </span>
  </div>

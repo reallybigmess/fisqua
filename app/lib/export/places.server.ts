@@ -8,9 +8,8 @@
  * Seven historical-administration columns
  * (historical_gobernacion, historical_partido, historical_region,
  * country_code, admin_level_1, admin_level_2, wikidata_id) were
- * dropped from the `places` table because the production-data audit
- * (../docs/fisqua/releases/0.4/0.4.0/production-data-audit.md)
- * confirmed 0% population on each. To preserve the public-export
+ * dropped from the `places` table because the v0.4.0 production-data
+ * audit confirmed 0% population on each. To preserve the public-export
  * JSON shape (consumers may have stored snapshots), the formatter
  * still emits these fields as `null`. The `fclass` column is now
  * sourced from the new `places.fclass` column (5-value GeoNames

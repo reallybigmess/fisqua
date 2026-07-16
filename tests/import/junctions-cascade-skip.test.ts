@@ -25,23 +25,29 @@
  *     `Apoderado` are canonical Spanish-kept roles mirroring the
  *     `albacea` precedent)
  *
- * @version v0.4.0
+ * @version v0.4.1
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import * as os from "node:os";
 
-const OUTPUT_DIR = ".import";
+// Per-suite scratch dir (never the production `.import/` snapshot dir —
+// see audit item 23).
+let outputDir: string;
+async function setUpOutputDir() {
+  outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "fisqua-import-test-"));
+}
 async function cleanOutput() {
   try {
-    await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
+    await fs.rm(outputDir, { recursive: true, force: true });
   } catch {
     // ignore
   }
 }
 
 describe("junctions cascade-skip + role mapping", () => {
-  beforeEach(cleanOutput);
+  beforeEach(setUpOutputDir);
   afterEach(cleanOutput);
 
   it("records rootCauseTable and cascadedFrom for every junction whose parent description failed", async () => {
@@ -57,18 +63,19 @@ describe("junctions cascade-skip + role mapping", () => {
     );
 
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
     const descFixture = path.resolve(
       "tests/import/fixtures/round-builder/cascade-descriptions.json",
     );
     const { result: descResult, idMap: descIdMap } = await importDescriptions(
       descFixture,
       repoIdMap,
+      outputDir,
     );
     const entityFixture = path.resolve(
       "tests/import/fixtures/round-builder/entities.json",
     );
-    const { idMap: entityIdMap } = await importEntities(entityFixture);
+    const { idMap: entityIdMap } = await importEntities(entityFixture, outputDir);
 
     // The broken description (id=501) must fail validation.
     const failedDescErrors = descResult.errors.filter((e) => e.oldId === 501);
@@ -81,6 +88,9 @@ describe("junctions cascade-skip + role mapping", () => {
       junctionFixture,
       descIdMap,
       entityIdMap,
+      undefined,
+      undefined,
+      outputDir,
     );
 
     // The 5 cascade rows (description_id=501) must each carry
@@ -107,18 +117,19 @@ describe("junctions cascade-skip + role mapping", () => {
     );
 
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
     const descFixture = path.resolve(
       "tests/import/fixtures/round-builder/cascade-descriptions.json",
     );
     const { idMap: descIdMap } = await importDescriptions(
       descFixture,
       repoIdMap,
+      outputDir,
     );
     const entityFixture = path.resolve(
       "tests/import/fixtures/round-builder/entities.json",
     );
-    const { idMap: entityIdMap } = await importEntities(entityFixture);
+    const { idMap: entityIdMap } = await importEntities(entityFixture, outputDir);
 
     const junctionFixture = path.resolve(
       "tests/import/fixtures/round-builder/cascade-description-entities.json",
@@ -127,6 +138,9 @@ describe("junctions cascade-skip + role mapping", () => {
       junctionFixture,
       descIdMap,
       entityIdMap,
+      undefined,
+      undefined,
+      outputDir,
     );
     expect(result.sqlFiles.length).toBeGreaterThan(0);
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
@@ -150,18 +164,19 @@ describe("junctions cascade-skip + role mapping", () => {
     );
 
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
     const descFixture = path.resolve(
       "tests/import/fixtures/round-builder/cascade-descriptions.json",
     );
     const { idMap: descIdMap } = await importDescriptions(
       descFixture,
       repoIdMap,
+      outputDir,
     );
     const entityFixture = path.resolve(
       "tests/import/fixtures/round-builder/entities.json",
     );
-    const { idMap: entityIdMap } = await importEntities(entityFixture);
+    const { idMap: entityIdMap } = await importEntities(entityFixture, outputDir);
 
     const junctionFixture = path.resolve(
       "tests/import/fixtures/round-builder/cascade-description-entities.json",
@@ -170,6 +185,9 @@ describe("junctions cascade-skip + role mapping", () => {
       junctionFixture,
       descIdMap,
       entityIdMap,
+      undefined,
+      undefined,
+      outputDir,
     );
     expect(result.sqlFiles.length).toBeGreaterThan(0);
     const content = await fs.readFile(result.sqlFiles[0], "utf8");
@@ -194,18 +212,19 @@ describe("junctions cascade-skip + role mapping", () => {
     );
 
     const repoFixture = path.resolve("tests/import/fixtures/repositories.json");
-    const { idMap: repoIdMap } = await importRepositories(repoFixture);
+    const { idMap: repoIdMap } = await importRepositories(repoFixture, outputDir);
     const descFixture = path.resolve(
       "tests/import/fixtures/round-builder/cascade-descriptions.json",
     );
     const { idMap: descIdMap } = await importDescriptions(
       descFixture,
       repoIdMap,
+      outputDir,
     );
     const entityFixture = path.resolve(
       "tests/import/fixtures/round-builder/entities.json",
     );
-    const { idMap: entityIdMap } = await importEntities(entityFixture);
+    const { idMap: entityIdMap } = await importEntities(entityFixture, outputDir);
 
     const junctionFixture = path.resolve(
       "tests/import/fixtures/round-builder/cascade-description-entities.json",
@@ -214,6 +233,9 @@ describe("junctions cascade-skip + role mapping", () => {
       junctionFixture,
       descIdMap,
       entityIdMap,
+      undefined,
+      undefined,
+      outputDir,
     );
 
     // The "Apoderado" row (id=1008) must NOT produce an error — after
@@ -233,4 +255,4 @@ describe("junctions cascade-skip + role mapping", () => {
   });
 });
 
-// Version: v0.4.0
+// Version: v0.4.1

@@ -19,7 +19,7 @@
  * `projectMembers` so a caller never sees a project they do not have
  * a role on, regardless of how the loader assembles the request.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 // --- EXTENSION POINT --- add your domain-specific project logic here
@@ -76,9 +76,17 @@ export function validateProjectForm(data: {
 
 /**
  * Creates a project and adds the creator as a "lead" member.
+ *
+ * A project is a ROOT of the crowdsourcing tenant tree, so `tenantId`
+ * comes from the request-boundary session tenant
+ * (`context.get(tenantContext).id`) -- the volume/entry/page writers
+ * below inherit their tenant from the project, not the other way round.
+ * It is a required parameter (no schema default) so TypeScript forces
+ * every caller to supply it.
  */
 export async function createProject(
   db: DrizzleD1Database<any>,
+  tenantId: string,
   data: { name: string; description: string | null },
   creatorId: string
 ) {
@@ -87,6 +95,7 @@ export async function createProject(
 
   const project = {
     id: projectId,
+    tenantId,
     name: data.name,
     description: data.description || null,
     createdBy: creatorId,

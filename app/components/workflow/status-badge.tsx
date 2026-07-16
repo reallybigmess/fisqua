@@ -14,7 +14,7 @@
  * `--*-bg` / `--*-fg` token set; this keeps the palette swappable
  * from one design pass without having to chase every badge call site.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { useTranslation } from "react-i18next";
@@ -52,10 +52,10 @@ export const DESCRIPTION_STATUS_STYLES: Record<
 };
 
 // One shape, one size, one style — only the colour pair varies.
-// README §4.4: rounded-full px-2.5 py-0.5 text-[11px] font-sans
+// README §4.4: rounded-full px-2.5 py-0.5 text-11 font-sans
 // font-semibold tracking-[0.02em] uppercase.
 const BADGE_SHAPE =
-  "inline-flex items-center rounded-full px-2.5 py-0.5 font-sans text-[11px] font-semibold uppercase tracking-[0.02em]";
+  "inline-flex items-center rounded-full px-2.5 py-0.5 font-sans text-11 font-semibold uppercase tracking-[0.02em]";
 
 type StatusBadgeProps = {
   status: string;

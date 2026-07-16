@@ -15,7 +15,7 @@
  *      so the verify URL stays on the tenant subdomain (host-aware by
  *      construction).
  *
- * @version v0.4.1
+ * @version v0.4.2
  */
 import { redirect, data } from "react-router";
 import { useTranslation } from "react-i18next";
@@ -150,7 +150,7 @@ export default function LoginPage({
             alt="Fisqua"
             className="mx-auto h-24 w-24"
           />
-          <h1 className="mt-4 font-display text-[2.5rem] font-semibold text-indigo">
+          <h1 className="mt-4 font-display text-5xl font-semibold text-indigo">
             Fisqua
           </h1>
           {loaderData?.tenantName && (
@@ -191,7 +191,7 @@ export default function LoginPage({
             */}
             <a
               href={githubHref}
-              className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#24292f] font-sans text-[0.9375rem] font-semibold text-white hover:bg-[#1b1f23] focus:outline-none focus:ring-2 focus:ring-[#24292f] focus:ring-offset-2"
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#24292f] font-sans text-15 font-semibold text-white hover:bg-[#1b1f23] focus:outline-none focus:ring-2 focus:ring-[#24292f] focus:ring-offset-2"
             >
               <Github className="h-5 w-5" />
               {t("github_login_button")}
@@ -240,7 +240,7 @@ export default function LoginPage({
 
               <button
                 type="submit"
-                className="flex h-12 w-full items-center justify-center gap-2 rounded-md bg-indigo font-sans text-[0.9375rem] font-semibold text-parchment hover:bg-indigo-deep focus:outline-none focus:ring-2 focus:ring-indigo focus:ring-offset-2"
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-md bg-indigo font-sans text-15 font-semibold text-parchment hover:bg-indigo-deep focus:outline-none focus:ring-2 focus:ring-indigo focus:ring-offset-2"
               >
                 <Mail className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />
                 {t("login_button")}
@@ -257,4 +257,4 @@ export default function LoginPage({
   );
 }
 
-// @version v0.4.1
+// @version v0.4.2

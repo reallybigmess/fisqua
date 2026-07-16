@@ -13,7 +13,7 @@
  * top of the page. Like the other dashboard views, this component is
  * pure render; loaders on the parent route handle the database access.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { useTranslation } from "react-i18next";
@@ -99,8 +99,8 @@ export function ReviewerDashboard({ groups }: ReviewerDashboardProps) {
               <polyline points="22 4 12 14.01 9 11.01" />
             </svg>
           </div>
-          <h3 className="mt-4 font-serif text-[18px] font-semibold text-indigo">{t("empty.no_review_title")}</h3>
-          <p className="mt-2 font-serif text-[15px] text-stone-500 max-w-[36ch] mx-auto">
+          <h3 className="mt-4 font-serif text-lg font-semibold text-indigo">{t("empty.no_review_title")}</h3>
+          <p className="mt-2 font-serif text-15 text-stone-500 max-w-measure mx-auto">
             {t("empty.no_review_body")}
           </p>
         </div>

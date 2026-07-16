@@ -35,6 +35,34 @@ export type { VolumeStatus };
 // canonical `ProjectRole` so the role vocabulary has one source.
 export type WorkflowRole = ProjectRole;
 
+// Workflow-role precedence, highest first. This is NOT the same as
+// PROJECT_ROLES from validation/enums, whose declaration order
+// (lead, cataloguer, reviewer) is arbitrary — deriving precedence
+// from it would rank cataloguer above reviewer.
+export const WORKFLOW_ROLE_PRECEDENCE = [
+  "lead",
+  "reviewer",
+  "cataloguer",
+] as const satisfies readonly WorkflowRole[];
+
+/**
+ * The user's highest workflow role among the given membership rows,
+ * or null with no memberships. A user can hold several roles on one
+ * project (project_members has no (project, user) uniqueness), so
+ * callers must never read a single row's role — row order is not
+ * precedence. Pure and client-safe; the server-side permission
+ * helpers re-export it.
+ */
+export function highestProjectRole(
+  memberships: { role: string }[],
+): WorkflowRole | null {
+  return (
+    WORKFLOW_ROLE_PRECEDENCE.find((r) =>
+      memberships.some((m) => m.role === r),
+    ) ?? null
+  );
+}
+
 const TRANSITIONS: Record<
   WorkflowRole,
   Partial<Record<VolumeStatus, VolumeStatus[]>>

@@ -22,7 +22,7 @@
  * `app/lib/export/ead/profiles/registry.ts` resolves a tenant's
  * `descriptiveStandard` to the right profile.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import type { Standard, DescriptionLevel } from "../standards/types";
@@ -31,8 +31,12 @@ import type { Standard, DescriptionLevel } from "../standards/types";
  * Resolved tenant context threaded through every export step. The
  * three fields are everything the pipeline needs:
  *
- *   - `id`    — joined into every D1 read so cross-tenant rows
- *               cannot leak.
+ *   - `id`    — joined into every tenant-scoped D1 read so
+ *               cross-tenant rows cannot leak.
+ *   - `federationId` — joined into the authority reads (entities /
+ *               places), which are federation-scoped after migration
+ *               0045; the export reads this tenant's descriptions
+ *               against its federation's authorities.
  *   - `slug`  — prefixed onto every R2 key so cross-tenant objects
  *               cannot collide. Slug rather than UUID because tenant
  *               slugs are immutable and human-readable in `rclone ls`.
@@ -43,6 +47,7 @@ import type { Standard, DescriptionLevel } from "../standards/types";
  */
 export type ExportTenant = {
   id: string;
+  federationId: string;
   slug: string;
   descriptiveStandard: "isadg" | "dacs" | "rad";
 };

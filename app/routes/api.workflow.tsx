@@ -15,7 +15,7 @@
  * `volumes` directly — keeping every status change behind one
  * guarded handler is what lets the state machine stay enforceable.
  *
- * @version v0.3.0
+ * @version v0.4.1
  */
 
 import { userContext } from "../context";
@@ -30,6 +30,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   const { drizzle } = await import("drizzle-orm/d1");
   const { requireProjectRole } = await import("../lib/permissions.server");
+  const { WORKFLOW_ROLE_PRECEDENCE } = await import("../lib/workflow");
   const { transitionVolumeStatus } = await import("../lib/workflow.server");
 
   const user = context.get(userContext);
@@ -57,8 +58,16 @@ export async function action({ request, context }: Route.ActionArgs) {
     user.isAdmin
   );
 
-  const userRole: WorkflowRole =
-    (memberships[0]?.role as WorkflowRole) ?? "cataloguer";
+  // All held roles, not the first row: previously a user holding both
+  // reviewer and cataloguer memberships got whichever role the DB
+  // returned first, making transition permissions row-order-dependent.
+  // The transition machine is role-partitioned, so every held role is
+  // passed and a move is allowed if any of them permits it.
+  const heldRoles: WorkflowRole[] = WORKFLOW_ROLE_PRECEDENCE.filter((r) =>
+    memberships.some((m) => m.role === r)
+  );
+  const userRoles: WorkflowRole[] =
+    heldRoles.length > 0 ? heldRoles : ["cataloguer"];
 
   try {
     await transitionVolumeStatus(
@@ -66,7 +75,7 @@ export async function action({ request, context }: Route.ActionArgs) {
       volumeId,
       targetStatus as VolumeStatus,
       user.id,
-      userRole,
+      userRoles,
       comment
     );
     return Response.json({ ok: true });

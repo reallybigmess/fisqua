@@ -50,7 +50,17 @@
  * to honour the role-override semantics. The middleware populates it
  * from the session payload's optional `impersonating` field.
  *
- * @version v0.4.0
+ * `grantContext` is a fourth typed slot carrying the federation grant
+ * under which the request is being served (federation role, the covered
+ * federation, and the grant-holder's home tenant), or `null` for the
+ * common home-access request. When it is populated the middleware has
+ * ALSO replaced `userContext`'s role flags with the grant's effective
+ * member-tenant flags (see `app/lib/federation.server.ts`), so ordinary
+ * role gates need no grant awareness; `grantContext` is for surfaces
+ * that must know a request is cross-tenant (a grant banner, the
+ * steward-gate helpers, grant-write audit).
+ *
+ * @version v0.4.2
  */
 
 // --- TEMPLATE INFRASTRUCTURE --- do not modify when extending
@@ -75,9 +85,10 @@ export type User = {
 
 /**
  * The Drizzle-inferred row shape for a single `tenants` table row,
- * including the four boolean capability flags
+ * including the boolean capability flags
  * (`crowdsourcingEnabled`, `vocabularyHubEnabled`,
- * `publishPipelineEnabled`, `multiRepositoryEnabled`), the
+ * `publishPipelineEnabled`, `multiRepositoryEnabled`,
+ * `authoritiesEnabled`), the
  * `kind` discriminator (`"tenant"` | `"platform"`), and
  * descriptive-standard / status fields.
  */
@@ -107,3 +118,21 @@ export type ImpersonatingState = {
 };
 
 export const impersonationContext = createContext<ImpersonatingState | null>();
+
+/**
+ * Federation grant envelope state. Populated by `authMiddleware` when a
+ * user reaches a member tenant of a federation they hold a
+ * `federation_memberships` row in (their home tenant is elsewhere);
+ * `null` for the common home-access request. `role` is the federation
+ * role (`steward` | `staff`), `federationId` the covered federation, and
+ * `homeTenantId` the grant-holder's home tenant (the audit actor tenant).
+ * When populated, `userContext`'s role flags are the grant's effective
+ * member-tenant flags, not the user's home-tenant flags.
+ */
+export type GrantState = {
+  role: "steward" | "staff";
+  federationId: string;
+  homeTenantId: string;
+};
+
+export const grantContext = createContext<GrantState | null>();

@@ -7,7 +7,7 @@
  * additionally enforces the lead-only resolver rule. GET lists open
  * flags for the requested volume or entry.
  *
- * @version v0.4.1
+ * @version v0.3.0
  */
 import { userContext } from "../context";
 import type { Route } from "./+types/api.qc-flags";

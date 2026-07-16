@@ -10,7 +10,7 @@
  * archive, delete) is deliberately absent from this surface — those
  * operations live exclusively in `/admin/cataloguing/projects`.
  *
- * @version v0.3.0
+ * @version v0.4.1
  */
 
 import { Link } from "react-router";
@@ -58,14 +58,19 @@ export async function loader({ context }: Route.LoaderArgs) {
   );
   const isCollabAdmin = user.isCollabAdmin || user.isSuperAdmin;
 
-  // Build per-project role map (a user can be lead of one, cataloguer of another)
-  const projectRoleMap = new Map<string, string>();
+  // Build per-project role map (a user can be lead of one, cataloguer
+  // of another); each project keeps the user's highest role there.
+  const { highestProjectRole } = await import("../lib/permissions.server");
+  const membershipsByProject = new Map<string, { role: string }[]>();
   for (const m of memberships) {
-    const existing = projectRoleMap.get(m.projectId);
-    // Keep the highest role: lead > reviewer > cataloguer
-    if (!existing || m.role === "lead" || (m.role === "reviewer" && existing === "cataloguer")) {
-      projectRoleMap.set(m.projectId, m.role);
-    }
+    const rows = membershipsByProject.get(m.projectId) ?? [];
+    rows.push(m);
+    membershipsByProject.set(m.projectId, rows);
+  }
+  const projectRoleMap = new Map<string, string>();
+  for (const [pid, rows] of membershipsByProject) {
+    const top = highestProjectRole(rows);
+    if (top) projectRoleMap.set(pid, top);
   }
 
   if (projectIds.length === 0) {

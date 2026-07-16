@@ -22,7 +22,7 @@ import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import * as schema from "../../app/db/schema";
-import { applyMigrations, cleanDatabase } from "../helpers/db";
+import { applyMigrations, cleanDatabase, DEFAULT_TEST_TENANT_ID } from "../helpers/db";
 import { createTestUser } from "../helpers/auth";
 import { createVolume, getProjectVolumes } from "../../app/lib/volumes.server";
 import { createQcFlag, resolveQcFlag } from "../../app/lib/qc-flags.server";
@@ -87,6 +87,7 @@ describe("getProjectVolumes openQcFlagCount", () => {
     projectId = crypto.randomUUID();
     await db.insert(schema.projects).values({
       id: projectId,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       name: "Project A",
       createdBy: reporterId,
       createdAt: now,
@@ -96,6 +97,7 @@ describe("getProjectVolumes openQcFlagCount", () => {
     otherProjectId = crypto.randomUUID();
     await db.insert(schema.projects).values({
       id: otherProjectId,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       name: "Project B",
       createdBy: reporterId,
       createdAt: now,

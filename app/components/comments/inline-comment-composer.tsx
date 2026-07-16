@@ -6,7 +6,7 @@
  * Collects the body and geometry and hands the payload back to the parent
  * form so persistence and re-render route through the shared fetcher.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 import { useEffect, useRef, useState } from "react";
 import { useFetcher } from "react-router";
@@ -179,7 +179,7 @@ export function InlineCommentComposer({
  />
  <div className="space-y-3 p-3 pl-4">
  {region && (
- <div className="inline-flex items-center gap-1.5 rounded border border-stone-200 bg-stone-100 px-2 py-0.5 font-sans text-[10px] font-bold text-stone-600">
+ <div className="inline-flex items-center gap-1.5 rounded border border-stone-200 bg-stone-100 px-2 py-0.5 font-sans text-10 font-bold text-stone-600">
  <MapPin className="h-2.5 w-2.5 text-indigo" aria-hidden />
  <span>
  {t("viewer:comment_prompt.region_label", {
@@ -194,7 +194,7 @@ export function InlineCommentComposer({
  onChange={(e) => setBody(e.target.value)}
  onKeyDown={handleKeyDown}
  placeholder={t("viewer:comment_prompt.placeholder")}
- className="min-h-[72px] w-full rounded border border-stone-200 p-2 font-serif text-[0.9375rem] text-stone-700 placeholder:text-stone-400 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo/40"
+ className="min-h-[72px] w-full rounded border border-stone-200 p-2 font-serif text-15 text-stone-700 placeholder:text-stone-400 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo/40"
  />
  {serverError && (
  <p className="text-xs text-indigo">

@@ -23,6 +23,8 @@ export default {
   pipeline: "Pipeline",
   manage_users: "Manage users",
   records_management: "Records management",
+  authorities: "Authorities",
+  possible_duplicates: "Possible duplicates",
   my_settings: "My settings",
   system_users: "System users",
   no_users: "No users found.",

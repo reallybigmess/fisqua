@@ -1,6 +1,6 @@
 {
   "name": "fisqua",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "description": "Collaborative cataloguing and data-management platform for archival materials, built on Cloudflare Workers.",
@@ -10,8 +10,12 @@
     "email": "juan@neogranadina.org"
   },
   "contributors": [
-    { "name": "Archives, Memory, and Preservation Lab, University of California, Santa Barbara" },
-    { "name": "Neogranadina" }
+    {
+      "name": "Archives, Memory, and Preservation Lab, University of California, Santa Barbara"
+    },
+    {
+      "name": "Neogranadina"
+    }
   ],
   "homepage": "https://fisqua.org",
   "repository": {
@@ -29,6 +33,10 @@
     "postinstall": "npm run cf-typegen",
     "preview": "npm run build && vite preview",
     "import:neogranadina": "npx tsx scripts/import-neogranadina.ts",
+    "test": "npm run test:workers && npm run test:node && npm run test:import",
+    "test:workers": "vitest run",
+    "test:node": "vitest run --config vitest.node.config.ts",
+    "test:import": "vitest run --config vitest.import.config.ts",
     "typecheck": "npm run cf-typegen && react-router typegen && tsc -b"
   },
   "dependencies": {
@@ -40,6 +48,7 @@
     "i18next-browser-languagedetector": "^8.2.1",
     "isbot": "^5.1.31",
     "lucide-react": "^0.577.0",
+    "maplibre-gl": "5.24.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-i18next": "^16.5.6",

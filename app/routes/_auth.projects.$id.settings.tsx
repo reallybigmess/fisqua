@@ -14,7 +14,7 @@
  * type level, while `documentSubtypes` owns its own dedicated form
  * and action handler.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 import { useState } from "react";
 import { Form, useActionData, useNavigate, useNavigation } from "react-router";
@@ -248,7 +248,7 @@ export default function ProjectSettings({ loaderData }: Route.ComponentProps) {
     <div className="space-y-10">
       {/* Settings form */}
       <section>
-        <h2 className="font-sans text-[1.5rem] font-semibold text-stone-700">
+        <h2 className="font-sans text-2xl font-semibold text-stone-700">
           {t("project:settings.heading")}
         </h2>
 
@@ -266,7 +266,7 @@ export default function ProjectSettings({ loaderData }: Route.ComponentProps) {
           <div>
             <label
               htmlFor="name"
-              className="block font-sans text-[0.875rem] font-medium text-indigo"
+              className="block font-sans text-sm font-medium text-indigo"
             >
               {t("project:settings.project_name")}
             </label>
@@ -277,7 +277,7 @@ export default function ProjectSettings({ loaderData }: Route.ComponentProps) {
               required
               maxLength={200}
               defaultValue={project.name}
-              className="mt-1 block w-full rounded-lg border border-stone-200 px-3 py-2 font-serif text-[1rem] text-stone-700 shadow-sm focus:border-indigo focus:ring-1 focus:ring-indigo focus:outline-none"
+              className="mt-1 block w-full rounded-lg border border-stone-200 px-3 py-2 font-serif text-base text-stone-700 shadow-sm focus:border-indigo focus:ring-1 focus:ring-indigo focus:outline-none"
             />
             {actionData?.errors?.name && (
               <p className="mt-1 text-sm text-madder-deep">
@@ -289,7 +289,7 @@ export default function ProjectSettings({ loaderData }: Route.ComponentProps) {
           <div>
             <label
               htmlFor="description"
-              className="block font-sans text-[0.875rem] font-medium text-indigo"
+              className="block font-sans text-sm font-medium text-indigo"
             >
               {t("project:settings.description")}
             </label>
@@ -305,7 +305,7 @@ export default function ProjectSettings({ loaderData }: Route.ComponentProps) {
           <div>
             <label
               htmlFor="conventions"
-              className="block font-sans text-[0.875rem] font-medium text-indigo"
+              className="block font-sans text-sm font-medium text-indigo"
             >
               {t("project:settings.conventions")}
             </label>
@@ -324,7 +324,7 @@ export default function ProjectSettings({ loaderData }: Route.ComponentProps) {
           <div>
             <label
               htmlFor="settings"
-              className="block font-sans text-[0.875rem] font-medium text-indigo"
+              className="block font-sans text-sm font-medium text-indigo"
             >
               {t("project:settings.settings_json")}
             </label>
@@ -358,7 +358,7 @@ export default function ProjectSettings({ loaderData }: Route.ComponentProps) {
 
       {/* Document subtypes editor */}
       <section className="border-t border-stone-200 pt-8">
-        <h2 className="font-sans text-[1.5rem] font-semibold text-stone-700">
+        <h2 className="font-sans text-2xl font-semibold text-stone-700">
           {t("project:settings.subtypes_heading")}
         </h2>
         <p className="mt-2 max-w-2xl font-sans text-sm text-stone-500">
@@ -404,7 +404,7 @@ export default function ProjectSettings({ loaderData }: Route.ComponentProps) {
                   className="h-4 w-4 shrink-0 text-stone-400"
                   aria-hidden="true"
                 />
-                <span className="flex-1 font-serif text-[1rem] text-stone-700">
+                <span className="flex-1 font-serif text-base text-stone-700">
                   {subtype}
                 </span>
                 <div className="flex items-center gap-1">
@@ -459,7 +459,7 @@ export default function ProjectSettings({ loaderData }: Route.ComponentProps) {
                 }
               }}
               placeholder={t("project:settings.subtypes_add_placeholder")}
-              className="flex-1 rounded-lg border border-stone-200 px-3 py-2 font-serif text-[1rem] text-stone-700 shadow-sm focus:border-indigo focus:ring-1 focus:ring-indigo focus:outline-none"
+              className="flex-1 rounded-lg border border-stone-200 px-3 py-2 font-serif text-base text-stone-700 shadow-sm focus:border-indigo focus:ring-1 focus:ring-indigo focus:outline-none"
             />
             <button
               type="button"
@@ -496,7 +496,7 @@ export default function ProjectSettings({ loaderData }: Route.ComponentProps) {
 
       {/* Danger zone */}
       <section className="border-t border-stone-200 pt-8">
-        <h2 className="font-sans text-[1.5rem] font-semibold text-stone-700">
+        <h2 className="font-sans text-2xl font-semibold text-stone-700">
           {t("project:settings.danger_zone")}
         </h2>
         <div className="mt-4 max-w-xl space-y-4">

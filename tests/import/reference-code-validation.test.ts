@@ -8,18 +8,22 @@
  *   - The 1–50 char and Unicode-letter+digit+hyphen contract still
  *     rejects truly malformed ids.
  *
- * @version v0.4.0
+ * @version v0.4.1
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 
-const OUTPUT_DIR = ".import";
-
+// Per-suite scratch dir (never the production `.import/` snapshot dir —
+// see audit item 23).
+let outputDir: string;
+async function setUpOutputDir() {
+  outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "fisqua-import-test-"));
+}
 async function cleanOutput() {
   try {
-    await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
+    await fs.rm(outputDir, { recursive: true, force: true });
   } catch {
     // ignore
   }
@@ -111,7 +115,7 @@ async function writeFixture(rows: MinimalDescription[]): Promise<string> {
 }
 
 describe("reference_code shape gate — multilingual + paren-strip", () => {
-  beforeEach(cleanOutput);
+  beforeEach(setUpOutputDir);
   afterEach(cleanOutput);
 
   it("accepts ASCII reference codes (regression)", async () => {
@@ -127,7 +131,7 @@ describe("reference_code shape gate — multilingual + paren-strip", () => {
     const repoIdMap = new Map<number, string>([
       [1, "00000000-0000-4000-8000-000000000001"],
     ]);
-    const { result } = await importDescriptions(fixture, repoIdMap);
+    const { result } = await importDescriptions(fixture, repoIdMap, outputDir);
 
     expect(result.imported).toBe(3);
     expect(result.skipped).toBe(0);
@@ -148,7 +152,7 @@ describe("reference_code shape gate — multilingual + paren-strip", () => {
     const repoIdMap = new Map<number, string>([
       [1, "00000000-0000-4000-8000-000000000001"],
     ]);
-    const { result } = await importDescriptions(fixture, repoIdMap);
+    const { result } = await importDescriptions(fixture, repoIdMap, outputDir);
 
     expect(result.imported).toBe(4);
     expect(result.skipped).toBe(0);
@@ -168,7 +172,7 @@ describe("reference_code shape gate — multilingual + paren-strip", () => {
     const repoIdMap = new Map<number, string>([
       [1, "00000000-0000-4000-8000-000000000001"],
     ]);
-    const { result } = await importDescriptions(fixture, repoIdMap);
+    const { result } = await importDescriptions(fixture, repoIdMap, outputDir);
 
     expect(result.imported).toBe(3);
     expect(result.skipped).toBe(0);
@@ -199,7 +203,7 @@ describe("reference_code shape gate — multilingual + paren-strip", () => {
     const repoIdMap = new Map<number, string>([
       [1, "00000000-0000-4000-8000-000000000001"],
     ]);
-    const { result } = await importDescriptions(fixture, repoIdMap);
+    const { result } = await importDescriptions(fixture, repoIdMap, outputDir);
 
     expect(result.imported).toBe(2);
     expect(result.skipped).toBe(0);
@@ -227,7 +231,7 @@ describe("reference_code shape gate — multilingual + paren-strip", () => {
     const repoIdMap = new Map<number, string>([
       [1, "00000000-0000-4000-8000-000000000001"],
     ]);
-    const { result, idMap } = await importDescriptions(fixture, repoIdMap);
+    const { result, idMap } = await importDescriptions(fixture, repoIdMap, outputDir);
 
     expect(result.imported).toBe(0);
     expect(result.skipped).toBe(6);

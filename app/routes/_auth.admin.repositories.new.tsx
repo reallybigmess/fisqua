@@ -12,7 +12,7 @@
  * `authMiddleware`; the new repository row is attributed to
  * `tenant.id` rather than a single-tenant hard-code.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { Form, useActionData, redirect, Link } from "react-router";
@@ -151,7 +151,7 @@ export default function NewRepositoryPage() {
           <input type="hidden" name="_action" value="create" />
 
           {/* Identity area */}
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.05em] text-stone-500">
+          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-stone-500">
             {t("section_identity")}
           </h2>
 
@@ -176,7 +176,7 @@ export default function NewRepositoryPage() {
           </div>
 
           {/* Contact area */}
-          <h2 className="mb-4 mt-6 text-sm font-semibold uppercase tracking-[0.05em] text-stone-500">
+          <h2 className="mb-4 mt-6 text-sm font-semibold uppercase tracking-wider text-stone-500">
             {t("section_contact")}
           </h2>
 
@@ -211,7 +211,7 @@ export default function NewRepositoryPage() {
           </div>
 
           {/* Administrative */}
-          <h2 className="mb-4 mt-6 text-sm font-semibold uppercase tracking-[0.05em] text-stone-500">
+          <h2 className="mb-4 mt-6 text-sm font-semibold uppercase tracking-wider text-stone-500">
             {t("section_admin")}
           </h2>
 

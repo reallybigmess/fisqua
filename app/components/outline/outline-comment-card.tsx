@@ -5,7 +5,7 @@
  * entry. Shares the card chrome with `CommentCard` but adapts spacing and
  * truncation to the narrower outline column.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -324,12 +324,12 @@ export function OutlineCommentCard({
  />
  </div>
  {/* Author name — dominant element in the reading order. */}
- <span className="min-w-0 truncate font-sans text-[12px] font-medium text-stone-800">
+ <span className="min-w-0 truncate font-sans text-xs font-medium text-stone-800">
  {comment.authorName ?? comment.authorEmail ?? ""}
  </span>
  {/* Kind · anchor caption: Annotations reference the image
  , comments reference the owning entry's Doc sequence. */}
- <span className="shrink-0 font-sans text-[9px] font-bold uppercase tracking-wider text-indigo">
+ <span className="shrink-0 font-sans text-10 font-bold uppercase tracking-wider text-indigo">
  {t(`viewer:outline.${kindKey}`)} ·{" "}
  {hasRegion && pageNumber != null
  ? t("viewer:outline.comment_img_prefix", { n: pageNumber })
@@ -340,14 +340,14 @@ export function OutlineCommentCard({
  Sit inline with the kind caption so the header stays one row. */}
  {isEdited && (
  <span
- className="shrink-0 font-sans text-[9px] font-medium uppercase tracking-wider text-stone-500"
+ className="shrink-0 font-sans text-10 font-medium uppercase tracking-wider text-stone-500"
  title={new Date(comment.editedAt!).toISOString()}
  >
  · {t("comments:comments.status.edited")}
  </span>
  )}
  {isResolved && (
- <span className="flex shrink-0 items-center gap-0.5 rounded bg-verdigris-tint px-1.5 py-0.5 font-sans text-[10px] font-bold text-verdigris">
+ <span className="flex shrink-0 items-center gap-0.5 rounded bg-verdigris-tint px-1.5 py-0.5 font-sans text-10 font-bold text-verdigris">
  <CheckCircle2 className="h-[10px] w-[10px]" aria-hidden="true" />
  <span>{t("comments:comments.status.resolved")}</span>
  </span>
@@ -356,13 +356,13 @@ export function OutlineCommentCard({
  row below, doubling card height). Only renders when there
  are replies AND the card is collapsed. */}
  {!isExpanded && replyCount != null && (
- <span className="ml-auto flex shrink-0 items-center gap-1 rounded bg-indigo/10 px-1.5 py-0.5 font-sans text-[10px] font-bold text-indigo">
+ <span className="ml-auto flex shrink-0 items-center gap-1 rounded bg-indigo/10 px-1.5 py-0.5 font-sans text-10 font-bold text-indigo">
  <MessageSquare className="h-[10px] w-[10px]" aria-hidden="true" />
  <span>{replyCount}</span>
  </span>
  )}
  <span
- className={`${replyCount != null && !isExpanded ? "" : "ml-auto"} shrink-0 font-sans text-[10px] font-medium text-stone-400`}
+ className={`${replyCount != null && !isExpanded ? "" : "ml-auto"} shrink-0 font-sans text-10 font-medium text-stone-400`}
  >
  {formatRelativeTime(comment.createdAt, locale)}
  </span>
@@ -404,14 +404,14 @@ export function OutlineCommentCard({
  value={editDraft}
  onChange={(e) => setEditDraft(e.target.value)}
  rows={3}
- className="w-full rounded border border-stone-200 bg-white px-3 py-2 font-serif text-[0.9375rem] italic leading-[1.5] text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
+ className="w-full rounded border border-stone-200 bg-white px-3 py-2 font-serif text-15 italic leading-[1.5] text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
  aria-label={t("comments:comments.edit.aria_label")}
  />
  <div className="flex items-center justify-end gap-2">
  <button
  type="button"
  onClick={handleEditCancel}
- className="font-sans text-[11px] font-medium text-stone-500 hover:text-stone-700"
+ className="font-sans text-11 font-medium text-stone-500 hover:text-stone-700"
  >
  {t("comments:comments.edit.cancel")}
  </button>
@@ -419,7 +419,7 @@ export function OutlineCommentCard({
  type="button"
  onClick={handleEditSave}
  disabled={editDraft.trim().length === 0}
- className="rounded bg-indigo px-3 py-1 font-sans text-[11px] font-bold text-parchment transition-colors hover:bg-indigo-deep disabled:opacity-50"
+ className="rounded bg-indigo px-3 py-1 font-sans text-11 font-bold text-parchment transition-colors hover:bg-indigo-deep disabled:opacity-50"
  >
  {t("comments:comments.edit.save")}
  </button>
@@ -427,7 +427,7 @@ export function OutlineCommentCard({
  </div>
  ) : (
  <p
- className={`font-serif text-[0.9375rem] leading-[1.5] ${
+ className={`font-serif text-15 leading-[1.5] ${
  isResolved ? "text-stone-500" : "text-stone-700"
  }`}
  >
@@ -442,7 +442,7 @@ export function OutlineCommentCard({
  <>
  {replies.length > 0 && (
  <div className="border-t border-stone-200/50 bg-white/50">
- <div className="bg-stone-100/30 px-4 py-2 font-sans text-[9px] font-bold uppercase tracking-widest text-stone-400">
+ <div className="bg-stone-100/30 px-4 py-2 font-sans text-10 font-bold uppercase tracking-widest text-stone-400">
  {t("viewer:outline.comment_thread_header")}
  </div>
  <ul className="divide-y divide-stone-200/30">
@@ -453,11 +453,11 @@ export function OutlineCommentCard({
  card header (2026-04-18 afternoon). */}
  <div className="mb-1 flex items-baseline justify-between gap-2">
  <div className="flex items-baseline gap-2 min-w-0">
- <span className="font-sans text-[12px] font-medium text-stone-800 truncate">
+ <span className="font-sans text-xs font-medium text-stone-800 truncate">
  {reply.authorName ?? reply.authorEmail ?? ""}
  </span>
  <span
- className={`font-sans text-[9px] font-bold uppercase tracking-wider shrink-0 ${
+ className={`font-sans text-10 font-bold uppercase tracking-wider shrink-0 ${
  reply.authorRole === "reviewer"
  ? "text-verdigris"
  : "text-indigo"
@@ -470,11 +470,11 @@ export function OutlineCommentCard({
  )}
  </span>
  </div>
- <span className="font-sans text-[10px] font-medium text-stone-400 shrink-0">
+ <span className="font-sans text-10 font-medium text-stone-400 shrink-0">
  {formatRelativeTime(reply.createdAt, locale)}
  </span>
  </div>
- <p className="font-serif text-[0.9375rem] leading-[1.5] text-stone-700">
+ <p className="font-serif text-15 leading-[1.5] text-stone-700">
  {reply.text}
  </p>
  </li>
@@ -491,7 +491,7 @@ export function OutlineCommentCard({
  setIsReplying((v) => !v);
  // ResizeObserver via measureElement handles the height change.
  }}
- className="font-sans text-[10px] font-bold uppercase tracking-wider text-indigo hover:underline"
+ className="font-sans text-10 font-bold uppercase tracking-wider text-indigo hover:underline"
  >
  {t("viewer:outline.comment_reply")}
  </button>
@@ -499,7 +499,7 @@ export function OutlineCommentCard({
  <button
  type="button"
  onClick={() => onMarkSeen(comment.id)}
- className="font-sans text-[10px] font-bold uppercase tracking-wider text-stone-500 hover:underline"
+ className="font-sans text-10 font-bold uppercase tracking-wider text-stone-500 hover:underline"
  >
  {t("viewer:outline.comment_mark_seen")}
  </button>
@@ -545,14 +545,14 @@ export function OutlineCommentCard({
  className="w-full max-w-sm rounded-lg bg-white p-5 shadow-lg"
  onClick={(e) => e.stopPropagation()}
  >
- <h3 className="mb-2 font-sans text-[15px] font-bold text-stone-800">
+ <h3 className="mb-2 font-sans text-15 font-bold text-stone-800">
  {t(
  isRoot && replies.length > 0
  ? "comments:comments.confirm.delete_root_with_replies.title"
  : "comments:comments.confirm.delete_simple.title",
  )}
  </h3>
- <p className="mb-4 font-sans text-[13px] text-stone-600">
+ <p className="mb-4 font-sans text-13 text-stone-600">
  {isRoot && replies.length > 0
  ? t(
  "comments:comments.confirm.delete_root_with_replies.body",
@@ -564,14 +564,14 @@ export function OutlineCommentCard({
  <button
  type="button"
  onClick={() => setConfirmDelete(false)}
- className="px-3 py-1 font-sans text-[12px] font-medium text-stone-500 hover:text-stone-700"
+ className="px-3 py-1 font-sans text-xs font-medium text-stone-500 hover:text-stone-700"
  >
  {t("comments:comments.confirm.delete.cancel")}
  </button>
  <button
  type="button"
  onClick={handleDeleteConfirm}
- className="rounded bg-indigo px-3 py-1 font-sans text-[12px] font-bold text-parchment transition-colors hover:bg-indigo-deep"
+ className="rounded bg-indigo px-3 py-1 font-sans text-xs font-bold text-parchment transition-colors hover:bg-indigo-deep"
  >
  {t("comments:comments.confirm.delete.confirm")}
  </button>

@@ -14,7 +14,7 @@
  * which matters because the description editor already balances the
  * IIIF viewer, the form, and the entry nav across the same screen.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { useState, useCallback } from "react";
@@ -61,7 +61,7 @@ export function SectionTOC({
               aria-label={section.label}
             />
             {hoveredId === section.id && (
-              <div className="pointer-events-none absolute right-full top-1/2 mr-2 -translate-y-1/2 whitespace-nowrap rounded bg-stone-700 px-2 py-1 font-sans text-[0.75rem] text-white">
+              <div className="pointer-events-none absolute right-full top-1/2 mr-2 -translate-y-1/2 whitespace-nowrap rounded bg-stone-700 px-2 py-1 font-sans text-xs text-white">
                 {section.label}
               </div>
             )}

@@ -16,7 +16,7 @@
  * `DEFAULT_TEST_TENANT_ID` so test bodies stay focused on the
  * field-level contract.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 import {
   describe,
@@ -29,7 +29,7 @@ import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
 import * as schema from "../../app/db/schema";
-import { DEFAULT_TEST_TENANT_ID, applyMigrations, cleanDatabase } from "../helpers/db";
+import { DEFAULT_TEST_TENANT_ID, DEFAULT_TEST_FEDERATION_ID, applyMigrations, cleanDatabase } from "../helpers/db";
 import { createTestEntity } from "../helpers/entities";
 import { createTestUser } from "../helpers/auth";
 import { createTestRepository } from "../helpers/repositories";
@@ -49,7 +49,7 @@ describe("entity CRUD", () => {
     const id = crypto.randomUUID();
 
     await db.insert(schema.entities).values({
-      tenantId: DEFAULT_TEST_TENANT_ID,
+      federationId: DEFAULT_TEST_FEDERATION_ID,
       id,
       entityCode: "ne-abc123",
       displayName: "Juan de Castellanos",
@@ -439,7 +439,7 @@ describe("entity merge and split", () => {
     // Split: create new entity, move the link
     const newEntityId = crypto.randomUUID();
     await db.insert(schema.entities).values({
-      tenantId: DEFAULT_TEST_TENANT_ID,
+      federationId: DEFAULT_TEST_FEDERATION_ID,
       id: newEntityId,
       entityCode: "ne-splt01",
       displayName: "Split Entity",

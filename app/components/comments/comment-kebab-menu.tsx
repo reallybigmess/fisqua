@@ -5,7 +5,7 @@
  * user owns. Exposes edit and delete actions, closes on outside click, and
  * restores focus to the originating button on dismiss.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -146,7 +146,7 @@ export function CommentKebabMenu({
  setOpen(false);
  onAction(item.action);
  }}
- className={`flex w-full items-center px-3 py-1.5 text-left font-sans text-[12px] transition-colors ${
+ className={`flex w-full items-center px-3 py-1.5 text-left font-sans text-xs transition-colors ${
  item.destructive
  ? "text-indigo hover:bg-madder-tint"
  : "text-stone-700 hover:bg-stone-50"

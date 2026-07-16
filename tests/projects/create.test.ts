@@ -94,6 +94,7 @@ describe("project creation", () => {
 
       await db.insert(schema.projects).values({
         id: "proj-1",
+        tenantId: DEFAULT_TEST_TENANT_ID,
         name: "Test Project",
         createdBy: user.id,
         createdAt: now,
@@ -120,6 +121,7 @@ describe("project creation", () => {
 
       await db.insert(schema.projects).values({
         id: "proj-2",
+        tenantId: DEFAULT_TEST_TENANT_ID,
         name: "Test Project 2",
         createdBy: user.id,
         createdAt: now,
@@ -150,6 +152,7 @@ describe("project creation", () => {
 
       await db.insert(schema.projects).values({
         id: "proj-3",
+        tenantId: DEFAULT_TEST_TENANT_ID,
         name: "Test Project 3",
         createdBy: admin.id,
         createdAt: now,
@@ -200,6 +203,7 @@ describe("project creation", () => {
 
       const project = await createProject(
         db,
+        DEFAULT_TEST_TENANT_ID,
         { name: "Short Id Project", description: null },
         admin.id
       );
@@ -211,7 +215,7 @@ describe("project creation", () => {
       const db = drizzle(env.DB, { schema });
       const admin = await createTestUser({ isAdmin: true });
 
-      const project = await createProject(db, {
+      const project = await createProject(db, DEFAULT_TEST_TENANT_ID, {
         name: "Template Project",
         description: "A project using the template",
       }, admin.id);

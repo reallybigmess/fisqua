@@ -1,19 +1,21 @@
 /**
- * Tests — admin places cross-tenant isolation
+ * Tests — admin places cross-federation isolation
  *
  * This suite carries the read-negative + write-negative coverage for
- * the places authority surface.
- * The places admin loader (`app/routes/_auth.admin.places.tsx`) and
- * its detail/edit counterparts (`_auth.admin.places.$id.tsx`,
+ * the places authority surface. Migration 0045 lifted places from
+ * tenant scope to FEDERATION scope, so the isolation boundary is now the
+ * federation: the places admin loader (`app/routes/_auth.admin.places.tsx`)
+ * and its detail/edit counterparts (`_auth.admin.places.$id.tsx`,
  * `_auth.admin.places.new.tsx`) all carry the
- * `eq(places.tenantId, tenant.id)` predicate; this test confirms
- * cross-tenant reads/writes are blocked at the data layer in the
- * seeded fixture.
+ * `eq(places.federationId, tenant.federationId)` predicate; this test
+ * confirms cross-federation reads/writes are blocked at the data layer.
+ * The DEFAULT test tenant lives in the Neogranadina federation and the
+ * SECOND test tenant in its own federation-of-one.
  *
- * Threat model coverage: cross-tenant data leak via subtle predicate
- * bug; POST body asserting tenantId for a different tenant.
+ * Threat model coverage: cross-federation data leak via subtle predicate
+ * bug; POST body asserting federationId for a different federation.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
@@ -23,12 +25,12 @@ import * as schema from "../../app/db/schema";
 import {
   applyMigrations,
   cleanDatabase,
-  DEFAULT_TEST_TENANT_ID,
-  SECOND_TEST_TENANT_ID,
+  DEFAULT_TEST_FEDERATION_ID,
+  SECOND_TEST_FEDERATION_ID,
 } from "../helpers/db";
 
 async function seedPlace(args: {
-  tenantId: string;
+  federationId: string;
   label: string;
   displayName?: string;
 }): Promise<string> {
@@ -37,7 +39,7 @@ async function seedPlace(args: {
   const now = Date.now();
   await db.insert(schema.places).values({
     id,
-    tenantId: args.tenantId,
+    federationId: args.federationId,
     label: args.label,
     displayName: args.displayName ?? args.label,
     createdAt: now,
@@ -46,7 +48,7 @@ async function seedPlace(args: {
   return id;
 }
 
-describe("admin places cross-tenant isolation", () => {
+describe("admin places cross-federation isolation", () => {
   beforeAll(async () => {
     await applyMigrations();
   });
@@ -55,26 +57,26 @@ describe("admin places cross-tenant isolation", () => {
     await cleanDatabase();
   });
 
-  it("read-negative: tenant-A scoped query never returns tenant-B places", async () => {
+  it("read-negative: federation-A scoped query never returns federation-B places", async () => {
     const db = drizzle(env.DB);
 
     const placeA = await seedPlace({
-      tenantId: DEFAULT_TEST_TENANT_ID,
+      federationId: DEFAULT_TEST_FEDERATION_ID,
       label: "Santafé de Bogotá",
     });
     const placeB = await seedPlace({
-      tenantId: SECOND_TEST_TENANT_ID,
-      label: "Tenant B Town",
+      federationId: SECOND_TEST_FEDERATION_ID,
+      label: "Federation B Town",
     });
 
     const rowsForA = await db
       .select({
         id: schema.places.id,
         label: schema.places.label,
-        tenantId: schema.places.tenantId,
+        federationId: schema.places.federationId,
       })
       .from(schema.places)
-      .where(eq(schema.places.tenantId, DEFAULT_TEST_TENANT_ID))
+      .where(eq(schema.places.federationId, DEFAULT_TEST_FEDERATION_ID))
       .all();
 
     expect(rowsForA).toHaveLength(1);
@@ -84,30 +86,30 @@ describe("admin places cross-tenant isolation", () => {
     const rowsForB = await db
       .select({ id: schema.places.id })
       .from(schema.places)
-      .where(eq(schema.places.tenantId, SECOND_TEST_TENANT_ID))
+      .where(eq(schema.places.federationId, SECOND_TEST_FEDERATION_ID))
       .all();
     expect(rowsForB).toHaveLength(1);
     expect(rowsForB[0].id).toBe(placeB);
   });
 
-  it("write-negative: tenant-A scoped UPDATE on tenant-B place id leaves tenant B unchanged", async () => {
+  it("write-negative: federation-A scoped UPDATE on federation-B place id leaves federation B unchanged", async () => {
     const db = drizzle(env.DB);
 
     const placeA = await seedPlace({
-      tenantId: DEFAULT_TEST_TENANT_ID,
+      federationId: DEFAULT_TEST_FEDERATION_ID,
       label: "Original A",
     });
     const placeB = await seedPlace({
-      tenantId: SECOND_TEST_TENANT_ID,
+      federationId: SECOND_TEST_FEDERATION_ID,
       label: "Original B",
     });
 
     await db
       .update(schema.places)
-      .set({ label: "Cross-tenant overwrite attempt" })
+      .set({ label: "Cross-federation overwrite attempt" })
       .where(
         and(
-          eq(schema.places.tenantId, DEFAULT_TEST_TENANT_ID),
+          eq(schema.places.federationId, DEFAULT_TEST_FEDERATION_ID),
           eq(schema.places.id, placeB),
         ),
       )
@@ -120,7 +122,7 @@ describe("admin places cross-tenant isolation", () => {
       .get();
     expect(rowB).toBeTruthy();
     expect(rowB!.label).toBe("Original B");
-    expect(rowB!.tenantId).toBe(SECOND_TEST_TENANT_ID);
+    expect(rowB!.federationId).toBe(SECOND_TEST_FEDERATION_ID);
 
     const rowA = await db
       .select()
@@ -130,11 +132,11 @@ describe("admin places cross-tenant isolation", () => {
     expect(rowA!.label).toBe("Original A");
   });
 
-  it("write-negative: tenant-A scoped DELETE on tenant-B place id leaves tenant B intact", async () => {
+  it("write-negative: federation-A scoped DELETE on federation-B place id leaves federation B intact", async () => {
     const db = drizzle(env.DB);
 
     const placeB = await seedPlace({
-      tenantId: SECOND_TEST_TENANT_ID,
+      federationId: SECOND_TEST_FEDERATION_ID,
       label: "Will Survive",
     });
 
@@ -142,7 +144,7 @@ describe("admin places cross-tenant isolation", () => {
       .delete(schema.places)
       .where(
         and(
-          eq(schema.places.tenantId, DEFAULT_TEST_TENANT_ID),
+          eq(schema.places.federationId, DEFAULT_TEST_FEDERATION_ID),
           eq(schema.places.id, placeB),
         ),
       )

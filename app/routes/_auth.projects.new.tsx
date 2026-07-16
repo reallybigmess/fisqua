@@ -17,12 +17,12 @@
  * subtypes, conventions, JSON settings blob) live on the per-project
  * settings page once the row exists.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { Form, redirect, useActionData, Link } from "react-router";
 import { useTranslation } from "react-i18next";
-import { userContext } from "../context";
+import { tenantContext, userContext } from "../context";
 import type { Route } from "./+types/_auth.projects.new";
 
 export function meta() {
@@ -60,9 +60,11 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
+  const tenant = context.get(tenantContext);
 
   const project = await createProject(
     db,
+    tenant.id,
     {
       name: result.data.name,
       description: result.data.description || null,

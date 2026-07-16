@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-12
+
+### Added
+
+- **Federations.** Institutional tenants can now be grouped into a federation that shares one authority space. Entities, places, and controlled vocabularies are lifted from tenant scope to federation scope, so member institutions describe their holdings against a single shared set of people, places, and terms instead of maintaining parallel copies. Archival descriptions remain tenant-scoped.
+- **Federation stewardship.** Structural changes to shared authorities are gated behind steward grants held at federation level: member institutions read and link shared records, while designated stewards curate them.
+- **Federated publishing.** The publish pipeline now operates at federation level: export runs record their federation scope and read across member tenants' data.
+- **Authorities module.** A complete workspace for curating the shared entity and place authorities, gated per tenant by a new `authorities` capability flag (tenants without it keep read-and-link behaviour unchanged).
+- **Merge and split workbenches.** Full-page workbenches for merging duplicate authority records and splitting conflated ones. Both sides of a merge — and every group of a split — show context cards for the linked archival descriptions (metadata, names as recorded, scope snippets), so the person deciding sees what each record is actually attached to. Merges are soft: the losing record points at the winner and stays consultable.
+- **Authority operations ledger.** Every merge, split, and deletion of an authority record lands an append-only ledger row, protected by database-level immutability triggers and written in the same atomic batch as the operation itself, carrying full pre-images of anything the operation removed. Deleted records stay reconstructible, and per-record history pages render the ledger.
+- **Duplicates worklists.** Candidate-duplicate queues for entities and places, with merge entry points and "not a duplicate" dismissals that are recorded in the ledger so refuted pairs stop resurfacing.
+- **Places map explorer and coordinate editing.** Place authorities gain an interactive map (MapLibre GL with MapTiler tiles), a coordinate editor with pin placement and geocoding search, and a controlled coordinate-precision vocabulary (exact, approximate, centroid, uncertain). A derived geocoding status distinguishes missing, needs-review, and located places, backed by a "coordinates to review" worklist.
+- **Combined places surface.** The places list and map are now one surface: list and map panes side by side, accent-insensitive full-text search, place-type and external-identifier filters (TGN, HGIS de las Indias, WHG) with per-row badges, a show-merged toggle, and live re-filtering as the map viewport moves.
+- **Authority record pages redesigned.** Entity and place records use a two-column layout that keeps the record fields and map in view while linked descriptions render as a worklist: search within links, role and repository filters with live counts, sorting, page sizes, and click-to-unfold context cards. Where a link's evidence lives in transcribed text rather than structured fields, the worklist surfaces OCR snippets with match highlighting, steppers for repeated matches, and an on-demand full-transcript view.
+- **Notes on authority records.** Entities and places gain public and internal notes fields.
+- **Entities list filters.** Type pills, an attested-year range filter, a function picker, a sortable linked-descriptions column, and a columns toggle for the external-identifier columns.
+- **Role vocabulary, grouped and fully labelled.** The 33 entity roles and 7 place roles are organised into canonical groups; the entity and place linkers use grouped, localised pickers; every role carries complete English and Spanish labels, with a regression suite keeping enum and label sets in lockstep.
+- **Reference federations.** Two working federations ship as the reference deployment: Neogranadina, with the Archivo Histórico de Rionegro partitioned into its own member tenant and Komuni joining as a member; and AMPL, with the Santa Bárbara Mission Archive-Library as its first member tenant.
+
+### Changed
+
+- **Typographic scale.** Admin surfaces move to a named typographic scale, replacing ad-hoc font sizing.
+- **Geocoding status is derived.** The manual needs-geocoding flag is gone; a place's geocoding status now derives from its coordinates and precision.
+
 ## [0.4.1] - 2026-05-29
 
 ### Fixed

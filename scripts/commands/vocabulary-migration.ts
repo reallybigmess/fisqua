@@ -21,12 +21,13 @@
  * proposed-term INSERTs and one with the entity UPDATEs, applied in that
  * order so the FK targets exist before the entity rows reference them.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 import * as fs from "node:fs/promises";
 import * as crypto from "node:crypto";
 import type { ImportResult } from "../lib/types";
 import { escapeSql, generateInserts, writeSqlFiles } from "../lib/sql";
+import { NEOGRANADINA_FEDERATION_ID } from "../../app/lib/tenant";
 
 /**
  * Shape of each entity in the entity data export.
@@ -113,13 +114,16 @@ export async function migrateEntityFunctions(
 
   if (proposedTerms.size > 0) {
     const termColumns = [
-      "id", "canonical", "category", "status", "entity_count",
+      // federation_id (migration 0045): vocabulary_terms is
+      // federation-scoped; auto-created terms file under Neogranadina.
+      "id", "federation_id", "canonical", "category", "status", "entity_count",
       "notes", "created_at", "updated_at",
     ];
     const termRows: string[][] = [];
     for (const term of proposedTerms.values()) {
       termRows.push([
         escapeSql(term.id),
+        escapeSql(NEOGRANADINA_FEDERATION_ID),
         escapeSql(term.canonical),
         escapeSql(null), // category unknown
         escapeSql("proposed"),

@@ -34,6 +34,7 @@ import user_admin from "./en/user_admin";
 import qc_flags from "./en/qc_flags";
 import landing from "./en/landing";
 import operator from "./en/operator";
+import authorities from "./en/authorities";
 
 export default {
   common,
@@ -63,4 +64,5 @@ export default {
   qc_flags,
   landing,
   operator,
+  authorities,
 } satisfies ResourceLanguage;

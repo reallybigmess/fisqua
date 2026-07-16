@@ -19,7 +19,7 @@
  * validator (the `test_images` autosave hang). `tests/db/enum-drift.test.ts`
  * pins each schema column's enum against the constant it must equal.
  *
- * @version v0.4.1
+ * @version v0.4.3
  */
 
 // Description levels
@@ -60,11 +60,59 @@ export const ENTITY_ROLES = [
   "mortgagor", "mortgagee", "creditor", "debtor", "fiador",
 ] as const;
 
+export type EntityRole = (typeof ENTITY_ROLES)[number];
+
 // Place roles in descriptions
 export const PLACE_ROLES = [
   "created", "subject", "mentioned",
   "sent_from", "sent_to", "published", "venue",
 ] as const;
+
+export type PlaceRole = (typeof PLACE_ROLES)[number];
+
+// Entity-role grouping for grouped pickers (optgroups). The seven groups
+// and their membership are the canonical zasqua-backend structure
+// (`catalog/models.py` `DescriptionEntity.Role`, 7 comment-delimited
+// groups). The contract this constant must hold: the union of every
+// group's `roles` equals ENTITY_ROLES exactly — same members, no
+// duplicates, nothing extra. `satisfies …EntityRole[]` enforces at
+// compile time that no group can name a value absent from ENTITY_ROLES;
+// `tests/lib/role-vocabulary.test.ts` enforces the reverse (every
+// ENTITY_ROLES member sits in exactly one group) so adding an enum value
+// without grouping it fails loudly. The picker renders groups in this
+// order; ENTITY_ROLES keeps its own (schema-pinned) order untouched.
+// Group-label i18n keys are `role_group_<key>`; role-label keys are
+// `role_<value>` — both live in the locale namespaces the pickers use.
+export const ENTITY_ROLE_GROUPS = [
+  {
+    key: "production",
+    roles: ["creator", "author", "editor", "publisher", "mentioned", "subject", "official"],
+  },
+  {
+    key: "correspondence",
+    roles: ["sender", "recipient"],
+  },
+  {
+    key: "notarial",
+    roles: ["scribe", "witness", "notary"],
+  },
+  {
+    key: "legal",
+    roles: ["plaintiff", "defendant", "petitioner", "judge", "appellant", "fiador", "apoderado", "victim"],
+  },
+  {
+    key: "family",
+    roles: ["heir", "albacea", "spouse"],
+  },
+  {
+    key: "transactions",
+    roles: ["grantor", "donor", "seller", "buyer", "mortgagor", "mortgagee", "creditor", "debtor"],
+  },
+  {
+    key: "visual",
+    roles: ["photographer", "artist"],
+  },
+] as const satisfies readonly { key: string; roles: readonly EntityRole[] }[];
 
 // Vocabulary term statuses
 export const VOCABULARY_STATUSES = ["approved", "proposed", "deprecated"] as const;
@@ -125,3 +173,15 @@ export const QC_RESOLUTION_ACTIONS = [
 
 // GeoNames feature classes (fixed external vocabulary).
 export const GEONAMES_FCLASSES = ["P", "H", "A", "T", "S"] as const;
+
+// Coordinate-precision vocabulary for `places.coordinate_precision`
+// (migration 0060). NULL/absent = not recorded; it is NOT a member here.
+// `uncertain` also drives the derived "to review" coordinate status on
+// the combined places surface. The `places.coordinate_precision` column
+// carries no Drizzle `enum:` hint — legacy rows may still hold
+// out-of-vocabulary values — so this constant is enforced only at the
+// Zod boundary, not by enum-drift.
+export const COORDINATE_PRECISIONS = [
+  "exact", "approximate", "centroid", "uncertain",
+] as const;
+export type CoordinatePrecision = (typeof COORDINATE_PRECISIONS)[number];

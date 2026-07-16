@@ -14,7 +14,7 @@
  * rejected by the project-role guard before the UI renders, so the page
  * can assume it is always running as a lead.
  *
- * @version v0.3.0
+ * @version v0.4.1
  */
 
 import { useState } from "react";
@@ -99,27 +99,14 @@ export async function loader({ params, context }: Route.LoaderArgs) {
     for (const r of rows) userMap.set(r.id, { name: r.name, email: r.email });
   }
 
-  // Valid transitions for this user's project role
-  const [membership] = await db
-    .select({ role: projectMembers.role })
-    .from(projectMembers)
-    .where(
-      and(
-        eq(projectMembers.projectId, params.id),
-        eq(projectMembers.userId, user.id)
-      )
-    )
-    .limit(1)
-    .all();
-
-  const workflowRole: WorkflowRole =
-    user.isAdmin || !membership
-      ? "lead"
-      : (membership.role as WorkflowRole);
-
+  // Valid transitions to offer in the UI. The requireProjectRole guard
+  // above admits only leads and admins, so the role here is always
+  // lead — deriving it from a single membership row previously showed
+  // a lead-plus-cataloguer member the cataloguer's transition map when
+  // the cataloguer row came back first.
   const validTransitions = getValidTransitions(
     volume.status as VolumeStatus,
-    workflowRole
+    "lead"
   );
 
   // open QC flags on this volume, with denormalised
@@ -262,8 +249,13 @@ export async function action({ request, params, context }: Route.ActionArgs) {
     const targetStatus = formData.get("targetStatus") as VolumeStatus;
     const comment = formData.get("comment") as string | null;
 
-    // Determine workflow role
-    const [membership] = await db
+    // Determine workflow roles. ALL membership rows count — a user can
+    // hold several roles on one project and the transition machine is
+    // role-partitioned, so reading a single row made permissions
+    // row-order-dependent. Admins and non-members act as lead (this
+    // page is already lead/admin-gated upstream).
+    const { WORKFLOW_ROLE_PRECEDENCE } = await import("../lib/workflow");
+    const membershipRows = await db
       .select({ role: projectMembers.role })
       .from(projectMembers)
       .where(
@@ -272,13 +264,14 @@ export async function action({ request, params, context }: Route.ActionArgs) {
           eq(projectMembers.userId, user.id)
         )
       )
-      .limit(1)
       .all();
-
-    const workflowRole: WorkflowRole =
-      user.isAdmin || !membership
-        ? "lead"
-        : (membership.role as WorkflowRole);
+    const heldRoles: WorkflowRole[] = WORKFLOW_ROLE_PRECEDENCE.filter((r) =>
+      membershipRows.some((m) => m.role === r)
+    );
+    // Lead fallback only for admins and true non-members; a member whose
+    // rows carry no workflow role keeps an empty set (transition denied).
+    const workflowRoles: WorkflowRole[] =
+      user.isAdmin || membershipRows.length === 0 ? ["lead"] : heldRoles;
 
     try {
       await transitionVolumeStatus(
@@ -286,7 +279,7 @@ export async function action({ request, params, context }: Route.ActionArgs) {
         params.volumeId,
         targetStatus,
         user.id,
-        workflowRole,
+        workflowRoles,
         comment || undefined
       );
       return {

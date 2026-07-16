@@ -25,7 +25,7 @@
  * validator factory is the same one the admin form save action
  * consumes.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 import { eq, and, isNull, inArray, sql, desc } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -103,9 +103,16 @@ export interface VolumeWithCount {
 /**
  * List volumes that have at least one promotable entry:
  * type = 'item', descriptionStatus = 'approved', promotedDescriptionId IS NULL.
+ *
+ * Tenant-scoped: `tenantId` (the request-boundary session tenant) filters
+ * both the volume scan and the per-volume entry count so the promote
+ * surface never lists another tenant's volumes. Volumes inherit their
+ * tenant from their project; entries from their volume -- the predicate
+ * on each is the loader-layer enforcement D1 cannot provide (invariant I1).
  */
 export async function getVolumesWithPromotableEntries(
-  db: DrizzleD1Database<any>
+  db: DrizzleD1Database<any>,
+  tenantId: string,
 ): Promise<VolumeWithCount[]> {
   const rows = await db
     .select({
@@ -114,6 +121,7 @@ export async function getVolumesWithPromotableEntries(
       referenceCode: volumes.referenceCode,
     })
     .from(volumes)
+    .where(eq(volumes.tenantId, tenantId))
     .all();
 
   const result: VolumeWithCount[] = [];
@@ -124,6 +132,7 @@ export async function getVolumesWithPromotableEntries(
       .from(entries)
       .where(
         and(
+          eq(entries.tenantId, tenantId),
           eq(entries.volumeId, vol.id),
           eq(entries.type, "item"),
           eq(entries.descriptionStatus, "approved"),
@@ -146,6 +155,7 @@ export async function getVolumesWithPromotableEntries(
  */
 export async function getPromotableEntries(
   db: DrizzleD1Database<any>,
+  tenantId: string,
   volumeId: string
 ): Promise<{
   promotable: Array<typeof entries.$inferSelect>;
@@ -156,6 +166,7 @@ export async function getPromotableEntries(
     .from(entries)
     .where(
       and(
+        eq(entries.tenantId, tenantId),
         eq(entries.volumeId, volumeId),
         eq(entries.type, "item"),
         eq(entries.descriptionStatus, "approved"),
@@ -170,6 +181,7 @@ export async function getPromotableEntries(
     .from(entries)
     .where(
       and(
+        eq(entries.tenantId, tenantId),
         eq(entries.volumeId, volumeId),
         eq(entries.type, "item"),
         eq(entries.descriptionStatus, "promoted"),
@@ -246,7 +258,7 @@ export async function promoteEntries(
   const loadedEntries = await db
     .select()
     .from(entries)
-    .where(inArray(entries.id, entryIds))
+    .where(and(eq(entries.tenantId, tenantId), inArray(entries.id, entryIds)))
     .all();
 
   const entryMap = new Map(loadedEntries.map((e) => [e.id, e]));
@@ -351,7 +363,7 @@ export async function promoteEntries(
   const volume = await db
     .select()
     .from(volumes)
-    .where(eq(volumes.id, volumeId))
+    .where(and(eq(volumes.tenantId, tenantId), eq(volumes.id, volumeId)))
     .get();
 
   if (!volume) {
@@ -391,7 +403,9 @@ export async function promoteEntries(
   const pages = await db
     .select()
     .from(volumePages)
-    .where(eq(volumePages.volumeId, volumeId))
+    .where(
+      and(eq(volumePages.tenantId, tenantId), eq(volumePages.volumeId, volumeId)),
+    )
     .orderBy(volumePages.position)
     .all();
 
@@ -520,7 +534,7 @@ export async function promoteEntries(
         descriptionStatus: "promoted" as const,
         updatedAt: now,
       })
-      .where(eq(entries.id, m.entry.id))
+      .where(and(eq(entries.tenantId, tenantId), eq(entries.id, m.entry.id)))
   );
 
   for (let i = 0; i < updateStmts.length; i += CHUNK_SIZE) {

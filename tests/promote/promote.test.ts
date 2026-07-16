@@ -464,7 +464,7 @@ describe("getPromotableEntries", () => {
       }),
     };
 
-    const result = await getPromotableEntries(mockDb as any, "vol-001");
+    const result = await getPromotableEntries(mockDb as any, DEFAULT_TEST_TENANT_ID, "vol-001");
     expect(result.promotable).toHaveLength(1);
     expect(result.alreadyPromoted).toHaveLength(1);
     expect(result.promotable[0].id).toBe("e1");
@@ -479,22 +479,26 @@ describe("getVolumesWithPromotableEntries", () => {
       { id: "v2", name: "Vol 2", referenceCode: "REF-002" },
     ];
 
-    let countCall = 0;
+    // getVolumesWithPromotableEntries now tenant-scopes the volume scan,
+    // so BOTH the volumes query and each per-volume entry-count query end
+    // in `.where(...).all()`. Track the shared where().all() call order:
+    // call 1 = the volumes list; calls 2+ = per-volume promotable counts
+    // (v1 -> 5, v2 -> 0).
+    let whereAllCall = 0;
     const mockDb = {
       select: vi.fn().mockReturnThis(),
       from: vi.fn().mockReturnValue({
-        all: vi.fn().mockResolvedValue(volumes),
         where: vi.fn().mockReturnValue({
           all: vi.fn().mockImplementation(() => {
-            countCall++;
-            // v1 has 5 promotable, v2 has 0
-            return Promise.resolve([{ count: countCall === 1 ? 5 : 0 }]);
+            whereAllCall++;
+            if (whereAllCall === 1) return Promise.resolve(volumes);
+            return Promise.resolve([{ count: whereAllCall === 2 ? 5 : 0 }]);
           }),
         }),
       }),
     };
 
-    const result = await getVolumesWithPromotableEntries(mockDb as any);
+    const result = await getVolumesWithPromotableEntries(mockDb as any, DEFAULT_TEST_TENANT_ID);
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe("v1");
     expect(result[0].promotableCount).toBe(5);

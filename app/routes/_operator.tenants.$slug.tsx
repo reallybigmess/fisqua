@@ -123,12 +123,14 @@ export async function action({ request, params, context }: Route.ActionArgs) {
           vocabularyHubEnabled: tenant.vocabularyHubEnabled as unknown as boolean,
           publishPipelineEnabled: tenant.publishPipelineEnabled as unknown as boolean,
           multiRepositoryEnabled: tenant.multiRepositoryEnabled as unknown as boolean,
+          authoritiesEnabled: tenant.authoritiesEnabled as unknown as boolean,
         },
         {
           crowdsourcingEnabled: parsed.data.crowdsourcingEnabled,
           vocabularyHubEnabled: parsed.data.vocabularyHubEnabled,
           publishPipelineEnabled: parsed.data.publishPipelineEnabled,
           multiRepositoryEnabled: parsed.data.multiRepositoryEnabled,
+          authoritiesEnabled: parsed.data.authoritiesEnabled,
         },
       );
       if (changes.length === 0) {
@@ -161,6 +163,7 @@ export async function action({ request, params, context }: Route.ActionArgs) {
               vocabularyHubEnabled: parsed.data.vocabularyHubEnabled,
               publishPipelineEnabled: parsed.data.publishPipelineEnabled,
               multiRepositoryEnabled: parsed.data.multiRepositoryEnabled,
+              authoritiesEnabled: parsed.data.authoritiesEnabled,
               updatedAt: now,
             })
             .where(eq(tenants.id, tenant.id));
@@ -370,6 +373,17 @@ export default function TenantDetailPage() {
                   }
                 />
                 <span>{t("tenants_list.capabilities.multi_repository")}</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  name="authoritiesEnabled"
+                  value="true"
+                  defaultChecked={
+                    tenant.authoritiesEnabled as unknown as boolean
+                  }
+                />
+                <span>{t("tenants_list.capabilities.authorities")}</span>
               </label>
             </div>
             <button

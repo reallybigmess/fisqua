@@ -24,7 +24,7 @@ import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import * as schema from "../../app/db/schema";
-import { applyMigrations, cleanDatabase } from "../helpers/db";
+import { applyMigrations, cleanDatabase, DEFAULT_TEST_TENANT_ID } from "../helpers/db";
 import { createTestUser } from "../helpers/auth";
 import type { ActivityEvent } from "../../app/lib/workflow.server";
 
@@ -57,6 +57,7 @@ describe("activity_log.event accepts literals", () => {
     const id = crypto.randomUUID();
     await db.insert(schema.activityLog).values({
       id,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       userId: user.id,
       projectId: null,
       volumeId: null,
@@ -80,6 +81,7 @@ describe("activity_log.event accepts literals", () => {
     const id = crypto.randomUUID();
     await db.insert(schema.activityLog).values({
       id,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       userId: user.id,
       projectId: null,
       volumeId: null,

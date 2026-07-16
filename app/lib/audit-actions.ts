@@ -20,7 +20,7 @@
  * `tests/db/audit-log.test.ts` "action CHECK" assertion will catch
  * a drift in either direction.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 /**
@@ -35,9 +35,11 @@
  *     Recovery flows through `login_as` + tenant-side admin UI.
  *   - `login_as` — operator mints an impersonation handoff and the
  *     tenant subdomain consumes it.
- *   - `edit_on_behalf` — reserved enum slot; no v0.4 code path.
- *     Tenant content edits flow through `login_as` instead.
- *   - `set_capability` — operator toggles one of the four capability
+ *   - `edit_on_behalf` — the federation grant-write chokepoint: every
+ *     non-GET request served under a live federation grant records one
+ *     row with actor = the grant-holder's home tenant and target = the
+ *     member tenant (see federation.server.ts `logGrantWrite`).
+ *   - `set_capability` — operator toggles one of the five capability
  *     booleans on a tenant.
  *   - `set_quota` — reserved enum slot; quota columns exist on
  *     `tenants` but no code path enforces them in v0.4.
@@ -60,4 +62,4 @@ export const AUDIT_LOG_ACTIONS = [
  */
 export type AuditAction = (typeof AUDIT_LOG_ACTIONS)[number];
 
-// @version v0.4.0
+// @version v0.4.2

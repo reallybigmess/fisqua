@@ -5,6 +5,8 @@ worker-configuration.d.ts
 .dev.vars
 .wrangler/
 .DS_Store
+.import/
 tsconfig.cloudflare.tsbuildinfo
 tsconfig.node.tsbuildinfo
 docs/
+.reconcile-reports/

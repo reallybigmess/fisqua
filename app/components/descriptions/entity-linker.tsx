@@ -5,7 +5,7 @@
  * description, with typeahead search, role picker, and inline create-new
  * flow.
  *
- * @version v0.3.0
+ * @version v0.4.3
  */
 
 import { useState } from "react";
@@ -19,7 +19,7 @@ import {
   Plus,
 } from "lucide-react";
 import { SearchPopover } from "./search-popover";
-import { ENTITY_ROLES } from "~/lib/validation/enums";
+import { entityRoleOptionGroups } from "~/lib/role-options";
 
 export interface DescriptionEntityLink {
   id: string;
@@ -55,6 +55,9 @@ export function EntityLinker({
 }: EntityLinkerProps) {
   const { t } = useTranslation("descriptions_admin");
   const fetcher = useFetcher();
+  // Grouped, localised role options — the picker can only offer
+  // vocabulary values (see `~/lib/role-options`).
+  const roleGroups = entityRoleOptionGroups(t);
   const [showSearch, setShowSearch] = useState(false);
   const [selectedEntity, setSelectedEntity] = useState<SelectedEntity | null>(
     null
@@ -203,10 +206,14 @@ export function EntityLinker({
                     onChange={(e) => setEditRole(e.target.value)}
                     className="w-full rounded border border-stone-200 px-2 py-1 text-sm"
                   >
-                    {ENTITY_ROLES.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
+                    {roleGroups.map((g) => (
+                      <optgroup key={g.key} label={g.label}>
+                        {g.options.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
                   <input
@@ -361,10 +368,14 @@ export function EntityLinker({
               onChange={(e) => setAddRole(e.target.value)}
               className="w-full rounded border border-stone-200 px-2 py-1 text-sm"
             >
-              {ENTITY_ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
+              {roleGroups.map((g) => (
+                <optgroup key={g.key} label={g.label}>
+                  {g.options.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </div>

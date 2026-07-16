@@ -9,11 +9,12 @@
  * flags" badge can render without the caller having to fan out a
  * second query.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 import { eq, and, inArray, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import {
+  projects,
   volumes,
   volumePages,
   entries,
@@ -26,9 +27,13 @@ import type { ParsedManifest } from "./iiif.server";
 
 /**
  * Number of page rows per INSERT statement.
- * 8 columns per row * 12 rows = 96 bound params (under D1's 100 limit).
+ * 9 columns per row * 11 rows = 99 bound params (under D1's 100 limit).
+ * Each volume_pages row binds 9 columns — id, tenant_id, volume_id,
+ * position, image_url, width, height, label, created_at — and every
+ * inserted row must set tenant_id explicitly (the column is NOT NULL with
+ * no Drizzle default), so the per-row bind count is fixed at 9.
  */
-const PAGE_CHUNK_SIZE = 12;
+const PAGE_CHUNK_SIZE = 11;
 
 type Volume = typeof volumes.$inferSelect;
 
@@ -56,8 +61,24 @@ export async function createVolume(
   const now = Date.now();
   const volumeId = crypto.randomUUID();
 
+  // A volume inherits its tenant from its parent project; the
+  // volume_pages rows below inherit the same tenantId from the volume.
+  // Resolving it from the project row (rather than taking a session
+  // tenant) keeps the volume's tenant equal to its project's by
+  // construction -- the invariant the crowdsourcing tree relies on.
+  const projectRow = await db
+    .select({ tenantId: projects.tenantId })
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .get();
+  if (!projectRow) {
+    throw new Error(`createVolume: project ${projectId} not found`);
+  }
+  const tenantId = projectRow.tenantId;
+
   const volumeRow: typeof volumes.$inferInsert = {
     id: volumeId,
+    tenantId,
     projectId,
     name: manifest.name,
     referenceCode: manifest.referenceCode,
@@ -79,6 +100,7 @@ export async function createVolume(
       chunks.push(
         manifest.pages.slice(i, i + PAGE_CHUNK_SIZE).map((page) => ({
           id: crypto.randomUUID(),
+          tenantId,
           volumeId,
           position: page.position,
           imageUrl: page.imageUrl,
@@ -104,6 +126,7 @@ export async function createVolume(
 
   return {
     id: volumeId,
+    tenantId,
     projectId,
     name: manifest.name,
     referenceCode: manifest.referenceCode,

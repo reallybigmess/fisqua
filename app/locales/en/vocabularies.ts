@@ -7,7 +7,7 @@
  * the merge/split workflow labels that authority editors use to keep
  * the function and subject vocabularies tidy.
  *
- * @version v0.3.0
+ * @version v0.4.1
  */
 export default {
   // Page
@@ -99,4 +99,26 @@ export default {
   enum_redeployment_warning:
     "Changes to these vocabularies require a code update and redeployment.",
   enum_pending_changes: "Pending changes (not yet deployed)",
+
+  // Linked-entities list overflow (first page + remainder)
+  linked_more: "{{count}} more",
+
+  // Shared merge/split dialog labels (camelCase keys resolved by the
+  // shared admin MergeDialog/SplitDialog against this namespace).
+  mergeTitle: "Merge function",
+  mergeSearch: "Search functions...",
+  mergeReassignTitle: "Reassign entities",
+  mergeReassignSubtitle: "{{name}} has {{count}} linked entities",
+  mergeConfirm: "Confirm merge",
+  mergeCancel: "Cancel",
+  splitTitle: "Split function",
+  splitSubtitle:
+    "A new function will be created from {{name}}. Select the entities that should be moved to the new function.",
+  splitConfirm: "Confirm split",
+  splitCancel: "Cancel",
+  splitNameLabel: "New function name",
+  splitNamePlaceholder: "Enter new function name...",
+  loadMore: "Load more",
+  selectAll: "Select all",
+  deselectAll: "Deselect all",
 } as const;

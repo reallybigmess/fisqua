@@ -6,13 +6,13 @@
  * activity timeline so the operator can decide where to dive in
  * without opening every panel.
  *
- * Tenant attribution comes from request context, populated by
- * `authMiddleware`. Distinct-value counts on `entities` and `places`
- * are scoped to `tenant.id`; descriptionEntities /
+ * Authority scope is the federation (migrations 0045-0048). The vocabulary
+ * term counts and the distinct-value counts on `entities` and `places`
+ * are scoped to `tenant.federationId`; descriptionEntities /
  * descriptionPlaces inherit tenant scope through their parent
  * description (children-table FK chain).
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { Link } from "react-router";
@@ -51,6 +51,7 @@ export async function loader({ context }: Route.LoaderArgs) {
       count: sql<number>`count(*)`,
     })
     .from(vocabularyTerms)
+    .where(eq(vocabularyTerms.federationId, tenant.federationId))
     .groupBy(vocabularyTerms.status)
     .all();
 
@@ -62,7 +63,7 @@ export async function loader({ context }: Route.LoaderArgs) {
   const entityTypeCount = await db
     .select({ count: sql<number>`count(distinct entity_type)` })
     .from(entities)
-    .where(eq(entities.tenantId, tenant.id))
+    .where(eq(entities.federationId, tenant.federationId))
     .all();
 
   // Entity roles: count distinct values in use. descriptionEntities has
@@ -77,7 +78,7 @@ export async function loader({ context }: Route.LoaderArgs) {
   const placeTypeCount = await db
     .select({ count: sql<number>`count(distinct place_type)` })
     .from(places)
-    .where(eq(places.tenantId, tenant.id))
+    .where(eq(places.federationId, tenant.federationId))
     .all();
 
   // Place roles: count distinct values in use

@@ -47,7 +47,10 @@
  * Fifth, the tenant layer (v0.4): `tenants` carries tenant identity,
  * the four-boolean capability matrix, the descriptive_standard enum,
  * quota fields, and a nullable `disabled_at` column carrying the
- * soft-disable timestamp. `auditLog` records every operator action
+ * soft-disable timestamp. `federations` sits one level above tenants
+ * (platform > federation > tenant): every tenant carries a
+ * `federation_id` and belongs to exactly one federation, standalone
+ * tenants being a federation of one. `auditLog` records every operator action
  * that touches tenant data — append-only by trigger (BEFORE UPDATE /
  * BEFORE DELETE both RAISE ABORT), bounded by a CHECK enum on the
  * `action` column. `impersonationHandoffs` is the single-use D1
@@ -79,7 +82,7 @@
  * left in the database for migration purity and should be treated as
  * legacy for any future schema work.
  *
- * @version v0.4.1
+ * @version v0.4.3
  */
 
 import {
@@ -116,6 +119,20 @@ import {
 // runtime hint just gives Drizzle TypeScript narrowing.
 import { AUDIT_LOG_ACTIONS } from "../lib/audit-actions";
 
+// The nine crowdsourcing-subtree tables declare `tenant_id` NOT NULL
+// with NO Drizzle `.default(...)`: `tenantId` is therefore REQUIRED in
+// each table's `$inferInsert` type, so TypeScript forces every writer to
+// supply it explicitly (resolved from the row's natural parent -- project
+// -> volume -> entry/page inheritance -- or the session tenant at the
+// roots). The DB-level `DEFAULT '<neogranadina-uuid>'` that migration
+// 0042 stamped on these columns remains in the SQLite schema as inert
+// metadata: SQLite cannot drop a column default without the table rebuild
+// prohibited for these populated cascade-parent tables (0042 header), and
+// because no writer omits the column, that default is never consulted.
+// The authority tables (entities/places/vocabulary_terms) carry
+// `federation_id`, not `tenant_id`; drafts sit at a root (session tenant),
+// keyed by (record_id, record_type) rather than under a volume.
+
 export const tenants = sqliteTable(
   "tenants",
   {
@@ -129,6 +146,10 @@ export const tenants = sqliteTable(
     vocabularyHubEnabled: integer("vocabulary_hub_enabled", { mode: "boolean" }).notNull().default(true),
     publishPipelineEnabled: integer("publish_pipeline_enabled", { mode: "boolean" }).notNull().default(true),
     multiRepositoryEnabled: integer("multi_repository_enabled", { mode: "boolean" }).notNull().default(false),
+    // Gates the entity/place authority surface (migration 0058). DEFAULT
+    // true keeps the rollout behaviour-neutral; the greenfield member
+    // tenants (komuni, sbmal) launch strings-only with it off.
+    authoritiesEnabled: integer("authorities_enabled", { mode: "boolean" }).notNull().default(true),
     quotaStorageBytes: integer("quota_storage_bytes"),
     // Soft-disable timestamp (migration 0039). Nullable — NULL means
     // active. When set, getTenantFromRequest 404s the tenant subdomain
@@ -136,12 +157,69 @@ export const tenants = sqliteTable(
     // carve-out exists so a disabled tenant remains recoverable from
     // the operator surface).
     disabledAt: integer("disabled_at"),
+    // The federation this tenant belongs to (federation spec §2 — every
+    // tenant is in exactly one federation; a standalone tenant is a
+    // federation of one). Declared `.notNull()` so reads type it as
+    // `string` and every insert must supply it (there is no safe default
+    // federation — see migration 0044's header), but the underlying D1
+    // column is nullable-with-FK: migration 0044 adds it via
+    // `ADD COLUMN federation_id TEXT REFERENCES federations(id)` (SQLite
+    // forbids NOT NULL + REFERENCES on ADD COLUMN, and the table-rebuild
+    // alternative is prohibited) and back-fills every current tenant, so
+    // no NULL survives. Provisioning a new tenant must create its
+    // federation-of-one and set this column in the same batch.
+    //
+    // `.references()` is deliberately OMITTED: tenants <-> federations is
+    // a circular FK pair (federations.leadTenantId already points back
+    // here), and declaring both directions in Drizzle triggers the
+    // recursive-declaration trap (TS7022) — the same reason the
+    // self-referencing tree columns above omit it. The real FK lives in
+    // the SQL migration (0044) and the test harness; this is the one
+    // side dropped to break the type cycle.
+    federationId: text("federation_id").notNull(),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
     uniqueIndex("tenants_slug_idx").on(table.slug),
     index("tenants_kind_idx").on(table.kind),
+    index("tenants_federation_idx").on(table.federationId),
+  ],
+);
+
+// federations sit one scoping level above tenants (platform >
+// federation > tenant). Every tenant references exactly one federation
+// via tenants.federationId; a standalone tenant is a federation of one
+// whose lead is itself. Authorities (entities, places, vocabulary terms)
+// become federation-scoped in a later migration, shared across all
+// member tenants of a federation. `leadTenantId` is a real FK back to
+// tenants, making tenants <-> federations a circular FK pair — see
+// migration 0044 for how creation/seeding/teardown sequence around it
+// (D1 has no DEFERRED FK support).
+export const federations = sqliteTable(
+  "federations",
+  {
+    id: text("id").primaryKey(),
+    // Not routable; admin/display only (federations have no host — the
+    // lead tenant's host renders federation-level surfaces).
+    slug: text("slug").notNull().unique(),
+    name: text("name").notNull(),
+    leadTenantId: text("lead_tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    status: text("status", { enum: ["active", "suspended"] }).notNull().default("active"),
+    // Operator-set gate on whether this federation can have members at
+    // all (federation spec §5). Default off: every federation starts as
+    // a federation-of-one. Neogranadina and AMPL are enabled at
+    // provisioning; the platform federation-of-one stays off.
+    multiMemberEnabled: integer("multi_member_enabled", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("federations_slug_idx").on(table.slug),
+    index("federations_lead_tenant_idx").on(table.leadTenantId),
   ],
 );
 
@@ -163,6 +241,41 @@ export const users = sqliteTable("users", {
   updatedAt: integer("updated_at").notNull(),
   githubId: text("github_id").unique(),
 });
+
+// federation_memberships (migration 0049) is the grant join table:
+// a row `(userId, federationId, role)` lets a user whose HOME tenant is
+// elsewhere act in every tenant of `federationId` at the effective role
+// its `role` maps to -- generalising the platform -> tenant impersonation
+// mechanism one scoping level down (federation spec §3/§4). `role` is a
+// bounded enum: `steward` (admin-equivalent in member tenants; full
+// member-tenant setup/management) or `staff` (cataloguer/editor-equivalent;
+// never member-tenant administration -- invariant I6). Both FKs are
+// ON DELETE CASCADE (a membership is meaningless once its user or
+// federation is gone). `UNIQUE (userId, federationId)` makes a user's
+// role in a federation single-valued -- a role change is an UPDATE, not a
+// second row. Grant resolution and effective-role mapping live in
+// app/lib/federation.server.ts; this table only stores the grant.
+export const federationMemberships = sqliteTable(
+  "federation_memberships",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    federationId: text("federation_id")
+      .notNull()
+      .references(() => federations.id, { onDelete: "cascade" }),
+    role: text("role", { enum: ["steward", "staff"] }).notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("fed_memberships_user_federation_idx").on(
+      table.userId,
+      table.federationId,
+    ),
+    index("fed_memberships_federation_idx").on(table.federationId),
+  ],
+);
 
 // oauth_handoffs (migration 0038) is the ephemeral, single-use rendezvous
 // table that lets the apex GitHub OAuth callback hand a freshly
@@ -305,6 +418,7 @@ export const magicLinks = sqliteTable(
 
 export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
   name: text("name").notNull(),
   description: text("description"),
   conventions: text("conventions"),       // markdown guidelines
@@ -351,6 +465,7 @@ export const volumes = sqliteTable(
   "volumes",
   {
     id: text("id").primaryKey(),
+    tenantId: text("tenant_id").notNull(),
     projectId: text("project_id").notNull().references(() => projects.id),
     name: text("name").notNull(),
     referenceCode: text("reference_code").notNull(),
@@ -377,6 +492,7 @@ export const volumePages = sqliteTable(
   "volume_pages",
   {
     id: text("id").primaryKey(),
+    tenantId: text("tenant_id").notNull(),
     volumeId: text("volume_id")
       .notNull()
       .references(() => volumes.id, { onDelete: "cascade" }),
@@ -393,10 +509,24 @@ export const volumePages = sqliteTable(
   ]
 );
 
+// Entries carry their own copy of the descriptive fields
+// (`translatedTitle` through `descriptionLevel` below) even though the
+// same concepts exist as columns on `descriptions`. The split is
+// deliberate: an entry's fields are the crowdsourcing WORKING copy --
+// draft data with its own review lifecycle (`descriptionStatus`),
+// edited through the project workflow -- while a `descriptions` row is
+// the canonical archival record read by the catalogue and the export
+// pipeline. Promotion (`app/lib/promote/promote.server.ts`) is the one
+// bridge between them: it validates an approved entry and copies the
+// mapped fields onto a fresh `descriptions` row, recording the link in
+// `promotedDescriptionId`. After promotion the description is the
+// authoritative copy; the entry keeps its fields as the record of what
+// was promoted.
 export const entries = sqliteTable(
   "entries",
   {
     id: text("id").primaryKey(),
+    tenantId: text("tenant_id").notNull(),
     volumeId: text("volume_id")
       .notNull()
       .references(() => volumes.id),
@@ -453,6 +583,7 @@ export const resegmentationFlags = sqliteTable(
   "resegmentation_flags",
   {
     id: text("id").primaryKey(),
+    tenantId: text("tenant_id").notNull(),
     volumeId: text("volume_id").notNull().references(() => volumes.id),
     reportedBy: text("reported_by").notNull().references(() => users.id),
     entryId: text("entry_id").notNull().references(() => entries.id),
@@ -488,6 +619,7 @@ export const qcFlags = sqliteTable(
   "qc_flags",
   {
     id: text("id").primaryKey(),
+    tenantId: text("tenant_id").notNull(),
     volumeId: text("volume_id")
       .notNull()
       .references(() => volumes.id, { onDelete: "cascade" }),
@@ -527,6 +659,7 @@ export const comments = sqliteTable(
   "comments",
   {
     id: text("id").primaryKey(),
+    tenantId: text("tenant_id").notNull(),
     // Denormalised for cheap volume-scoped queries.
     volumeId: text("volume_id")
       .notNull()
@@ -575,6 +708,7 @@ export const activityLog = sqliteTable(
   "activity_log",
   {
     id: text("id").primaryKey(),
+    tenantId: text("tenant_id").notNull(),
     userId: text("user_id")
       .notNull()
       .references(() => users.id),
@@ -639,10 +773,18 @@ export const repositories = sqliteTable(
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
-    uniqueIndex("repo_code_idx").on(table.code),
+    // Per-tenant unique (migration 0043): repository codes are unique
+    // within a tenant, not globally.
+    uniqueIndex("repo_code_idx").on(table.tenantId, table.code),
   ]
 );
 
+// The canonical archival record. Crowdsourced description work does
+// not happen on this table: it accumulates on `entries` (the working
+// copy -- see that table's note) and arrives here via promotion, which
+// copies an approved entry's mapped fields onto a fresh row. Rows are
+// also created directly by the admin description editor and the bulk
+// import scripts.
 export const descriptions = sqliteTable(
   "descriptions",
   {
@@ -744,7 +886,9 @@ export const descriptions = sqliteTable(
   (table) => [
     index("desc_parent_pos_idx").on(table.parentId, table.position),
     index("desc_root_idx").on(table.rootDescriptionId),
-    uniqueIndex("desc_ref_code_idx").on(table.referenceCode),
+    // Per-tenant unique (migration 0043): reference codes are unique
+    // within a tenant, not globally.
+    uniqueIndex("desc_ref_code_idx").on(table.tenantId, table.referenceCode),
     index("desc_repo_idx").on(table.repositoryId),
     index("desc_local_id_idx").on(table.localIdentifier),
   ]
@@ -754,9 +898,17 @@ export const entities = sqliteTable(
   "entities",
   {
     id: text("id").primaryKey(),
-    tenantId: text("tenant_id")
+    // Authority scope is the FEDERATION, not the tenant (federation spec
+    // §9 step 3, migrations 0045-0048): entities are managed by the federation
+    // and shared by all its members. Declared `.notNull()` so reads type
+    // it as `string` and every insert must supply it (no safe default
+    // federation — see 0044/0045 headers); the underlying D1 column is
+    // nullable-with-FK (0045 adds it via ADD COLUMN, 0046 backfills;
+    // the table-rebuild alternative is prohibited), but the backfill
+    // leaves no NULL. tenant_id was dropped by 0048.
+    federationId: text("federation_id")
       .notNull()
-      .references(() => tenants.id, { onDelete: "restrict" }),
+      .references(() => federations.id, { onDelete: "restrict" }),
     entityCode: text("entity_code"), // ne-xxxxxx format
     displayName: text("display_name").notNull(),
     sortName: text("sort_name").notNull(),
@@ -781,11 +933,18 @@ export const entities = sqliteTable(
     // legacy_ids JSON column.
     dbeId: text("dbe_id"),
     legacyIds: text("legacy_ids").notNull().default("[]"),
+    // Notes pair mirroring descriptions' ISAD 3.6 columns (migration
+    // 0059): `notes` may eventually publish; `internal_notes` never
+    // leaves the admin surface.
+    notes: text("notes"),
+    internalNotes: text("internal_notes"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
-    uniqueIndex("entity_code_idx").on(table.entityCode),
+    // Codes are unique per FEDERATION (invariant I5), not global —
+    // migration 0048 swapped this from UNIQUE(entity_code).
+    uniqueIndex("entity_code_idx").on(table.federationId, table.entityCode),
     index("entity_sort_name_idx").on(table.sortName),
     index("entity_wikidata_idx").on(table.wikidataId),
     index("entity_pf_id_idx").on(table.primaryFunctionId),
@@ -796,9 +955,11 @@ export const places = sqliteTable(
   "places",
   {
     id: text("id").primaryKey(),
-    tenantId: text("tenant_id")
+    // Federation-scoped authority (see entities.federationId; 0045 adds
+    // the column, 0047 backfills). tenant_id was dropped by 0048.
+    federationId: text("federation_id")
       .notNull()
-      .references(() => tenants.id, { onDelete: "restrict" }),
+      .references(() => federations.id, { onDelete: "restrict" }),
     placeCode: text("place_code"), // nl-xxxxxx format
     label: text("label").notNull(),
     displayName: text("display_name").notNull(),
@@ -807,11 +968,18 @@ export const places = sqliteTable(
     parentId: text("parent_id"), // self-ref; no .references()
     latitude: real("latitude"),
     longitude: real("longitude"),
+    // Four-value vocabulary (exact/approximate/centroid/uncertain,
+    // NULL = not recorded) enforced at the app-layer Zod boundary, not
+    // by a DB CHECK; migration 0060 mapped the legacy v2_* pipeline
+    // codes into it and archived the originals in legacy_ids. Rows
+    // predating the vocabulary may hold values outside the enum -- the
+    // Drizzle `enum:` hint is deliberately absent.
     coordinatePrecision: text("coordinate_precision"),
     // historical_gobernacion, historical_partido, historical_region,
     // country_code, admin_level_1, admin_level_2, wikidata_id all
     // DROPPED in migration 0036 — 0% populated in audit.
-    needsGeocoding: integer("needs_geocoding", { mode: "boolean" }).default(true),
+    // needs_geocoding DROPPED in migration 0060: coordinate status is
+    // derived from (latitude, coordinate_precision) instead of stored.
     mergedInto: text("merged_into"), // self-ref; no .references()
     tgnId: text("tgn_id"),
     hgisId: text("hgis_id"),
@@ -822,11 +990,18 @@ export const places = sqliteTable(
     // Drizzle's `enum:` hint here is the TypeScript-side mirror.
     fclass: text("fclass", { enum: [...GEONAMES_FCLASSES] }),
     legacyIds: text("legacy_ids").notNull().default("[]"),
+    // Notes pair mirroring descriptions' ISAD 3.6 columns (migration
+    // 0059): `notes` may eventually publish; `internal_notes` never
+    // leaves the admin surface.
+    notes: text("notes"),
+    internalNotes: text("internal_notes"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
-    uniqueIndex("place_code_idx").on(table.placeCode),
+    // Codes are unique per FEDERATION (invariant I5) — migration 0048
+    // swapped this from UNIQUE(place_code).
+    uniqueIndex("place_code_idx").on(table.federationId, table.placeCode),
     index("place_label_idx").on(table.label),
     index("place_tgn_idx").on(table.tgnId),
   ]
@@ -888,6 +1063,7 @@ export const drafts = sqliteTable(
   "drafts",
   {
     id: text("id").primaryKey(),
+    tenantId: text("tenant_id").notNull(),
     recordId: text("record_id").notNull(),
     recordType: text("record_type").notNull(), // 'description' | 'repository' | 'entity' | 'place'
     userId: text("user_id")
@@ -897,7 +1073,15 @@ export const drafts = sqliteTable(
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
-    uniqueIndex("drafts_record_idx").on(table.recordId, table.recordType),
+    // Per-tenant uniqueness (migration 0050): entities/places are
+    // federation-SHARED records, so two tenants may each hold a draft on
+    // the same (recordId, recordType) -- the uniqueness domain is the
+    // tenant, not the platform.
+    uniqueIndex("drafts_record_idx").on(
+      table.tenantId,
+      table.recordId,
+      table.recordType,
+    ),
     index("drafts_user_idx").on(table.userId),
   ]
 );
@@ -964,6 +1148,18 @@ export const exportRuns = sqliteTable(
     // Selective export config
     selectedFonds: text("selected_fonds").notNull(), // JSON array of fonds ref codes
     selectedTypes: text("selected_types").notNull(), // JSON array: ["descriptions","repositories","entities","places"]
+    // The federation this aggregated publish run published (migration
+    // 0055; federation spec §3/§9 step 8). Publishing is a
+    // federation-level operation -- the lead publishes all member
+    // tenants -- so the run's attribution is the federation, not one
+    // tenant. Nullable at BOTH the DB and Drizzle layers: historical
+    // rows predate federation-aware publishing and have no correct
+    // federation to backfill, and (unlike tenants.federationId) this
+    // column is not a scoping root, so a NULL on a legacy run is
+    // harmless. New runs set it explicitly at insert. `.references()` is
+    // safe here (no circular-FK cycle -- export_runs is only ever
+    // referenced, never referenced-by, in the federation graph).
+    federationId: text("federation_id").references(() => federations.id),
     // Progress tracking
     currentStep: text("current_step"),   // e.g. "descriptions:co-ahr-gob"
     stepsCompleted: integer("steps_completed").notNull().default(0),
@@ -994,6 +1190,15 @@ export const vocabularyTerms = sqliteTable(
   "vocabulary_terms",
   {
     id: text("id").primaryKey(),
+    // Federation-scoped authority (federation spec §9 step 3, migration
+    // 0045). vocabulary_terms was a tenant-blind global table before the
+    // lift; the review-queue proposer-tenant visibility logic is
+    // superseded by this column. Same nullable-with-FK-at-DB /
+    // notNull-at-type pattern as entities.federationId (0045 backfills
+    // every existing term to the Neogranadina federation).
+    federationId: text("federation_id")
+      .notNull()
+      .references(() => federations.id, { onDelete: "restrict" }),
     canonical: text("canonical").notNull(),
     category: text("category"),
     status: text("status", { enum: [...VOCABULARY_STATUSES] }).notNull().default("approved"),
@@ -1010,5 +1215,57 @@ export const vocabularyTerms = sqliteTable(
     index("vt_canonical_idx").on(table.canonical),
     index("vt_category_idx").on(table.category),
     index("vt_status_idx").on(table.status),
+    // Federation lookup index (migration 0045) — vocab reads/mutations
+    // scope by federation_id.
+    index("vt_federation_idx").on(table.federationId),
+  ]
+);
+
+// authority_operations (migration 0057) is the append-only ledger of
+// irreversible authority mutations: entity/place/vocabulary_term merge,
+// split, and delete. It is the durable system of record — the free-text
+// `entities.sources` merge/split notes stay human-readable in place and
+// `merged_into` stays the live pointer the app filters on, but neither
+// survives a later edit. Written in the same D1 batch as the mutation it
+// records (app/lib/authority-operations.server.ts) so the ledger row and
+// the mutation commit atomically. Append-only by trigger (BEFORE UPDATE /
+// BEFORE DELETE both RAISE ABORT, bare form) and bounded by CHECK enums on
+// record_type + operation — as with audit_log, Drizzle models neither, so
+// the `enum:` hints below are the TypeScript-side mirror of the SQL CHECKs
+// in 0057. source_id / target_id carry NO foreign key: a deleted record
+// must stay referenceable (delete: source_id = the gone record) and a
+// merge loser / split parent may be deleted later.
+export const authorityOperations = sqliteTable(
+  "authority_operations",
+  {
+    id: text("id").primaryKey(),
+    federationId: text("federation_id")
+      .notNull()
+      .references(() => federations.id, { onDelete: "restrict" }),
+    recordType: text("record_type", {
+      enum: ["entity", "place", "vocabulary_term"],
+    }).notNull(),
+    // resolve (per-entity creation provenance, written only by the
+    // pipeline provenance backfill — spec §10) and separate (a refuted
+    // merge: the do-not-relink record automated extraction consults)
+    // are reserved for the backfill; the admin routes write only the
+    // first three.
+    operation: text("operation", {
+      enum: ["merge", "split", "delete", "resolve", "separate"],
+    }).notNull(),
+    // merge: the loser · split: the parent · delete: the deleted record.
+    sourceId: text("source_id").notNull(),
+    // merge: the winner · split: the new record · delete: NULL.
+    targetId: text("target_id"),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    detail: text("detail"), // JSON, nullable
+    createdAt: integer("created_at").notNull(), // epoch ms
+  },
+  (table) => [
+    index("authority_operations_federation_idx").on(table.federationId),
+    index("authority_operations_source_idx").on(table.sourceId),
+    index("authority_operations_target_idx").on(table.targetId),
   ]
 );

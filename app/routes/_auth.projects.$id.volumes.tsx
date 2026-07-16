@@ -9,7 +9,7 @@
  * from a IIIF manifest URL here; per-volume deep management lives on
  * the `$volumeId/manage` page.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { useState } from "react";
@@ -151,7 +151,7 @@ export default function ProjectVolumes({ loaderData }: Route.ComponentProps) {
     <div>
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="font-sans text-[1.5rem] font-semibold text-stone-700">{t("project:heading.volumes")}</h2>
+        <h2 className="font-sans text-2xl font-semibold text-stone-700">{t("project:heading.volumes")}</h2>
         <button
           type="button"
           onClick={() => setShowAddForm(!showAddForm)}

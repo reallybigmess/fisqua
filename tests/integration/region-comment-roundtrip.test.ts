@@ -105,6 +105,7 @@ async function seedFixture(db: Db) {
 
   await db.insert(schema.projects).values({
     id: projectId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     name: "Region Roundtrip",
     createdBy: leadRow.id,
     createdAt: now,
@@ -130,6 +131,7 @@ async function seedFixture(db: Db) {
 
   await db.insert(schema.volumes).values({
     id: volumeId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     projectId,
     name: "V1",
     referenceCode: "co-rrt-v1",
@@ -143,6 +145,7 @@ async function seedFixture(db: Db) {
 
   await db.insert(schema.volumePages).values({
     id: pageId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     volumeId,
     position: 0,
     imageUrl: "https://example.com/p1.jpg",
@@ -154,6 +157,7 @@ async function seedFixture(db: Db) {
 
   await db.insert(schema.entries).values({
     id: entryId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     volumeId,
     parentId: null,
     position: 0,
@@ -171,6 +175,7 @@ async function seedFixture(db: Db) {
   const qcFlagId = crypto.randomUUID();
   await db.insert(schema.qcFlags).values({
     id: qcFlagId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     volumeId,
     pageId,
     reportedBy: catRow.id,
@@ -184,6 +189,7 @@ async function seedFixture(db: Db) {
   const resegFlagId = crypto.randomUUID();
   await db.insert(schema.resegmentationFlags).values({
     id: resegFlagId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     volumeId,
     entryId,
     reportedBy: leadRow.id,

@@ -24,18 +24,25 @@
  * survive the clear. That mitigates the cross-tenant
  * information-disclosure threat in the import clear path.
  *
- * @version v0.4.0
+ * @version v0.4.1
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import * as os from "node:os";
 import { NEOGRANADINA_TENANT_ID } from "../../app/lib/tenant";
 import { DOMAIN_TABLES, SECOND_TEST_TENANT_ID } from "./helpers";
 
-const OUTPUT_DIR = ".import";
+// Per-suite scratch dir (never the production `.import/` snapshot dir —
+// see audit item 23). Created fresh before each test and removed after,
+// so parallel test files never contend for the same directory.
+let outputDir: string;
+async function setUpOutputDir() {
+  outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "fisqua-import-test-"));
+}
 async function cleanOutput() {
   try {
-    await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
+    await fs.rm(outputDir, { recursive: true, force: true });
   } catch {
     // ignore
   }
@@ -53,7 +60,7 @@ const TENANT_SCOPED_DOMAIN_TABLES = DOMAIN_TABLES.filter(
 );
 
 describe("generateTenantScopedClearSql (cross-tenant keystone)", () => {
-  beforeEach(cleanOutput);
+  beforeEach(setUpOutputDir);
   afterEach(cleanOutput);
 
   it("produces SQL that filters every domain DELETE by NEOGRANADINA tenant_id", async () => {
@@ -62,6 +69,7 @@ describe("generateTenantScopedClearSql (cross-tenant keystone)", () => {
     );
     const sqlFiles = await generateTenantScopedClearSql({
       tenantId: NEOGRANADINA_TENANT_ID,
+      outputDir,
     });
     expect(sqlFiles.length).toBeGreaterThan(0);
     const content = await fs.readFile(sqlFiles[0], "utf8");
@@ -86,6 +94,7 @@ describe("generateTenantScopedClearSql (cross-tenant keystone)", () => {
     );
     const sqlFiles = await generateTenantScopedClearSql({
       tenantId: NEOGRANADINA_TENANT_ID,
+      outputDir,
     });
     const content = await fs.readFile(sqlFiles[0], "utf8");
 
@@ -105,6 +114,7 @@ describe("generateTenantScopedClearSql (cross-tenant keystone)", () => {
     );
     const sqlFiles = await generateTenantScopedClearSql({
       tenantId: NEOGRANADINA_TENANT_ID,
+      outputDir,
     });
     const content = await fs.readFile(sqlFiles[0], "utf8");
 
@@ -127,4 +137,4 @@ describe("generateTenantScopedClearSql (cross-tenant keystone)", () => {
   });
 });
 
-// Version: v0.4.0
+// Version: v0.4.1

@@ -70,6 +70,7 @@ async function seedFixture(
 
   await db.insert(schema.projects).values({
     id: projectId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     name: "Test Project",
     createdBy: owner.id,
     createdAt: now,
@@ -86,6 +87,7 @@ async function seedFixture(
 
   await db.insert(schema.volumes).values({
     id: volumeId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     projectId,
     name: "Test Volume",
     referenceCode: "co-test-vol",
@@ -98,6 +100,7 @@ async function seedFixture(
 
   await db.insert(schema.volumePages).values({
     id: pageId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     volumeId,
     position: 1,
     imageUrl: "https://example.com/image-1.jpg",
@@ -109,6 +112,7 @@ async function seedFixture(
 
   await db.insert(schema.entries).values({
     id: entryId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     volumeId,
     position: 0,
     startPage: 1,

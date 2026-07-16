@@ -11,10 +11,18 @@
  * detail page.
  *
  * Tenant attribution comes from request context, populated by
- * `authMiddleware`. The pre-flight count queries against
- * `repositories`, `entities`, and `places` are scoped to
- * `tenant.id`, and the per-fonds CTE on `descriptions` is filtered
- * to the calling tenant.
+ * `authMiddleware`. `resolveExportScope` then expands it to the export
+ * SCOPE (federation spec §9 step 8): on the federation LEAD host the
+ * scope is every member tenant (the lead publishes all members), so the
+ * dropdown, the changelog, and the run history all span the federation;
+ * a non-lead tenant sees only its own. Every scoped query below filters
+ * by `memberTenantIds` — the pre-flight `repositories` / per-fonds
+ * `descriptions` counts and the run-history joins take the member set,
+ * and the authority counts on `entities` / `places` join the
+ * federation-scoped authority tables (migrations 0045-0048) through the
+ * junctions to the member tenants' published descriptions, so an entity
+ * linked solely to an AHR description is counted once the AHR tenant is
+ * a federation member.
  *
  * Capability gate runs before everything else. The loader calls
  * `requireCapability(tenant, "publish_pipeline")` as the first
@@ -24,7 +32,7 @@
  * configuration 404s for everyone, never falling through to the
  * "superadmin required" page.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { useState } from "react";
@@ -56,9 +64,17 @@ export interface ExportRunRow {
 
 export async function loader({ context }: Route.LoaderArgs) {
   const { drizzle } = await import("drizzle-orm/d1");
-  const { sql, desc, eq, and, isNull, gt } = await import("drizzle-orm");
-  const { descriptions, repositories, entities, places, exportRuns, users } =
-    await import("../db/schema");
+  const { sql, desc, eq, and, isNull, gt, inArray } = await import("drizzle-orm");
+  const {
+    descriptions,
+    repositories,
+    entities,
+    places,
+    descriptionEntities,
+    descriptionPlaces,
+    exportRuns,
+    users,
+  } = await import("../db/schema");
 
   const user = context.get(userContext);
   const tenant = context.get(tenantContext);
@@ -74,7 +90,10 @@ export async function loader({ context }: Route.LoaderArgs) {
     };
   }
 
-  const { getFondsList } = await import("../lib/export/fonds-list.server");
+  const { getScopedFondsList } = await import("../lib/export/fonds-list.server");
+  const { resolveExportScope } = await import(
+    "../lib/export/federation-scope.server"
+  );
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -94,11 +113,20 @@ export async function loader({ context }: Route.LoaderArgs) {
       `Tenant ${tenant.slug} has no descriptive_standard (kind=platform tenants cannot publish)`
     );
   }
-  const fondsList = await getFondsList(db, {
+  // Resolve the export scope (federation spec §9 step 8). On the
+  // federation LEAD host the scope aggregates every member tenant, so
+  // the dropdown offers fonds from ALL members (the lead publishes all
+  // members) and the changelog counts span the federation; a non-lead
+  // tenant sees only its own. `memberTenantIds` drives every scoped
+  // query below.
+  const scope = await resolveExportScope(db, {
     id: tenant.id,
+    federationId: tenant.federationId,
     slug: tenant.slug,
     descriptiveStandard: tenant.descriptiveStandard,
   });
+  const memberTenantIds = scope.memberTenantIds;
+  const fondsList = await getScopedFondsList(db, memberTenantIds);
 
   // Find the last completed export timestamp scoped to this tenant.
   // Reading `lastExport` from the global `exportRuns` pool would let
@@ -115,7 +143,7 @@ export async function loader({ context }: Route.LoaderArgs) {
     .where(
       and(
         eq(exportRuns.status, "complete"),
-        eq(users.tenantId, tenant.id)
+        inArray(users.tenantId, memberTenantIds)
       )
     )
     .orderBy(desc(exportRuns.completedAt))
@@ -146,8 +174,8 @@ export async function loader({ context }: Route.LoaderArgs) {
     FROM ${descriptions} d
     JOIN ${descriptions} root ON d.root_description_id = root.id
     WHERE root.parent_id IS NULL
-      AND d.tenant_id = ${tenant.id}
-      AND root.tenant_id = ${tenant.id}
+      AND d.tenant_id IN (${sql.join(memberTenantIds.map((id) => sql`${id}`), sql`, `)})
+      AND root.tenant_id IN (${sql.join(memberTenantIds.map((id) => sql`${id}`), sql`, `)})
     GROUP BY root.reference_code, root.title
     ORDER BY root.reference_code
   `);
@@ -173,7 +201,7 @@ export async function loader({ context }: Route.LoaderArgs) {
         .from(repositories)
         .where(
           and(
-            eq(repositories.tenantId, tenant.id),
+            inArray(repositories.tenantId, memberTenantIds),
             gt(repositories.updatedAt, lastExportedAt)
           )
         )
@@ -181,42 +209,68 @@ export async function loader({ context }: Route.LoaderArgs) {
     : await db
         .select({ count: sql<number>`count(*)` })
         .from(repositories)
-        .where(eq(repositories.tenantId, tenant.id))
+        .where(inArray(repositories.tenantId, memberTenantIds))
         .get();
 
-  const entityCount = lastExportedAt
-    ? await db
-        .select({ count: sql<number>`count(*)` })
-        .from(entities)
-        .where(
-          and(
-            eq(entities.tenantId, tenant.id),
-            gt(entities.updatedAt, lastExportedAt)
-          )
-        )
-        .get()
-    : await db
-        .select({ count: sql<number>`count(*)` })
-        .from(entities)
-        .where(eq(entities.tenantId, tenant.id))
-        .get();
+  // Authority counts mirror the export read exactly (exportEntities /
+  // exportPlaces in app/lib/export/pipeline.server.ts): authorities are
+  // federation-scoped (migrations 0045-0048), but this tenant's export only
+  // emits the federation authorities REFERENCED BY ITS OWN PUBLISHED
+  // DESCRIPTIONS — so the pre-flight count joins through the junction
+  // tables to this tenant's published descriptions rather than counting
+  // the whole federation set. Counting the raw federation set would
+  // overstate the numbers as soon as a federation holds more than one
+  // tenant. count(DISTINCT id) because an authority linked from several
+  // descriptions exports once.
+  // The entities/places workflow steps are skipped for an
+  // authorities-off tenant, so the preview must not advertise
+  // authority counts it will not export.
+  let entityCount: { count: number } | undefined;
+  let placeCount: { count: number } | undefined;
+  if (tenant.authoritiesEnabled) {
+    const entityCountConditions = [
+      eq(entities.federationId, tenant.federationId),
+      inArray(descriptions.tenantId, memberTenantIds),
+      eq(descriptions.isPublished, true),
+      isNull(entities.mergedInto),
+    ];
+    if (lastExportedAt) {
+      entityCountConditions.push(gt(entities.updatedAt, lastExportedAt));
+    }
+    entityCount = await db
+      .select({ count: sql<number>`count(DISTINCT ${entities.id})` })
+      .from(entities)
+      .innerJoin(
+        descriptionEntities,
+        eq(descriptionEntities.entityId, entities.id)
+      )
+      .innerJoin(
+        descriptions,
+        eq(descriptionEntities.descriptionId, descriptions.id)
+      )
+      .where(and(...entityCountConditions))
+      .get();
 
-  const placeCount = lastExportedAt
-    ? await db
-        .select({ count: sql<number>`count(*)` })
-        .from(places)
-        .where(
-          and(
-            eq(places.tenantId, tenant.id),
-            gt(places.updatedAt, lastExportedAt)
-          )
-        )
-        .get()
-    : await db
-        .select({ count: sql<number>`count(*)` })
-        .from(places)
-        .where(eq(places.tenantId, tenant.id))
-        .get();
+    const placeCountConditions = [
+      eq(places.federationId, tenant.federationId),
+      inArray(descriptions.tenantId, memberTenantIds),
+      eq(descriptions.isPublished, true),
+      isNull(places.mergedInto),
+    ];
+    if (lastExportedAt) {
+      placeCountConditions.push(gt(places.updatedAt, lastExportedAt));
+    }
+    placeCount = await db
+      .select({ count: sql<number>`count(DISTINCT ${places.id})` })
+      .from(places)
+      .innerJoin(descriptionPlaces, eq(descriptionPlaces.placeId, places.id))
+      .innerJoin(
+        descriptions,
+        eq(descriptionPlaces.descriptionId, descriptions.id)
+      )
+      .where(and(...placeCountConditions))
+      .get();
+  }
 
   const changelog: ChangelogData = {
     descriptions: descriptionChangelog,
@@ -241,7 +295,7 @@ export async function loader({ context }: Route.LoaderArgs) {
     .where(
       and(
         sql`${exportRuns.status} IN ('running', 'pending')`,
-        eq(users.tenantId, tenant.id)
+        inArray(users.tenantId, memberTenantIds)
       )
     )
     .orderBy(desc(exportRuns.createdAt))
@@ -271,7 +325,7 @@ export async function loader({ context }: Route.LoaderArgs) {
     })
     .from(exportRuns)
     .innerJoin(users, eq(exportRuns.triggeredBy, users.id))
-    .where(eq(users.tenantId, tenant.id))
+    .where(inArray(users.tenantId, memberTenantIds))
     .orderBy(desc(exportRuns.createdAt))
     .limit(20)
     .all();

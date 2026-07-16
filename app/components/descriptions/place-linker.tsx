@@ -5,7 +5,7 @@
  * description, with typeahead search, role picker, and inline create-new
  * flow.
  *
- * @version v0.3.0
+ * @version v0.4.3
  */
 
 import { useState } from "react";
@@ -13,7 +13,7 @@ import { useFetcher } from "react-router";
 import { useTranslation } from "react-i18next";
 import { Pencil, X, Plus } from "lucide-react";
 import { SearchPopover } from "./search-popover";
-import { PLACE_ROLES } from "~/lib/validation/enums";
+import { placeRoleOptions } from "~/lib/role-options";
 
 export interface DescriptionPlaceLink {
   id: string;
@@ -45,6 +45,9 @@ export function PlaceLinker({
 }: PlaceLinkerProps) {
   const { t } = useTranslation("descriptions_admin");
   const fetcher = useFetcher();
+  // Flat, localised role options — the picker can only offer the seven
+  // PLACE_ROLES values (see `~/lib/role-options`).
+  const roleOptions = placeRoleOptions(t);
   const [showSearch, setShowSearch] = useState(false);
   const [selectedPlace, setSelectedPlace] = useState<SelectedPlace | null>(
     null
@@ -126,9 +129,9 @@ export function PlaceLinker({
                     onChange={(e) => setEditRole(e.target.value)}
                     className="rounded border border-stone-200 px-2 py-1 text-sm"
                   >
-                    {PLACE_ROLES.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
+                    {roleOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
                       </option>
                     ))}
                   </select>
@@ -256,9 +259,9 @@ export function PlaceLinker({
               onChange={(e) => setAddRole(e.target.value)}
               className="w-full rounded border border-stone-200 px-2 py-1 text-sm"
             >
-              {PLACE_ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {r}
+              {roleOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
                 </option>
               ))}
             </select>

@@ -7,11 +7,11 @@
  * to entries or regions, and joining denormalised author display
  * names so the UI renders without follow-up queries.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 import { and, eq, isNull, or } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import { comments, users } from "../db/schema";
+import { comments, users, volumes } from "../db/schema";
 import type { WorkflowRole } from "./workflow";
 
 /**
@@ -87,6 +87,19 @@ export async function createComment(
   const id = crypto.randomUUID();
   const now = Date.now();
 
+  // A comment inherits its tenant from its parent volume (the denormalised
+  // volumeId every comment carries). Resolve it so the row sets tenant_id
+  // explicitly -- the schema has no default.
+  const volumeRow = await db
+    .select({ tenantId: volumes.tenantId })
+    .from(volumes)
+    .where(eq(volumes.id, data.volumeId))
+    .get();
+  if (!volumeRow) {
+    throw new Response("Volume not found", { status: 404 });
+  }
+  const tenantId = volumeRow.tenantId;
+
   let entryId: string | null = null;
   let pageId: string | null = null;
   let qcFlagId: string | null = null;
@@ -122,6 +135,7 @@ export async function createComment(
 
   await db.insert(comments).values({
  id,
+ tenantId,
  volumeId: data.volumeId,
  entryId,
  pageId,

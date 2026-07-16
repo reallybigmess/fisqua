@@ -101,6 +101,7 @@ async function seedFixture(db: Db) {
   await db.insert(schema.projects).values([
     {
       id: projectId,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       name: "QC Comments P1",
       createdBy: leadRow.id,
       createdAt: now,
@@ -108,6 +109,7 @@ async function seedFixture(db: Db) {
     },
     {
       id: otherProjectId,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       name: "QC Comments P2",
       createdBy: outsiderRow.id,
       createdAt: now,
@@ -135,6 +137,7 @@ async function seedFixture(db: Db) {
   await db.insert(schema.volumes).values([
     {
       id: volumeId,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       projectId,
       name: "V1",
       referenceCode: "co-test-qcc-v1",
@@ -146,6 +149,7 @@ async function seedFixture(db: Db) {
     },
     {
       id: otherVolumeId,
+      tenantId: DEFAULT_TEST_TENANT_ID,
       projectId,
       name: "V-other-same-project",
       referenceCode: "co-test-qcc-v2",
@@ -159,6 +163,7 @@ async function seedFixture(db: Db) {
 
   await db.insert(schema.volumePages).values({
     id: pageId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     volumeId,
     position: 3,
     imageUrl: "https://example.com/p1.jpg",
@@ -170,6 +175,7 @@ async function seedFixture(db: Db) {
 
   await db.insert(schema.qcFlags).values({
     id: flagId,
+    tenantId: DEFAULT_TEST_TENANT_ID,
     volumeId,
     pageId,
     reportedBy: leadRow.id,

@@ -17,7 +17,7 @@
  * calling tenant rather than a single-tenant hard-code in
  * `mapEntryToDescription`.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { useState, useRef, useCallback, useMemo } from "react";
@@ -57,8 +57,9 @@ export async function loader({ context, request }: Route.LoaderArgs) {
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
+  const tenant = context.get(tenantContext);
 
-  const volumes = await getVolumesWithPromotableEntries(db);
+  const volumes = await getVolumesWithPromotableEntries(db, tenant.id);
 
   const url = new URL(request.url);
   const selectedVolumeId = url.searchParams.get("volumeId");
@@ -68,17 +69,22 @@ export async function loader({ context, request }: Route.LoaderArgs) {
   let volumeManifestUrl: string | null = null;
 
   if (selectedVolumeId) {
-    const result = await getPromotableEntries(db, selectedVolumeId);
+    const result = await getPromotableEntries(db, tenant.id, selectedVolumeId);
     promotableEntries = result.promotable;
     alreadyPromoted = result.alreadyPromoted;
 
-    // Load volume manifest URL for IIIF viewer
+    // Load volume manifest URL for IIIF viewer (tenant-scoped)
     const { volumes: volumesTable } = await import("../db/schema");
-    const { eq } = await import("drizzle-orm");
+    const { and, eq } = await import("drizzle-orm");
     const volume = await db
       .select({ manifestUrl: volumesTable.manifestUrl })
       .from(volumesTable)
-      .where(eq(volumesTable.id, selectedVolumeId))
+      .where(
+        and(
+          eq(volumesTable.tenantId, tenant.id),
+          eq(volumesTable.id, selectedVolumeId),
+        ),
+      )
       .get();
     volumeManifestUrl = volume?.manifestUrl ?? null;
   }

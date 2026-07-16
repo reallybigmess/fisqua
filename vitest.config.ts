@@ -25,13 +25,23 @@
  * (notably `svix`, which dangles workerd isolates trying to resolve a
  * missing `mockttp` import).
  *
- * @version v0.4.0
+ * @version v0.5.0
  */
 
 import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
 import { configDefaults } from "vitest/config";
+import { fileURLToPath } from "node:url";
 
 export default defineWorkersConfig({
+  // Mirrors the `~/*` -> `./app/*` mapping in tsconfig.cloudflare.json.
+  // The app build resolves it via vite-tsconfig-paths in vite.config.ts,
+  // but this config never loads that plugin, so route modules that use
+  // `~/` imports are untestable without this alias.
+  resolve: {
+    alias: {
+      "~": fileURLToPath(new URL("./app", import.meta.url)),
+    },
+  },
   test: {
     exclude: [
       ...configDefaults.exclude,
@@ -57,6 +67,9 @@ export default defineWorkersConfig({
             SESSION_SECRET: "test-session-secret",
             GITHUB_CLIENT_ID: "test-github-id",
             GITHUB_CLIENT_SECRET: "test-github-secret",
+            // Injected so the places-map loader tests never depend on a
+            // real key being present in wrangler.jsonc vars.
+            MAPTILER_KEY: "test-maptiler-key",
           },
           d1Databases: {
             DB: "my-app-db",

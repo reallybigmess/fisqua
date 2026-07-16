@@ -18,7 +18,7 @@
  * focused on getting the right pages in front of the cataloguer at the
  * right scale.
  *
- * @version v0.3.0
+ * @version v0.4.2
  */
 
 import { useState, useRef, useEffect, useCallback } from "react";
@@ -158,7 +158,7 @@ export function DescriptionImageViewer({
         >
           <ZoomOutIcon />
         </button>
-        <span className="min-w-[3.5rem] text-center font-sans text-[0.875rem] text-stone-500">
+        <span className="min-w-[3.5rem] text-center font-sans text-sm text-stone-500">
           {zoom}%
         </span>
         <button
@@ -184,7 +184,7 @@ export function DescriptionImageViewer({
                 className="flex gap-4"
               >
                 {/* Label column */}
-                <div className="w-4 shrink-0 pt-1 font-sans text-[0.875rem] font-semibold text-indigo">
+                <div className="w-4 shrink-0 pt-1 font-sans text-sm font-semibold text-indigo">
                   <span className="writing-mode-vertical whitespace-nowrap">
                     {page.position}
                   </span>

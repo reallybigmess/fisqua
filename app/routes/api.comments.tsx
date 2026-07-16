@@ -7,7 +7,7 @@
  * project-role guard so a cataloguer never sees a thread on a project
  * they do not belong to.
  *
- * @version v0.3.0
+ * @version v0.4.1
  */
 import { userContext } from "../context";
 import type { WorkflowRole } from "../lib/workflow";
@@ -17,7 +17,7 @@ import type { Route } from "./+types/api.comments";
 export async function action({ request, context }: Route.ActionArgs) {
   const { drizzle } = await import("drizzle-orm/d1");
   const { eq } = await import("drizzle-orm");
-  const { requireEntryAccess, requirePageAccess, requireProjectRole } =
+  const { requireEntryAccess, requirePageAccess, requireProjectRole, highestProjectRole } =
  await import("../lib/permissions.server");
   const { createComment } = await import("../lib/comments.server");
   const { logActivity } = await import("../lib/workflow.server");
@@ -88,7 +88,7 @@ export async function action({ request, context }: Route.ActionArgs) {
  let projectId: string;
 
  if (entryId) {
- const { member, volume } = await requireEntryAccess(
+ const { memberships, volume } = await requireEntryAccess(
  db,
  entryId,
  user.id,
@@ -100,7 +100,7 @@ export async function action({ request, context }: Route.ActionArgs) {
  { status: 400 }
  );
  }
- authorRole = (member?.role as WorkflowRole) ?? "cataloguer";
+ authorRole = highestProjectRole(memberships) ?? "cataloguer";
  projectId = volume.projectId;
  } else if (pageId) {
  const { volume } = await requirePageAccess(
@@ -125,10 +125,7 @@ export async function action({ request, context }: Route.ActionArgs) {
  [...PROJECT_ROLES],
  user.isAdmin
  );
- const roleOrder: WorkflowRole[] = ["lead", "reviewer", "cataloguer"];
- authorRole =
- roleOrder.find((r) => memberships.some((m) => m.role === r)) ??
- "cataloguer";
+ authorRole = highestProjectRole(memberships) ?? "cataloguer";
  projectId = volume.projectId;
  } else {
  // qcFlag-targeted post. Resolve flag → volume → projectId server-
@@ -172,10 +169,7 @@ export async function action({ request, context }: Route.ActionArgs) {
  [...PROJECT_ROLES],
  user.isAdmin
  );
- const roleOrder: WorkflowRole[] = ["lead", "reviewer", "cataloguer"];
- authorRole =
- roleOrder.find((r) => memberships.some((m) => m.role === r)) ??
- "cataloguer";
+ authorRole = highestProjectRole(memberships) ?? "cataloguer";
  projectId = volume.projectId;
  }
 

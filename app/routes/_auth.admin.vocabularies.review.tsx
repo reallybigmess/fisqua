@@ -8,14 +8,15 @@
  * panel so the reviewer can capture a reason without leaving the
  * queue.
  *
- * Tenant attribution comes from request context, populated by
- * `authMiddleware`. The merge action's primaryFunctionId
- * reassignment and post-merge entity-count subqueries are scoped to
- * `tenant.id`. The proposer-name join uses the `users` table; we
- * filter that join to the calling tenant so a cross-tenant proposer
- * name cannot leak.
+ * Authority scope is the federation (migrations 0045-0048). The merge
+ * action's primaryFunctionId reassignment and post-merge entity-count
+ * subqueries are scoped to `tenant.federationId`, and every vocab
+ * mutation (approve/reject/merge) carries a federation predicate. The
+ * queue is federation-scoped: a proposal surfaces in its federation via
+ * vocabulary_terms.federation_id, which replaces the former
+ * proposer-tenant visibility rule (and its orphan-proposal fallback).
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { useState } from "react";
@@ -53,6 +54,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
   const user = context.get(userContext);
   requireAdmin(user);
+  const tenant = context.get(tenantContext);
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
@@ -64,6 +66,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     const q = url.searchParams.get("q")?.trim() || "";
     const excludeId = url.searchParams.get("exclude") || "";
     const conditions = [
+      eq(vocabularyTerms.federationId, tenant.federationId),
       like(vocabularyTerms.canonical, `%${escapeLike(q)}%`),
       isNull(vocabularyTerms.mergedInto),
       eq(vocabularyTerms.status, "approved"),
@@ -91,13 +94,24 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const pageSize = 50;
   const offset = (page - 1) * pageSize;
 
-  // Count total proposed terms
+  // Queue visibility: a proposal belongs to its FEDERATION (migration
+  // 0045). The proposer-tenant scoping this replaced is superseded by
+  // vocabulary_terms.federation_id, which every term carries (including
+  // orphan proposals whose proposedBy went null after a user deletion),
+  // so no or()/isNull fallback is needed. The users leftJoin below stays
+  // only to surface the proposer name.
+  const proposedVisibleHere = and(
+    eq(vocabularyTerms.status, "proposed"),
+    isNull(vocabularyTerms.mergedInto),
+    eq(vocabularyTerms.federationId, tenant.federationId)
+  );
+
+  // Count total proposed terms visible to this tenant
   const [{ total }] = await db
     .select({ total: sql<number>`count(*)` })
     .from(vocabularyTerms)
-    .where(
-      and(eq(vocabularyTerms.status, "proposed"), isNull(vocabularyTerms.mergedInto))
-    )
+    .leftJoin(users, eq(vocabularyTerms.proposedBy, users.id))
+    .where(proposedVisibleHere)
     .all();
 
   // Fetch proposed terms with proposer name
@@ -112,9 +126,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     })
     .from(vocabularyTerms)
     .leftJoin(users, eq(vocabularyTerms.proposedBy, users.id))
-    .where(
-      and(eq(vocabularyTerms.status, "proposed"), isNull(vocabularyTerms.mergedInto))
-    )
+    .where(proposedVisibleHere)
     .orderBy(desc(vocabularyTerms.createdAt))
     .limit(pageSize)
     .offset(offset)
@@ -146,6 +158,17 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
+
+  // Authority mutation gate (ruled 2026-07-08): approving, rejecting, or
+  // merging proposed terms is a canonical vocabulary mutation subject to
+  // federation steward review; the review queue is steward-only.
+  // Member-tenant PROPOSE is currently unreachable (the only propose
+  // sites live inside the steward-gated entity create/update intents)
+  // and defers to the entities/places propose-for-review follow-up
+  // (ruled 2026-07-08). Behaviour-neutral today.
+  const { requireFederationSteward } = await import("~/lib/federation.server");
+  await requireFederationSteward(db, user, tenant);
+
   const formData = await request.formData();
   const intent = formData.get("_action") as string;
 
@@ -169,7 +192,12 @@ export async function action({ request, context }: Route.ActionArgs) {
       await db
         .update(vocabularyTerms)
         .set(updates)
-        .where(eq(vocabularyTerms.id, termId));
+        .where(
+          and(
+            eq(vocabularyTerms.id, termId),
+            eq(vocabularyTerms.federationId, tenant.federationId)
+          )
+        );
 
       // Changelog entry
       await db.insert(changelog).values({
@@ -196,7 +224,12 @@ export async function action({ request, context }: Route.ActionArgs) {
       const term = await db
         .select({ notes: vocabularyTerms.notes })
         .from(vocabularyTerms)
-        .where(eq(vocabularyTerms.id, termId))
+        .where(
+          and(
+            eq(vocabularyTerms.id, termId),
+            eq(vocabularyTerms.federationId, tenant.federationId)
+          )
+        )
         .get();
 
       const existingNotes = term?.notes || "";
@@ -217,7 +250,12 @@ export async function action({ request, context }: Route.ActionArgs) {
           notes: updatedNotes,
           updatedAt: now,
         })
-        .where(eq(vocabularyTerms.id, termId));
+        .where(
+          and(
+            eq(vocabularyTerms.id, termId),
+            eq(vocabularyTerms.federationId, tenant.federationId)
+          )
+        );
 
       // Changelog entry
       await db.insert(changelog).values({
@@ -236,6 +274,9 @@ export async function action({ request, context }: Route.ActionArgs) {
     }
 
     case "merge": {
+      const { logAuthorityOperation } = await import(
+        "~/lib/authority-operations.server"
+      );
       const sourceId = formData.get("sourceId") as string;
       const targetId = formData.get("targetId") as string;
       if (!sourceId || !targetId)
@@ -243,37 +284,71 @@ export async function action({ request, context }: Route.ActionArgs) {
 
       const now = Math.floor(Date.now() / 1000);
 
-      // Reassign entities from source to target (tenant-scoped).
-      await db
-        .update(entities)
-        .set({ primaryFunctionId: targetId, updatedAt: now })
+      // Count the entities the reassignment below will move BEFORE the
+      // batch — the ledger's movedLinks must describe this merge, and the
+      // predicate matches the UPDATE's exactly.
+      const [{ count: movedLinks }] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(entities)
         .where(
           and(
-            eq(entities.tenantId, tenant.id),
+            eq(entities.federationId, tenant.federationId),
             eq(entities.primaryFunctionId, sourceId)
           )
-        );
+        )
+        .all();
 
-      // Mark source as merged
-      await db
-        .update(vocabularyTerms)
-        .set({
-          status: "deprecated",
-          mergedInto: targetId,
-          entityCount: 0,
-          reviewedBy: user.id,
-          reviewedAt: now,
-          updatedAt: now,
-        })
-        .where(eq(vocabularyTerms.id, sourceId));
+      // Entity reassignment, source deprecation, and the ledger row commit
+      // in one batch so the ledger cannot fall out of step with the
+      // mutation. The target entityCount recompute and the changelog write
+      // stay sequential after the batch (denormalised cache + display
+      // trail, matching the functions.$id merge). The ledger is always
+      // epoch ms (Date.now()), not this route's second-precision `now`.
+      await db.batch([
+        db
+          .update(entities)
+          .set({ primaryFunctionId: targetId, updatedAt: now })
+          .where(
+            and(
+              eq(entities.federationId, tenant.federationId),
+              eq(entities.primaryFunctionId, sourceId)
+            )
+          ),
+        db
+          .update(vocabularyTerms)
+          .set({
+            status: "deprecated",
+            mergedInto: targetId,
+            entityCount: 0,
+            reviewedBy: user.id,
+            reviewedAt: now,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(vocabularyTerms.id, sourceId),
+              eq(vocabularyTerms.federationId, tenant.federationId)
+            )
+          ),
+        logAuthorityOperation(db, {
+          federationId: tenant.federationId,
+          recordType: "vocabulary_term",
+          operation: "merge",
+          sourceId,
+          targetId,
+          userId: user.id,
+          detail: { movedLinks },
+          now: Date.now(),
+        }),
+      ] as any);
 
-      // Update target entity count (tenant-scoped).
+      // Update target entity count (federation-scoped).
       const [{ count }] = await db
         .select({ count: sql<number>`count(*)` })
         .from(entities)
         .where(
           and(
-            eq(entities.tenantId, tenant.id),
+            eq(entities.federationId, tenant.federationId),
             eq(entities.primaryFunctionId, targetId)
           )
         )
@@ -281,7 +356,12 @@ export async function action({ request, context }: Route.ActionArgs) {
       await db
         .update(vocabularyTerms)
         .set({ entityCount: count, updatedAt: now })
-        .where(eq(vocabularyTerms.id, targetId));
+        .where(
+          and(
+            eq(vocabularyTerms.id, targetId),
+            eq(vocabularyTerms.federationId, tenant.federationId)
+          )
+        );
 
       // Changelog
       await db.insert(changelog).values({

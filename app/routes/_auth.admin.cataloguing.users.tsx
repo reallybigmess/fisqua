@@ -19,7 +19,7 @@
  * gate; the JSX gate here is belt-and-braces. Dormant flag values
  * stay in the DB (no auto-clear).
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { Form, useActionData } from "react-router";
@@ -132,7 +132,7 @@ export default function AdminCataloguingUsers({
           <div>
             <label
               htmlFor="email"
-              className="block font-sans text-[0.875rem] font-medium text-indigo"
+              className="block font-sans text-sm font-medium text-indigo"
             >
               {t("table.email")}
             </label>
@@ -148,7 +148,7 @@ export default function AdminCataloguingUsers({
           <div>
             <label
               htmlFor="name"
-              className="block font-sans text-[0.875rem] font-medium text-indigo"
+              className="block font-sans text-sm font-medium text-indigo"
             >
               {t("table.name")}
             </label>

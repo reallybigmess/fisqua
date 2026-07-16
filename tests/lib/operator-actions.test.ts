@@ -119,6 +119,7 @@ describe("diffCapabilities", () => {
     vocabularyHubEnabled: false,
     publishPipelineEnabled: false,
     multiRepositoryEnabled: false,
+    authoritiesEnabled: false,
   };
 
   it("returns [] when current === submitted (no-op)", () => {
@@ -127,6 +128,7 @@ describe("diffCapabilities", () => {
       vocabularyHubEnabled: true,
       publishPipelineEnabled: true,
       multiRepositoryEnabled: false,
+      authoritiesEnabled: false,
     };
     expect(diffCapabilities(current, current)).toEqual([]);
   });
@@ -137,6 +139,7 @@ describe("diffCapabilities", () => {
       vocabularyHubEnabled: true,
       publishPipelineEnabled: true,
       multiRepositoryEnabled: false,
+      authoritiesEnabled: false,
     };
     const submitted = { ...current, vocabularyHubEnabled: false };
     const diff = diffCapabilities(current, submitted);
@@ -155,6 +158,7 @@ describe("diffCapabilities", () => {
       vocabularyHubEnabled: true,
       publishPipelineEnabled: false,
       multiRepositoryEnabled: false,
+      authoritiesEnabled: false,
     };
     const diff = diffCapabilities(current, submitted);
     expect(diff).toHaveLength(2);

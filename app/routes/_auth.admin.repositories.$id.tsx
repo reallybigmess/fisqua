@@ -15,7 +15,7 @@
  * `authMiddleware`. Every read/update/delete of `repositories`,
  * `descriptions`, and `users` is filtered by `tenant.id`.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -99,7 +99,7 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   // Check for another user's draft on this record
   const { getConflictDraft } = await import("~/lib/drafts.server");
   const { users } = await import("~/db/schema");
-  const conflictRaw = await getConflictDraft(db, id, "repository", user.id);
+  const conflictRaw = await getConflictDraft(db, tenant.id, id, "repository", user.id);
   let conflictDraft: { userName: string; updatedAt: number } | null = null;
   if (conflictRaw) {
     const conflictUser = await db
@@ -147,7 +147,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       const { saveDraft } = await import("~/lib/drafts.server");
       const snapshot = formData.get("snapshot") as string;
       if (snapshot) {
-        await saveDraft(db, id, "repository", user.id, snapshot);
+        await saveDraft(db, tenant.id, id, "repository", user.id, snapshot);
       }
       return { ok: true as const, autosaved: true };
     }
@@ -297,7 +297,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 
       // Delete draft after successful save
       const { deleteDraft } = await import("~/lib/drafts.server");
-      await deleteDraft(db, id, "repository");
+      await deleteDraft(db, tenant.id, id, "repository");
 
       return { ok: true as const, message: "updated" };
     }
@@ -503,7 +503,7 @@ export default function RepositoryDetailPage({
 
       {/* Linked descriptions tree */}
       <div className="mt-6">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.05em] text-stone-500">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-stone-500">
           {t("linked_descriptions")}
         </h2>
         <div className="rounded-lg border border-stone-200 bg-white p-4">
@@ -557,7 +557,7 @@ export default function RepositoryDetailPage({
             </h2>
             <p
               id="delete-modal-body"
-              className="mt-2 font-serif text-[15px] text-stone-500 max-w-[36ch] mx-auto"
+              className="mt-2 font-serif text-15 text-stone-500 max-w-measure mx-auto"
             >
               {t("delete_modal_body", { name: repository.name })}
             </p>
@@ -666,7 +666,7 @@ function ViewMode({
     <div className="space-y-6">
       {/* Identity area */}
       <section>
-        <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.05em] text-stone-500">
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-stone-500">
           {t("section_identity")}
         </h2>
         <div className="space-y-3">
@@ -681,7 +681,7 @@ function ViewMode({
 
       {/* Contact area */}
       <section>
-        <h2 className="mt-6 mb-4 text-sm font-semibold uppercase tracking-[0.05em] text-stone-500">
+        <h2 className="mt-6 mb-4 text-sm font-semibold uppercase tracking-wider text-stone-500">
           {t("section_contact")}
         </h2>
         <div className="space-y-3">
@@ -721,7 +721,7 @@ function ViewMode({
 
       {/* Administrative */}
       <section>
-        <h2 className="mt-6 mb-4 text-sm font-semibold uppercase tracking-[0.05em] text-stone-500">
+        <h2 className="mt-6 mb-4 text-sm font-semibold uppercase tracking-wider text-stone-500">
           {t("section_admin")}
         </h2>
         <div className="space-y-3">
@@ -792,7 +792,7 @@ function EditMode({
       />
 
       {/* Identity area */}
-      <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.05em] text-stone-500">
+      <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-stone-500">
         {t("section_identity")}
       </h2>
       <div className="space-y-4">
@@ -819,7 +819,7 @@ function EditMode({
       </div>
 
       {/* Contact area */}
-      <h2 className="mb-4 mt-6 text-sm font-semibold uppercase tracking-[0.05em] text-stone-500">
+      <h2 className="mb-4 mt-6 text-sm font-semibold uppercase tracking-wider text-stone-500">
         {t("section_contact")}
       </h2>
       <div className="space-y-4">
@@ -857,7 +857,7 @@ function EditMode({
       </div>
 
       {/* Administrative */}
-      <h2 className="mb-4 mt-6 text-sm font-semibold uppercase tracking-[0.05em] text-stone-500">
+      <h2 className="mb-4 mt-6 text-sm font-semibold uppercase tracking-wider text-stone-500">
         {t("section_admin")}
       </h2>
       <div className="space-y-4">

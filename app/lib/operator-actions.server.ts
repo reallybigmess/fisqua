@@ -11,7 +11,7 @@
  * ## Form-field set
  *
  * `CreateTenantSchema` mirrors the `/operator/tenants/new` form fields
- * one-to-one (slug, name, descriptive_standard, four capability flags,
+ * one-to-one (slug, name, descriptive_standard, five capability flags,
  * optional quota, bootstrap-superadmin email). The schema applies
  * `SlugSchema` for the slug field — the existing GLOB regex +
  * reserved-list refinement flows through unchanged.
@@ -37,6 +37,8 @@
  *                                    vocabulary surface by default)
  *   - `publish_pipeline`     → on   (every tenant gets export by default)
  *   - `multi_repository`     → off  (single-repo is the v0.4 default)
+ *   - `authorities`          → on   (authority cataloguing is the norm;
+ *                                    strings-only tenants opt out)
  *
  * `SetCapabilitySchema` defaults each flag to FALSE — the form's
  * capability checkboxes mean "send a value only if checked"; an
@@ -46,16 +48,16 @@
  *
  * ## diffCapabilities
  *
- * Pure function. Compares the four boolean columns from the current
+ * Pure function. Compares the five boolean columns from the current
  * tenant row against the submitted values and returns an array of
  * `{ capability, from, to }` entries — one per changed flag. Empty
  * array means no-op (the action handler then skips the `withAuditLog`
  * call to avoid logging a no-op write). The capability label uses the
  * `Capability` string literals (`crowdsourcing`, `vocabulary_hub`,
- * `publish_pipeline`, `multi_repository`) so the audit details JSON
- * is reviewable as-shipped.
+ * `publish_pipeline`, `multi_repository`, `authorities`) so the audit
+ * details JSON is reviewable as-shipped.
  *
- * @version v0.4.0
+ * @version v0.4.2
  */
 
 import { z } from "zod";
@@ -112,6 +114,7 @@ export const CreateTenantSchema = z.object({
   vocabularyHubEnabled: checkboxSchema.default(true),
   publishPipelineEnabled: checkboxSchema.default(true),
   multiRepositoryEnabled: checkboxSchema.default(false),
+  authoritiesEnabled: checkboxSchema.default(true),
   // Empty string from a blank form field becomes `null`; otherwise a
   // non-negative integer. Storing `null` matches the schema's nullable
   // `quota_storage_bytes` column.
@@ -142,6 +145,7 @@ export const SetCapabilitySchema = z.object({
   vocabularyHubEnabled: checkboxSchema.default(false),
   publishPipelineEnabled: checkboxSchema.default(false),
   multiRepositoryEnabled: checkboxSchema.default(false),
+  authoritiesEnabled: checkboxSchema.default(false),
 });
 
 /**
@@ -167,7 +171,7 @@ export const ReEnableSchema = z.object({
 });
 
 /**
- * The four capability flag identifiers used in audit details payloads.
+ * The capability flag identifiers used in audit details payloads.
  * Mirrors `Capability` from `app/lib/tenant.ts`; kept inline here so
  * the diff helper does not have to import the type.
  */
@@ -175,13 +179,15 @@ export type CapabilityName =
   | "crowdsourcing"
   | "vocabulary_hub"
   | "publish_pipeline"
-  | "multi_repository";
+  | "multi_repository"
+  | "authorities";
 
 interface CapabilityRow {
   crowdsourcingEnabled: boolean;
   vocabularyHubEnabled: boolean;
   publishPipelineEnabled: boolean;
   multiRepositoryEnabled: boolean;
+  authoritiesEnabled: boolean;
 }
 
 interface CapabilityDiffEntry {
@@ -233,7 +239,14 @@ export function diffCapabilities(
       to: submitted.multiRepositoryEnabled,
     });
   }
+  if (current.authoritiesEnabled !== submitted.authoritiesEnabled) {
+    changes.push({
+      capability: "authorities",
+      from: current.authoritiesEnabled,
+      to: submitted.authoritiesEnabled,
+    });
+  }
   return changes;
 }
 
-// @version v0.4.0
+// @version v0.4.2

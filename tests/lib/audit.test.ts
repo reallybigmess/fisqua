@@ -90,6 +90,9 @@ describe("withAuditLog", () => {
             publishPipelineEnabled: true,
             multiRepositoryEnabled: false,
             quotaStorageBytes: null,
+            // federation_id is DB-nullable (migration 0044); NULL is
+            // FK-exempt. schema.ts types it `.notNull()`, hence the cast.
+            federationId: null as unknown as string,
             createdAt: Date.now(),
             updatedAt: Date.now(),
           });
@@ -173,6 +176,9 @@ describe("withAuditLog", () => {
             publishPipelineEnabled: true,
             multiRepositoryEnabled: false,
             quotaStorageBytes: null,
+            // federation_id is DB-nullable (migration 0044); NULL is
+            // FK-exempt. schema.ts types it `.notNull()`, hence the cast.
+            federationId: null as unknown as string,
             createdAt: Date.now(),
             updatedAt: Date.now(),
           });
@@ -227,6 +233,9 @@ describe("withAuditLog", () => {
             publishPipelineEnabled: true,
             multiRepositoryEnabled: false,
             quotaStorageBytes: null,
+            // federation_id is DB-nullable (migration 0044); NULL is
+            // FK-exempt. schema.ts types it `.notNull()`, hence the cast.
+            federationId: null as unknown as string,
             createdAt: Date.now(),
             updatedAt: Date.now(),
           });

@@ -5,7 +5,7 @@
  * (Wikidata, VIAF, TGN) with a click-through link icon that opens the
  * resolved URL in a new tab.
  *
- * @version v0.3.0
+ * @version v0.4.3
  */
 
 import { useState } from "react";
@@ -30,7 +30,9 @@ const SERVICE_PATTERNS: Record<LodService, RegExp> = {
   whg: /^[a-zA-Z0-9]+$/,
 };
 
-const SERVICE_URLS: Record<LodService, (id: string) => string> = {
+/** Exported for the detail pages' linked-open-data cards, which
+ * render the same external links outside the edit field. */
+export const SERVICE_URLS: Record<LodService, (id: string) => string> = {
   wikidata: (id) => `https://www.wikidata.org/wiki/${id}`,
   viaf: (id) => `https://viaf.org/viaf/${id}`,
   tgn: (id) => `https://vocab.getty.edu/tgn/${id}`,
