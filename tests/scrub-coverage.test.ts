@@ -10,17 +10,21 @@
  * against the content, and fails on any match outside the
  * known-good fixture allowlist.
  *
- * The pattern catches three classes of leak: planning labels
+ * The pattern catches four classes of leak: planning labels
  * (`Phase NN`, `D-NN`, `RQ-N`, `Fase NN`, REQ-ID prefix codes —
  * `TENANT-NN`, `STD-NN`, `IMPORT-NN`, etc.), AI-tooling references
  * (`CLAUDE.md`, `.claude/`, `claude.com`, `anthropic`,
- * `co-authored-by`), and developer-workspace path literals
- * (`.planning/`, `docs/fisqua/`, `../docs/`). The literal-path check
- * is what surfaced the runtime path leak in
- * `scripts/reconcile-volume-status.ts` during v0.4 release prep, and
- * the `docs/fisqua/` / `../docs/` arms were added after two source
- * comments citing a private `../docs/fisqua/...` audit path reached
- * the public repo in the v0.4.0 port.
+ * `co-authored-by`), developer-workspace path literals
+ * (`.planning/`, `docs/fisqua/`, `../docs/`), and developer
+ * home-directory absolute paths (`/Users/<user>/…`,
+ * `/home/<user>/…`). The literal-path check is what surfaced the
+ * runtime path leak in `scripts/reconcile-volume-status.ts` during
+ * v0.4 release prep; the `docs/fisqua/` / `../docs/` arms were added
+ * after two source comments citing a private `../docs/fisqua/...`
+ * audit path reached the public repo in the v0.4.0 port; and the
+ * home-directory arm was added after `scripts/backfill/backfill.ts`
+ * shipped a hardcoded `/Users/…` default path to the public repo
+ * through the v0.5.0 port.
  *
  * Case-sensitive on purpose: the REQ-ID prefix codes and planning
  * labels are uppercase by convention (`TENANT-01`, `Phase 33`),
@@ -36,7 +40,7 @@
  * explaining why the false-positive is intentional, and ideally
  * a referenced incident so the next maintainer understands.
  *
- * @version v0.4.0
+ * @version v0.6.0
  */
 
 import { describe, it, expect } from "vitest";
@@ -46,7 +50,7 @@ import { describe, it, expect } from "vitest";
 // that happen to contain "tenant-1" or "import-2026" are NOT
 // planning labels and must not trip the gate.
 const SCRUB_PATTERN =
-  /Phase [0-9]+|Plan [0-9]+|RQ-[0-9]+|AI-SPEC|RESEARCH\.md|UI-SPEC|scratchpad|GSD|gsd-|TENANT-[0-9]+|STD-[0-9]+|IMPORT-[0-9]+|PARITY-[0-9]+|NORM-[0-9]+|SCHEMA-[0-9]+|CONTRACT-[0-9]+|VERIFY-[0-9]+|MODIFIED-[0-9]+|CUTOVER-[0-9]+|Fase [0-9]+|Claude Code|claude code|claude\.com|claude\.ai|Anthropic|anthropic|Co-Authored-By|co-authored-by|CLAUDE\.md|\.claude\/|\.planning\/|docs\/fisqua\/|\.\.\/docs\//g;
+  /Phase [0-9]+|Plan [0-9]+|RQ-[0-9]+|AI-SPEC|RESEARCH\.md|UI-SPEC|scratchpad|GSD|gsd-|TENANT-[0-9]+|STD-[0-9]+|IMPORT-[0-9]+|PARITY-[0-9]+|NORM-[0-9]+|SCHEMA-[0-9]+|CONTRACT-[0-9]+|VERIFY-[0-9]+|MODIFIED-[0-9]+|CUTOVER-[0-9]+|Fase [0-9]+|Claude Code|claude code|claude\.com|claude\.ai|Anthropic|anthropic|Co-Authored-By|co-authored-by|CLAUDE\.md|\.claude\/|\.planning\/|docs\/fisqua\/|\.\.\/docs\/|\/Users\/[A-Za-z0-9._-]+|\/home\/[a-z][A-Za-z0-9._-]+/g;
 
 // Allowlisted false positives. Each entry MUST carry a comment
 // explaining why the substring is intentional.
@@ -218,5 +222,11 @@ describe("scrub-pattern coverage keystone", () => {
     expect(SCRUB_PATTERN.test('const id = "viaf-import-2026";')).toBe(false);
     SCRUB_PATTERN.lastIndex = 0;
     expect(SCRUB_PATTERN.test('const t = "id-wrong-tenant-1";')).toBe(false);
+    SCRUB_PATTERN.lastIndex = 0;
+    // Developer home-directory absolute paths must trip the gate (the
+    // v0.5.0 leak: backfill.ts shipped a `/Users/…` default path).
+    expect(SCRUB_PATTERN.test('const p = "/Users/alice/code/foo";')).toBe(true);
+    SCRUB_PATTERN.lastIndex = 0;
+    expect(SCRUB_PATTERN.test('const p = "/home/runner/work/x";')).toBe(true);
   });
 });
