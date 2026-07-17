@@ -13,7 +13,13 @@
  * `authMiddleware`; the loader filters `repositories` by
  * `tenant.id`.
  *
- * @version v0.4.0
+ * Creating a repository is gated by capability, not visibility: allowed
+ * when the tenant has `multiRepositoryEnabled` OR currently has ZERO
+ * repositories (the first-repository case). Otherwise the "add" button
+ * gives way to a teaching note — the /new route refuses server-side too,
+ * so a direct URL cannot bypass.
+ *
+ * @version v0.6.0
  */
 
 import { useState, useEffect, useMemo, useRef } from "react";
@@ -74,7 +80,12 @@ export async function loader({ context }: Route.LoaderArgs) {
     .orderBy(repositories.name)
     .all();
 
-  return { repositories: allRepos };
+  // Create is capability-gated at the OPERATION: multi-repository tenants
+  // always may; a single-repository tenant only while it has none (the
+  // first-repository case). The /new route enforces the same rule.
+  const canCreate = tenant.multiRepositoryEnabled || allRepos.length === 0;
+
+  return { repositories: allRepos, canCreate };
 }
 
 // ---------------------------------------------------------------------------
@@ -84,7 +95,7 @@ export async function loader({ context }: Route.LoaderArgs) {
 export default function AdminRepositoriesPage({
   loaderData,
 }: Route.ComponentProps) {
-  const { repositories } = loaderData;
+  const { repositories, canCreate } = loaderData;
   const { t } = useTranslation("repositories");
 
   // Table ref for accessing the TanStack Table instance
@@ -271,13 +282,19 @@ export default function AdminRepositoriesPage({
         <h1 className="font-serif text-4xl font-semibold text-stone-700">
           {t("title")}
         </h1>
-        <Link
-          to="/admin/repositories/new"
-          className="inline-flex items-center gap-2 rounded-md bg-indigo px-4 py-2 text-sm font-semibold text-parchment hover:bg-indigo-deep"
-        >
-          <Plus className="h-4 w-4" />
-          {t("add")}
-        </Link>
+        {canCreate ? (
+          <Link
+            to="/admin/repositories/new"
+            className="inline-flex items-center gap-2 rounded-md bg-indigo px-4 py-2 text-sm font-semibold text-parchment hover:bg-indigo-deep"
+          >
+            <Plus className="h-4 w-4" />
+            {t("add")}
+          </Link>
+        ) : (
+          <p className="max-w-md text-right text-xs text-stone-500">
+            {t("single_repo_note")}
+          </p>
+        )}
       </div>
 
       {/* Toolbar */}

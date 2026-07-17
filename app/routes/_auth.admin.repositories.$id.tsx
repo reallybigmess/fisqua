@@ -15,7 +15,14 @@
  * `authMiddleware`. Every read/update/delete of `repositories`,
  * `descriptions`, and `users` is filtered by `tenant.id`.
  *
- * @version v0.4.2
+ * The edit form's country/code fields are the shared identity fields
+ * (`repository-country-fields`): country is an ISO select that fills the
+ * alpha-3 code, the repository code gets a derived suggestion behind a
+ * "use suggestion" affordance (an existing code is never silently
+ * rewritten), and a stored free-text country matching no ISO entry is
+ * kept verbatim behind a fallback option.
+ *
+ * @version v0.6.0
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -31,6 +38,13 @@ import { useTranslation } from "react-i18next";
 import { ChevronRight, Pencil, Trash2 } from "lucide-react";
 import { tenantContext, userContext } from "../context";
 import { DraftsBanner } from "~/components/admin/drafts-banner";
+import {
+  useRepositoryIdentity,
+  RepoNameInput,
+  RepoCodeInput,
+  RepoCountrySelect,
+  RepoCountryCodeInput,
+} from "~/components/admin/repository-country-fields";
 import { DescriptionTree } from "~/components/descriptions/description-tree";
 import type { Route } from "./+types/_auth.admin.repositories.$id";
 
@@ -115,7 +129,15 @@ export async function loader({ params, context }: Route.LoaderArgs) {
     };
   }
 
-  return { repository, descriptionCount, topLevelDescriptions, conflictDraft };
+  // The tenant's repository count gates delete: the LAST repository is
+  // never deletable (records and imports file under it), for every tenant.
+  const [{ count: repositoryCount }] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(repositories)
+    .where(eq(repositories.tenantId, tenant.id))
+    .all();
+
+  return { repository, descriptionCount, topLevelDescriptions, conflictDraft, repositoryCount };
 }
 
 // ---------------------------------------------------------------------------
@@ -319,6 +341,18 @@ export async function action({ params, request, context }: Route.ActionArgs) {
         return { ok: false as const, error: "has_descriptions" };
       }
 
+      // The tenant's LAST repository is never deletable — for every
+      // tenant, capability or not: a workspace with zero repositories
+      // cannot create descriptions or commit imports.
+      const [{ count: repositoryCount }] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(repositories)
+        .where(eq(repositories.tenantId, tenant.id))
+        .all();
+      if (repositoryCount <= 1) {
+        return { ok: false as const, error: "last_repository" };
+      }
+
       await db
         .delete(repositories)
         .where(and(eq(repositories.tenantId, tenant.id), eq(repositories.id, id)));
@@ -337,7 +371,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 export default function RepositoryDetailPage({
   loaderData,
 }: Route.ComponentProps) {
-  const { repository, descriptionCount, topLevelDescriptions, conflictDraft } =
+  const { repository, descriptionCount, topLevelDescriptions, conflictDraft, repositoryCount } =
     loaderData;
   const actionData = useActionData<typeof action>();
   const { t } = useTranslation("repositories");
@@ -440,25 +474,31 @@ export default function RepositoryDetailPage({
               <Pencil className="h-4 w-4" />
               {t("edit")}
             </button>
-            <button
-              type="button"
-              onClick={() => !hasDescriptions && setShowDeleteModal(true)}
-              disabled={hasDescriptions}
-              aria-disabled={hasDescriptions ? "true" : undefined}
-              title={
-                hasDescriptions
-                  ? t("delete_blocked", { count: descriptionCount })
-                  : undefined
-              }
-              className={
-                hasDescriptions
-                  ? "inline-flex cursor-not-allowed items-center gap-2 rounded-lg bg-madder px-4 py-2 text-sm font-semibold text-parchment opacity-50"
-                  : "inline-flex items-center gap-2 rounded-lg bg-madder px-4 py-2 text-sm font-semibold text-parchment hover:bg-madder-deep"
-              }
-            >
-              <Trash2 className="h-4 w-4" />
-              {t("delete")}
-            </button>
+            {repositoryCount === 1 ? (
+              <p className="max-w-xs self-center text-right text-xs text-stone-500">
+                {t("last_repository_note")}
+              </p>
+            ) : (
+              <button
+                type="button"
+                onClick={() => !hasDescriptions && setShowDeleteModal(true)}
+                disabled={hasDescriptions}
+                aria-disabled={hasDescriptions ? "true" : undefined}
+                title={
+                  hasDescriptions
+                    ? t("delete_blocked", { count: descriptionCount })
+                    : undefined
+                }
+                className={
+                  hasDescriptions
+                    ? "inline-flex cursor-not-allowed items-center gap-2 rounded-lg bg-madder px-4 py-2 text-sm font-semibold text-parchment opacity-50"
+                    : "inline-flex items-center gap-2 rounded-lg bg-madder px-4 py-2 text-sm font-semibold text-parchment hover:bg-madder-deep"
+                }
+              >
+                <Trash2 className="h-4 w-4" />
+                {t("delete")}
+              </button>
+            )}
           </div>
         ) : null}
       </div>
@@ -497,7 +537,9 @@ export default function RepositoryDetailPage({
             ? t("error_duplicate_code")
             : globalError === "has_descriptions"
               ? t("delete_blocked", { count: descriptionCount })
-              : t("error_generic")}
+              : globalError === "last_repository"
+                ? t("last_repository_note")
+                : t("error_generic")}
         </div>
       )}
 
@@ -782,6 +824,16 @@ function EditMode({
   formRef?: React.Ref<HTMLFormElement>;
   onFormChange?: () => void;
 }) {
+  // Interpolated strings and the active locale need the real i18n handle;
+  // the narrow `t` prop stays for the plain labels.
+  const { t: ti, i18n } = useTranslation("repositories");
+  const identity = useRepositoryIdentity({
+    name: repository.name,
+    code: repository.code,
+    country: repository.country ?? "",
+    countryCode: repository.countryCode ?? "",
+    locale: i18n.language ?? "en",
+  });
   return (
     <Form method="post" ref={formRef} onChange={onFormChange}>
       <input type="hidden" name="_action" value="update" />
@@ -791,50 +843,23 @@ function EditMode({
         value={String(repository.updatedAt)}
       />
 
-      {/* Identity area */}
-      <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-stone-500">
-        {t("section_identity")}
-      </h2>
-      <div className="space-y-4">
-        <EditField
-          name="code"
-          label={t("field.code")}
-          defaultValue={repository.code}
-          required
-          error={errors?.code?.[0]}
-        />
-        <EditField
-          name="name"
-          label={t("field.name")}
-          defaultValue={repository.name}
-          required
-          error={errors?.name?.[0]}
-        />
-        <EditField
-          name="shortName"
-          label={t("field.shortName")}
-          defaultValue={repository.shortName ?? ""}
-          error={errors?.shortName?.[0]}
-        />
-      </div>
-
       {/* Contact area */}
-      <h2 className="mb-4 mt-6 text-sm font-semibold uppercase tracking-wider text-stone-500">
+      <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-stone-500">
         {t("section_contact")}
       </h2>
       <div className="space-y-4">
-        <EditField
-          name="countryCode"
+        <RepoCountrySelect
+          identity={identity}
+          label={t("field.country")}
+          chooseLabel={t("country_choose")}
+          error={errors?.country?.[0]}
+        />
+        <RepoCountryCodeInput
+          identity={identity}
           label={t("field.countryCode")}
-          defaultValue={repository.countryCode ?? "COL"}
           required
           error={errors?.countryCode?.[0]}
-        />
-        <EditField
-          name="country"
-          label={t("field.country")}
-          defaultValue={repository.country ?? ""}
-          error={errors?.country?.[0]}
+          help={t("country_code_help")}
         />
         <EditField
           name="city"
@@ -853,6 +878,40 @@ function EditMode({
           label={t("field.website")}
           defaultValue={repository.website ?? ""}
           error={errors?.website?.[0]}
+          helperText={t("website_help")}
+        />
+      </div>
+
+      {/* Identity area */}
+      <h2 className="mb-4 mt-6 text-sm font-semibold uppercase tracking-wider text-stone-500">
+        {t("section_identity")}
+      </h2>
+      <div className="space-y-4">
+        <RepoNameInput
+          identity={identity}
+          label={t("field.name")}
+          required
+          error={errors?.name?.[0]}
+        />
+        <RepoCodeInput
+          identity={identity}
+          label={t("field.code")}
+          required
+          error={errors?.code?.[0]}
+          help={t("code_help")}
+          suggestionLabel={
+            identity.suggestion
+              ? ti("code_suggested", { code: identity.suggestion })
+              : null
+          }
+          useSuggestionLabel={t("code_use_suggestion")}
+        />
+        <EditField
+          name="shortName"
+          label={t("field.shortName")}
+          defaultValue={repository.shortName ?? ""}
+          error={errors?.shortName?.[0]}
+          helperText={t("short_name_help")}
         />
       </div>
 
@@ -866,12 +925,14 @@ function EditMode({
           label={t("field.notes")}
           defaultValue={repository.notes ?? ""}
           error={errors?.notes?.[0]}
+          helperText={t("notes_help")}
         />
         <EditTextarea
           name="rightsText"
           label={t("field.rightsText")}
           defaultValue={repository.rightsText ?? ""}
           error={errors?.rightsText?.[0]}
+          helperText={t("rights_text_help")}
         />
         <EditField
           name="displayTitle"
@@ -907,6 +968,7 @@ function EditMode({
             {t("badge_enabled")}
           </label>
         </div>
+        <p className="text-xs text-stone-400">{t("enabled_help")}</p>
       </div>
 
       {/* Actions */}
@@ -963,6 +1025,11 @@ function EditField({
         {label}
         {required && <span className="text-madder"> *</span>}
       </label>
+      {helperText && (
+        <p id={helperId} className="mb-1 text-xs text-stone-400">
+          {helperText}
+        </p>
+      )}
       <input
         type={type}
         id={name}
@@ -972,11 +1039,6 @@ function EditField({
         aria-describedby={describedBy}
         className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
       />
-      {helperText && (
-        <p id={helperId} className="mt-1 text-xs text-stone-400">
-          {helperText}
-        </p>
-      )}
       {error && (
         <p id={errorId} className="mt-1 text-xs text-madder">
           {error}
@@ -991,24 +1053,33 @@ function EditTextarea({
   label,
   defaultValue,
   error,
+  helperText,
 }: {
   name: string;
   label: string;
   defaultValue: string;
   error?: string;
+  helperText?: string;
 }) {
   const errorId = error ? `${name}-error` : undefined;
+  const helperId = helperText ? `${name}-helper` : undefined;
+  const describedBy = [errorId, helperId].filter(Boolean).join(" ") || undefined;
   return (
     <div>
       <label htmlFor={name} className="mb-1 block text-xs font-medium text-indigo">
         {label}
       </label>
+      {helperText && (
+        <p id={helperId} className="mb-1 text-xs text-stone-400">
+          {helperText}
+        </p>
+      )}
       <textarea
         id={name}
         name={name}
         rows={3}
         defaultValue={defaultValue}
-        aria-describedby={errorId}
+        aria-describedby={describedBy}
         className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
       />
       {error && (
