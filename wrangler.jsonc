@@ -92,6 +92,18 @@
       "binding": "PUBLISH_EXPORT",
       "class_name": "PublishExportWorkflow",
       "script_name": "fisqua"
+    },
+    {
+      "name": "import-commit",
+      "binding": "IMPORT_COMMIT",
+      "class_name": "ImportCommitWorkflow",
+      "script_name": "fisqua"
+    },
+    {
+      "name": "import-revert",
+      "binding": "IMPORT_REVERT",
+      "class_name": "ImportRevertWorkflow",
+      "script_name": "fisqua"
     }
   ],
   "env": {
@@ -139,6 +151,18 @@
           "name": "publish-export-staging",
           "binding": "PUBLISH_EXPORT",
           "class_name": "PublishExportWorkflow",
+          "script_name": "fisqua"
+        },
+        {
+          "name": "import-commit-staging",
+          "binding": "IMPORT_COMMIT",
+          "class_name": "ImportCommitWorkflow",
+          "script_name": "fisqua"
+        },
+        {
+          "name": "import-revert-staging",
+          "binding": "IMPORT_REVERT",
+          "class_name": "ImportRevertWorkflow",
           "script_name": "fisqua"
         }
       ]

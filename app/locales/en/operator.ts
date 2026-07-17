@@ -9,7 +9,7 @@
  * (`tests/i18n-coverage.test.ts`) runs equally over the parallel
  * ES file.
  *
- * @version v0.4.0
+ * @version v0.6.0
  */
 export default {
   brand: "Fisqua Operator",
@@ -40,6 +40,7 @@ export default {
       publish_pipeline: "Publish pipeline",
       multi_repository: "Multi-repository",
       authorities: "Authorities",
+      imports: "Imports",
     },
     view_link: "View",
     empty_state: "No tenants yet.",

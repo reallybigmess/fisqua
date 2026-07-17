@@ -19,7 +19,7 @@
  * server build for the app and is resolved during the bundle step, not at
  * runtime.
  *
- * @version v0.3.0
+ * @version v0.6.0
  */
 
 import { createRequestHandler, RouterContextProvider } from "react-router";
@@ -44,9 +44,11 @@ const requestHandler = createRequestHandler(
   import.meta.env.MODE
 );
 
-// Re-export the publish-export workflow class so the wrangler `workflows`
-// binding (PUBLISH_EXPORT, class_name: PublishExportWorkflow) can resolve it.
+// Re-export the workflow classes so the wrangler `workflows` bindings
+// (PUBLISH_EXPORT / IMPORT_COMMIT) can resolve them by class_name.
 export { PublishExportWorkflow } from "../app/workflows/publish-export";
+export { ImportCommitWorkflow } from "../app/workflows/import-commit";
+export { ImportRevertWorkflow } from "../app/workflows/import-revert";
 
 export default {
   async fetch(request, env, ctx) {

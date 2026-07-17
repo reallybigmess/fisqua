@@ -27,13 +27,16 @@
  *   - `authoritiesEnabled` → the entire `Authorities` section
  *     (`/admin/entities` and `/admin/places`), its own grouped
  *     section as of the 2026-07-10 module-section ruling
+ *   - `importsEnabled` → the entire `Imports` section
+ *     (`/admin/imports`), its own grouped section following the
+ *     authorities precedent
  *
- * For Neogranadina (all five capabilities ON) the rendered tree is
- * byte-identical to v0.3 — the gating is invisible to existing
- * users. The `<Sidebar>` component grew a matching `tenant` prop
+ * For a tenant with a capability off the corresponding surface is
+ * omitted — the gating is invisible to tenants that carry every
+ * flag. The `<Sidebar>` component grew a matching `tenant` prop
  * which the `_auth` layout populates from `tenantContext`.
  *
- * @version v0.4.2
+ * @version v0.6.0
  */
 
 import { NavLink } from "react-router";
@@ -48,6 +51,7 @@ import {
   Building2,
   UserCog,
   Upload,
+  Import,
   ArrowUpFromLine,
   BookOpen,
   GitCompare,
@@ -95,6 +99,7 @@ export interface SidebarTenant {
   publishPipelineEnabled: boolean;
   multiRepositoryEnabled: boolean;
   authoritiesEnabled: boolean;
+  importsEnabled: boolean;
 }
 
 /**
@@ -179,13 +184,15 @@ export function getSidebarSections(
     const items: NavItem[] = [
       { path: "/admin/descriptions", icon: FileText, labelKey: "sidebar:descriptions" },
     ];
-    if (tenant.multiRepositoryEnabled) {
-      items.push({
-        path: "/admin/repositories",
-        icon: Building2,
-        labelKey: "sidebar:repositories",
-      });
-    }
+    // Repositories renders for every tenant's admins: the capability gates
+    // the OPERATIONS (create beyond the first repository, delete of the
+    // last one — the repositories routes), never the surface. A
+    // single-repository tenant still reads and edits its one repository.
+    items.push({
+      path: "/admin/repositories",
+      icon: Building2,
+      labelKey: "sidebar:repositories",
+    });
     if (tenant.vocabularyHubEnabled) {
       items.push({
         path: "/admin/vocabularies",
@@ -219,6 +226,19 @@ export function getSidebarSections(
             labelKey: "sidebar:possible_duplicates",
             badge: counts?.duplicates,
           },
+        ],
+      });
+    }
+
+    // Imports — the module's own section, gated on the imports
+    // capability. When off the whole section is omitted (the route
+    // gate 404s any direct hit). Its single entry is the imports
+    // surface; later phases fill the section as the module grows.
+    if (tenant.importsEnabled) {
+      sections.push({
+        labelKey: "sidebar:imports",
+        items: [
+          { path: "/admin/imports", icon: Import, labelKey: "sidebar:imports" },
         ],
       });
     }

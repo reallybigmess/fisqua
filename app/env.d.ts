@@ -12,7 +12,7 @@
  * declaration for the typecheck step to pass without first running a
  * wrangler build.
  *
- * @version v0.3.0
+ * @version v0.6.0
  */
 interface Env {
   DB: D1Database;
@@ -27,4 +27,13 @@ interface Env {
   RESEND_API_KEY: string;
   GITHUB_CLIENT_ID?: string;
   GITHUB_CLIENT_SECRET?: string;
+  // Import staging store (spec §7.4). BACKEND is the explicit selector —
+  // "b2" in production, unset/anything else means R2 over BUCKET (dev,
+  // tests). The four S3 vars back the B2 store and are only read when
+  // BACKEND is "b2"; optional so dev/tests need not carry them.
+  IMPORTS_STAGING_BACKEND?: string;
+  IMPORTS_STAGING_S3_ENDPOINT: string;
+  IMPORTS_STAGING_BUCKET: string;
+  IMPORTS_STAGING_KEY_ID: string;
+  IMPORTS_STAGING_SECRET_KEY: string;
 }

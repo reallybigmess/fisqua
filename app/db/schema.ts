@@ -82,7 +82,7 @@
  * left in the database for migration purity and should be treated as
  * legacy for any future schema work.
  *
- * @version v0.4.3
+ * @version v0.6.0
  */
 
 import {
@@ -150,6 +150,10 @@ export const tenants = sqliteTable(
     // true keeps the rollout behaviour-neutral; the greenfield member
     // tenants (komuni, sbmal) launch strings-only with it off.
     authoritiesEnabled: integer("authorities_enabled", { mode: "boolean" }).notNull().default(true),
+    // Gates the bulk-import surface (migration 0061). DEFAULT false —
+    // bulk upsert is operator-granted per tenant when an import is
+    // actually planned.
+    importsEnabled: integer("imports_enabled", { mode: "boolean" }).notNull().default(false),
     quotaStorageBytes: integer("quota_storage_bytes"),
     // Soft-disable timestamp (migration 0039). Nullable — NULL means
     // active. When set, getTenantFromRequest 404s the tenant subdomain
@@ -1097,10 +1101,21 @@ export const changelog = sqliteTable(
       .references(() => users.id),
     note: text("note"),
     diff: text("diff").notNull(), // JSON: { fieldName: { old, new } }
+    // Stewardship journal columns (migration 0063). runId: which
+    // stewardship run caused this row; NULL = ordinary hand edit. No
+    // FK — journal rows must stay readable regardless of runs. kind:
+    // the effect discriminator; per-kind diff contract in the
+    // stewardship record spec §3. Rows are append-only at the DB level
+    // (0063 triggers) — never UPDATE or DELETE through this table.
+    runId: text("run_id"),
+    kind: text("kind", { enum: ["create", "update", "delete", "link", "unlink"] })
+      .notNull()
+      .default("update"),
     createdAt: integer("created_at").notNull(),
   },
   (table) => [
     index("changelog_record_idx").on(table.recordId, table.recordType, table.createdAt),
+    index("changelog_run_idx").on(table.runId),
   ]
 );
 
@@ -1179,6 +1194,151 @@ export const exportRuns = sqliteTable(
   (table) => [
     index("export_runs_status_idx").on(table.status),
     index("export_runs_created_idx").on(table.createdAt),
+  ]
+);
+
+// The commit envelope for bulk operations (migration 0062; stewardship
+// record spec §2): one row per import or revert run, carrying the
+// REQUIRED operator message, attribution, revert linkage, artifact
+// pointers, and the export_runs-shaped Workflow lifecycle columns.
+// Mutability contract (spec §6): only the lifecycle/linkage columns
+// (status, step tracking, heartbeats, errorMessage, started/completedAt,
+// revertedByRunId) are ever updated — by the Workflow and the revert
+// stamp. Rows are never deleted. revertsRunId/revertedByRunId/profileId
+// carry NO FK: ledger rows must stay referenceable forever (the
+// authority_operations.source_id rule), and a run must outlive its
+// profile.
+export const stewardshipRuns = sqliteTable(
+  "stewardship_runs",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    federationId: text("federation_id").references(() => federations.id),
+    kind: text("kind", { enum: ["import", "revert"] }).notNull(),
+    message: text("message").notNull(),
+    justification: text("justification"),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    status: text("status", {
+      enum: ["pending", "running", "complete", "error"],
+    }).notNull().default("pending"),
+    revertsRunId: text("reverts_run_id"),
+    revertedByRunId: text("reverted_by_run_id"),
+    profileId: text("profile_id"),
+    profileVersion: integer("profile_version"),
+    sourceArtifact: text("source_artifact"),
+    reportArtifact: text("report_artifact"),
+    recordCounts: text("record_counts"), // JSON: { created, updated, linked, rejected, ... }
+    // Audit snapshot of the readiness-check acceptances (0066), copied
+    // from the upload row when the run is minted — never from client
+    // input — so the run shows which incompleteness the operator
+    // knowingly accepted.
+    acceptedFindings: text("accepted_findings"), // JSON: [{ classKeys, counts, acceptedBy, acceptedAt }]
+    workflowInstanceId: text("workflow_instance_id"),
+    currentStep: text("current_step"),
+    stepsCompleted: integer("steps_completed").notNull().default(0),
+    totalSteps: integer("total_steps").notNull().default(0),
+    currentStepStartedAt: integer("current_step_started_at"),
+    currentStepCompletedAt: integer("current_step_completed_at"),
+    lastHeartbeatAt: integer("last_heartbeat_at"),
+    errorMessage: text("error_message"),
+    startedAt: integer("started_at"),
+    completedAt: integer("completed_at"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("stewardship_runs_tenant_idx").on(table.tenantId, table.createdAt),
+    index("stewardship_runs_status_idx").on(table.status),
+    index("stewardship_runs_reverts_idx").on(table.revertsRunId),
+  ]
+);
+
+// Named, per-tenant, versioned mapping profiles (migration 0064;
+// imports spec §2): `bindings` is the Zod-validated JSON mapping of
+// CSV HEADER NAMES to description fields, each with an optional
+// transform spec. A profile is a single mutable row whose `version`
+// increments on every bindings edit; runs pin (profileId,
+// profileVersion) on stewardship_runs, so drift is detectable and
+// revert never replays a mapping (the journal's before-images carry
+// the effects). sharedWithFederation (spec §7.3) marks lead-tenant
+// profiles readable by federation members — app-layer enforced.
+// starterKey marks seeded starter profiles (phase 7); NULL =
+// operator-authored. Nothing references this table by FK: runs and
+// uploads keep FK-free profileId pointers so they outlive deletion.
+export const importProfiles = sqliteTable(
+  "import_profiles",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    name: text("name").notNull(),
+    version: integer("version").notNull().default(1),
+    bindings: text("bindings").notNull(), // JSON: ProfileBindings (Zod-validated)
+    starterKey: text("starter_key"),
+    sharedWithFederation: integer("shared_with_federation", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
+    updatedBy: text("updated_by").references(() => users.id),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("import_profiles_tenant_name_unq").on(table.tenantId, table.name),
+    index("import_profiles_tenant_idx").on(table.tenantId, table.updatedAt),
+  ]
+);
+
+// The metadata row behind every staged CSV upload (migration 0065;
+// imports spec §§1, 4). The staged FILE lives in the staging store
+// (B2 in production, the local R2 binding in dev/tests — spec §7.4);
+// artifactKey points at it. Carries what the upload → profile →
+// dry-run → commit flow needs without re-fetching the object; the
+// dry-run report artifact is written before and independently of any
+// commit. Lifecycle: staged → committed (runId stamped) | discarded —
+// discard is a status flip, never a DELETE. runId carries a real FK
+// (stewardship_runs rows are never deleted); profileId is FK-free,
+// mirroring stewardshipRuns.profileId.
+export const importUploads = sqliteTable(
+  "import_uploads",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    filename: text("filename").notNull(),
+    artifactKey: text("artifact_key").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    rowCount: integer("row_count"),
+    headers: text("headers"), // JSON: string[] of parsed header names
+    profileId: text("profile_id"),
+    profileVersion: integer("profile_version"),
+    reportArtifact: text("report_artifact"),
+    // Readiness check (0066; readiness-check design §3.5). Findings are
+    // pinned to (profileId, profileVersion) and recomputed on drift;
+    // decisions record accepted class keys and never carry to a
+    // re-upload.
+    checkFindings: text("check_findings"), // JSON: { profileId, profileVersion, computedAt, findings }
+    checkDecisions: text("check_decisions"), // JSON: [{ classKeys, acceptedBy, acceptedAt }]
+    status: text("status", {
+      enum: ["staged", "committed", "discarded"],
+    }).notNull().default("staged"),
+    runId: text("run_id").references(() => stewardshipRuns.id),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    index("import_uploads_tenant_idx").on(table.tenantId, table.createdAt),
+    index("import_uploads_status_idx").on(table.status),
   ]
 );
 
