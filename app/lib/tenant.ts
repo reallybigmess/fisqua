@@ -20,7 +20,7 @@
  *   - `hasCapability(tenant, cap)` / `requireCapability(tenant, cap)`
  *     -- the route-loader gates for the capability flags
  *     (`crowdsourcing`, `vocabulary_hub`, `publish_pipeline`,
- *     `multi_repository`, `authorities`). The `require` form throws a bare 404 so
+ *     `multi_repository`, `authorities`, `imports`). The `require` form throws a bare 404 so
  *     a disabled-capability surface looks identical to a missing
  *     route from the outside; v0.4 capabilities are operator-set
  *     and effectively immutable (multi-tenancy.md), so the "user
@@ -68,7 +68,7 @@
  *     for operator actions touching tenant data; URL hits on
  *     disabled capabilities are not operator actions.
  *
- * @version v0.4.2
+ * @version v0.6.0
  */
 
 import { eq } from "drizzle-orm";
@@ -316,7 +316,8 @@ export type Capability =
   | "vocabulary_hub"
   | "publish_pipeline"
   | "multi_repository"
-  | "authorities";
+  | "authorities"
+  | "imports";
 
 /**
  * Returns the boolean value of the matching `*Enabled` field on
@@ -336,6 +337,8 @@ export function hasCapability(tenant: Tenant, cap: Capability): boolean {
       return tenant.multiRepositoryEnabled;
     case "authorities":
       return tenant.authoritiesEnabled;
+    case "imports":
+      return tenant.importsEnabled;
   }
 }
 

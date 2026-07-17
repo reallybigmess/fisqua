@@ -6,7 +6,7 @@
  * chrome (Inicio, Mis proyectos, Descripciones, Entidades, Lugares,
  * Repositorios, Publicar, Promover, Catalogación colaborativa).
  *
- * @version v0.3.0
+ * @version v0.6.0
  */
 export default {
   home: "Inicio",
@@ -24,6 +24,7 @@ export default {
   manage_users: "Administrar usuarios",
   records_management: "Gestión documental",
   authorities: "Autoridades",
+  imports: "Importaciones",
   possible_duplicates: "Posibles duplicados",
   my_settings: "Mi configuración",
   system_users: "Usuarios del sistema",

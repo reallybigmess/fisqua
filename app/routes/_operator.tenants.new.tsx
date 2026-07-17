@@ -58,7 +58,7 @@
  * so the form re-renders with the locale's `tenant_new.errors.slug_taken`
  * message rather than 5xx-ing on a UNIQUE constraint failure.
  *
- * @version v0.4.2
+ * @version v0.6.0
  */
 
 import { Form, redirect } from "react-router";
@@ -141,6 +141,7 @@ export async function action({ request, context }: Route.ActionArgs) {
           publish_pipeline: parsed.data.publishPipelineEnabled,
           multi_repository: parsed.data.multiRepositoryEnabled,
           authorities: parsed.data.authoritiesEnabled,
+          imports: parsed.data.importsEnabled,
         },
         bootstrap_email: parsed.data.bootstrapEmail,
       },
@@ -169,6 +170,7 @@ export async function action({ request, context }: Route.ActionArgs) {
         publishPipelineEnabled: parsed.data.publishPipelineEnabled,
         multiRepositoryEnabled: parsed.data.multiRepositoryEnabled,
         authoritiesEnabled: parsed.data.authoritiesEnabled,
+        importsEnabled: parsed.data.importsEnabled,
         quotaStorageBytes: parsed.data.quotaStorageBytes,
         disabledAt: null,
         federationId: null as unknown as string,
@@ -414,6 +416,14 @@ export default function CreateTenantPage({
               />
               <span>{t("tenants_list.capabilities.authorities")}</span>
             </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                name="importsEnabled"
+                value="true"
+              />
+              <span>{t("tenants_list.capabilities.imports")}</span>
+            </label>
           </div>
         </fieldset>
 
@@ -471,4 +481,4 @@ export default function CreateTenantPage({
   );
 }
 
-// @version v0.4.0
+// @version v0.6.0

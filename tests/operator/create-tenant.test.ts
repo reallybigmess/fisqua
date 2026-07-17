@@ -26,7 +26,7 @@
  * function directly with a hand-built RouterContextProvider; the
  * middleware behaviour is covered by `operator-layout.test.ts`.
  *
- * @version v0.4.0
+ * @version v0.6.0
  */
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import { env } from "cloudflare:test";
@@ -179,6 +179,8 @@ describe("/operator/tenants/new — create tenant + bootstrap superadmin", () =>
       multi_repository: false,
       // Omitted from the form → CreateTenantSchema default (on).
       authorities: true,
+      // Omitted from the form → CreateTenantSchema default (off).
+      imports: false,
     });
 
     // Magic-link row landed for the bootstrap user.

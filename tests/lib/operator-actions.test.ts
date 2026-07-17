@@ -11,7 +11,7 @@
  *   4. The schema rejects an invalid bootstrap_email.
  *   5. The schema applies the capability defaults when fields are
  *      omitted: crowdsourcing=false, vocabulary_hub=true,
- *      publish_pipeline=true, multi_repository=false.
+ *      publish_pipeline=true, multi_repository=false, imports=false.
  *   6. diffCapabilities returns [] for a no-op (current === submitted).
  *   7. diffCapabilities returns one entry for a single flip.
  *   8. diffCapabilities returns multiple entries for multi-flip and
@@ -20,7 +20,7 @@
  * No DB, no async — these run at compile speed and pin the validation
  * surface that Tasks 2 + 3 build their action handlers on top of.
  *
- * @version v0.4.0
+ * @version v0.6.0
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -108,6 +108,7 @@ describe("CreateTenantSchema", () => {
       expect(result.data.vocabularyHubEnabled).toBe(true);
       expect(result.data.publishPipelineEnabled).toBe(true);
       expect(result.data.multiRepositoryEnabled).toBe(false);
+      expect(result.data.importsEnabled).toBe(false);
       expect(result.data.quotaStorageBytes).toBeNull();
     }
   });
@@ -120,6 +121,7 @@ describe("diffCapabilities", () => {
     publishPipelineEnabled: false,
     multiRepositoryEnabled: false,
     authoritiesEnabled: false,
+    importsEnabled: false,
   };
 
   it("returns [] when current === submitted (no-op)", () => {
@@ -129,6 +131,7 @@ describe("diffCapabilities", () => {
       publishPipelineEnabled: true,
       multiRepositoryEnabled: false,
       authoritiesEnabled: false,
+      importsEnabled: false,
     };
     expect(diffCapabilities(current, current)).toEqual([]);
   });
@@ -140,6 +143,7 @@ describe("diffCapabilities", () => {
       publishPipelineEnabled: true,
       multiRepositoryEnabled: false,
       authoritiesEnabled: false,
+      importsEnabled: false,
     };
     const submitted = { ...current, vocabularyHubEnabled: false };
     const diff = diffCapabilities(current, submitted);
@@ -159,6 +163,7 @@ describe("diffCapabilities", () => {
       publishPipelineEnabled: false,
       multiRepositoryEnabled: false,
       authoritiesEnabled: false,
+      importsEnabled: false,
     };
     const diff = diffCapabilities(current, submitted);
     expect(diff).toHaveLength(2);
@@ -171,6 +176,18 @@ describe("diffCapabilities", () => {
     });
     expect(byCap.vocabulary_hub).toEqual({
       capability: "vocabulary_hub",
+      from: false,
+      to: true,
+    });
+  });
+
+  it("reports an imports flip as its own entry", () => {
+    const current = allOff;
+    const submitted = { ...allOff, importsEnabled: true };
+    const diff = diffCapabilities(current, submitted);
+    expect(diff).toHaveLength(1);
+    expect(diff[0]).toEqual({
+      capability: "imports",
       from: false,
       to: true,
     });

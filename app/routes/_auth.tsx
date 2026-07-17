@@ -10,12 +10,11 @@
  * context so nested pages can react.
  *
  * The loader reads `tenantContext` (populated by `authMiddleware`
- * after resolving the request `Host` header) and surfaces the five
+ * after resolving the request `Host` header) and surfaces the
  * capability flags to the `<Sidebar>` so capability-off nav surfaces
- * are hidden. For a tenant with all five capabilities on the
- * rendered tree is byte-identical to v0.3.
+ * are hidden.
  *
- * @version v0.4.2
+ * @version v0.6.0
  */
 
 import { useState, useEffect } from "react";
@@ -60,7 +59,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     .limit(1);
   const hasAnyProjectMembership = membershipRows.length > 0;
 
-  // Surface only the five capability flags the sidebar needs;
+  // Surface only the capability flags the sidebar needs;
   // structurally matches `SidebarTenant` so the prop typecheck is a
   // simple shape match rather than a wider Tenant cast. Keeping the
   // payload narrow also avoids accidentally serialising capability
@@ -72,6 +71,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     publishPipelineEnabled: tenant.publishPipelineEnabled,
     multiRepositoryEnabled: tenant.multiRepositoryEnabled,
     authoritiesEnabled: tenant.authoritiesEnabled,
+    importsEnabled: tenant.importsEnabled,
   };
 
   // Possible-duplicates badge for the Authorities sidebar entry —

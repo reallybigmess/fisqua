@@ -11,7 +11,7 @@
  * ## Form-field set
  *
  * `CreateTenantSchema` mirrors the `/operator/tenants/new` form fields
- * one-to-one (slug, name, descriptive_standard, five capability flags,
+ * one-to-one (slug, name, descriptive_standard, six capability flags,
  * optional quota, bootstrap-superadmin email). The schema applies
  * `SlugSchema` for the slug field — the existing GLOB regex +
  * reserved-list refinement flows through unchanged.
@@ -39,6 +39,7 @@
  *   - `multi_repository`     → off  (single-repo is the v0.4 default)
  *   - `authorities`          → on   (authority cataloguing is the norm;
  *                                    strings-only tenants opt out)
+ *   - `imports`              → off  (bulk import is opt-in)
  *
  * `SetCapabilitySchema` defaults each flag to FALSE — the form's
  * capability checkboxes mean "send a value only if checked"; an
@@ -54,10 +55,10 @@
  * array means no-op (the action handler then skips the `withAuditLog`
  * call to avoid logging a no-op write). The capability label uses the
  * `Capability` string literals (`crowdsourcing`, `vocabulary_hub`,
- * `publish_pipeline`, `multi_repository`, `authorities`) so the audit
- * details JSON is reviewable as-shipped.
+ * `publish_pipeline`, `multi_repository`, `authorities`, `imports`) so
+ * the audit details JSON is reviewable as-shipped.
  *
- * @version v0.4.2
+ * @version v0.6.0
  */
 
 import { z } from "zod";
@@ -115,6 +116,7 @@ export const CreateTenantSchema = z.object({
   publishPipelineEnabled: checkboxSchema.default(true),
   multiRepositoryEnabled: checkboxSchema.default(false),
   authoritiesEnabled: checkboxSchema.default(true),
+  importsEnabled: checkboxSchema.default(false),
   // Empty string from a blank form field becomes `null`; otherwise a
   // non-negative integer. Storing `null` matches the schema's nullable
   // `quota_storage_bytes` column.
@@ -146,6 +148,7 @@ export const SetCapabilitySchema = z.object({
   publishPipelineEnabled: checkboxSchema.default(false),
   multiRepositoryEnabled: checkboxSchema.default(false),
   authoritiesEnabled: checkboxSchema.default(false),
+  importsEnabled: checkboxSchema.default(false),
 });
 
 /**
@@ -180,7 +183,8 @@ export type CapabilityName =
   | "vocabulary_hub"
   | "publish_pipeline"
   | "multi_repository"
-  | "authorities";
+  | "authorities"
+  | "imports";
 
 interface CapabilityRow {
   crowdsourcingEnabled: boolean;
@@ -188,6 +192,7 @@ interface CapabilityRow {
   publishPipelineEnabled: boolean;
   multiRepositoryEnabled: boolean;
   authoritiesEnabled: boolean;
+  importsEnabled: boolean;
 }
 
 interface CapabilityDiffEntry {
@@ -203,8 +208,9 @@ interface CapabilityDiffEntry {
  * logging an idempotent submission.
  *
  * Ordering: the entries follow the C-07 capability matrix order
- * (crowdsourcing → vocabulary_hub → publish_pipeline → multi_repository)
- * so audit-UI rendering is stable across renders.
+ * (crowdsourcing → vocabulary_hub → publish_pipeline → multi_repository
+ * → authorities → imports) so audit-UI rendering is stable across
+ * renders.
  */
 export function diffCapabilities(
   current: CapabilityRow,
@@ -246,7 +252,14 @@ export function diffCapabilities(
       to: submitted.authoritiesEnabled,
     });
   }
+  if (current.importsEnabled !== submitted.importsEnabled) {
+    changes.push({
+      capability: "imports",
+      from: current.importsEnabled,
+      to: submitted.importsEnabled,
+    });
+  }
   return changes;
 }
 
-// @version v0.4.2
+// @version v0.6.0

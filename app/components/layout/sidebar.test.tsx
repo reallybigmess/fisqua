@@ -15,7 +15,11 @@
  * that structure: Records management holds descriptions / repositories /
  * vocabularies / publish; Authorities holds entities / places.
  *
- * @version v0.4.2
+ * The `imports` capability (migration 0061) adds its own gated
+ * `Imports` section, off by default; the cases near the end pin its
+ * visibility.
+ *
+ * @version v0.6.0
  */
 
 import { describe, it, expect } from "vitest";
@@ -39,9 +43,10 @@ function makeUser(overrides: Partial<SidebarUser> = {}): SidebarUser {
 }
 
 /**
- * Build a `SidebarTenant` with all five capabilities ON by default
- * — the Neogranadina shape. Override individual flags to flip a
- * single capability off in a test case.
+ * Build a `SidebarTenant` with the historical five capabilities ON
+ * and `imports` OFF by default — the Neogranadina shape (imports is
+ * opt-in, off platform-wide by migration 0061). Override individual
+ * flags to flip a single capability in a test case.
  */
 function makeTenant(overrides: Partial<SidebarTenant> = {}): SidebarTenant {
   return {
@@ -50,6 +55,7 @@ function makeTenant(overrides: Partial<SidebarTenant> = {}): SidebarTenant {
     publishPipelineEnabled: true,
     multiRepositoryEnabled: true,
     authoritiesEnabled: true,
+    importsEnabled: false,
     ...overrides,
   };
 }
@@ -262,15 +268,18 @@ describe("getSidebarSections", () => {
     ]);
   });
 
-  it("hides /admin/repositories when multi_repository is off", () => {
+  it("shows /admin/repositories regardless of the multi_repository flag", () => {
+    // The capability gates repository OPERATIONS (create beyond the first,
+    // delete of the last), never the surface: a single-repository tenant
+    // still reads and edits its one repository.
     const sections = getSidebarSections(
       makeUser({ isSuperAdmin: true }),
       makeTenant({ multiRepositoryEnabled: false }),
     );
-    expect(allPaths(sections)).not.toContain("/admin/repositories");
-    // The other records-management entries still render.
+    expect(allPaths(sections)).toContain("/admin/repositories");
     expect(paths(sections, "sidebar:records_management")).toEqual([
       "/admin/descriptions",
+      "/admin/repositories",
       "/admin/vocabularies",
       "/admin/publish",
     ]);
@@ -290,6 +299,61 @@ describe("getSidebarSections", () => {
     );
     expect(dup?.badge).toBe(4);
     expect(dup?.labelKey).toBe("sidebar:possible_duplicates");
+  });
+
+  it("shows the Imports section only when imports is on", () => {
+    const off = getSidebarSections(
+      makeUser({ isSuperAdmin: true }),
+      makeTenant(),
+    );
+    // Default tenant has imports off — no Imports section, and the
+    // existing section set is unchanged.
+    expect(labels(off)).not.toContain("sidebar:imports");
+    expect(allPaths(off)).not.toContain("/admin/imports");
+
+    const on = getSidebarSections(
+      makeUser({ isSuperAdmin: true }),
+      makeTenant({ importsEnabled: true }),
+    );
+    expect(labels(on)).toEqual([
+      "<home>",
+      "sidebar:collaborative_cataloguing",
+      "sidebar:records_management",
+      "sidebar:authorities",
+      "sidebar:imports",
+    ]);
+    expect(paths(on, "sidebar:imports")).toEqual(["/admin/imports"]);
+  });
+
+  it("hides the Imports section for a non-admin even when imports is on", () => {
+    // A member-only user never reaches the admin block that carries
+    // the Imports section, regardless of the capability flag.
+    const sections = getSidebarSections(
+      makeUser({ hasAnyProjectMembership: true }),
+      makeTenant({ importsEnabled: true }),
+    );
+    expect(labels(sections)).not.toContain("sidebar:imports");
+    expect(allPaths(sections)).not.toContain("/admin/imports");
+  });
+
+  it("imports capability does not collateral-affect other sections", () => {
+    // Turning imports on adds only the Imports section; Records
+    // management and Authorities render unchanged.
+    const sections = getSidebarSections(
+      makeUser({ isSuperAdmin: true }),
+      makeTenant({ importsEnabled: true }),
+    );
+    expect(paths(sections, "sidebar:records_management")).toEqual([
+      "/admin/descriptions",
+      "/admin/repositories",
+      "/admin/vocabularies",
+      "/admin/publish",
+    ]);
+    expect(paths(sections, "sidebar:authorities")).toEqual([
+      "/admin/entities",
+      "/admin/places",
+      "/admin/entities/duplicates",
+    ]);
   });
 
   it("hides the whole Authorities section when authorities is off", () => {
