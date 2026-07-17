@@ -40,7 +40,7 @@
  * tenant subdomain falls through to React Router's no-match 404
  * because no `/operator/*` route is registered on `_auth`.
  *
- * @version v0.4.0
+ * @version v0.6.0
  */
 
 import {
@@ -161,6 +161,29 @@ export default [
     route("admin/publish", "routes/_auth.admin.publish.tsx"),
     route("admin/publish/runs/:exportId", "routes/_auth.admin.publish.runs.$exportId.tsx"),
     route("admin/promote", "routes/_auth.admin.promote.tsx"),
+    route("admin/imports", "routes/_auth.admin.imports.tsx"),
+    route("admin/imports/template", "routes/_auth.admin.imports.template.tsx"),
+    route(
+      "admin/imports/profiles/:profileId",
+      "routes/_auth.admin.imports.profiles.$profileId.tsx",
+    ),
+    route(
+      "admin/imports/uploads/:uploadId",
+      "routes/_auth.admin.imports.uploads.$uploadId.tsx",
+    ),
+    route(
+      "admin/imports/uploads/:uploadId/download/:kind",
+      "routes/_auth.admin.imports.uploads.$uploadId.download.$kind.tsx",
+    ),
+    route("admin/imports/runs", "routes/_auth.admin.imports.runs.tsx"),
+    route(
+      "admin/imports/runs/:runId",
+      "routes/_auth.admin.imports.runs.$runId.tsx",
+    ),
+    route(
+      "admin/imports/runs/:runId/report",
+      "routes/_auth.admin.imports.runs.$runId.report.tsx",
+    ),
 
     // Vocabulary management
     layout("routes/_auth.admin.vocabularies.tsx", [

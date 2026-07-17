@@ -12,7 +12,7 @@
  * son `tú prefieres / quieres / sabes / eres / tienes`. NUNCA usar
  * `preferís / querés / sabés / sos / tenés`.
  *
- * @version v0.4.0
+ * @version v0.6.0
  */
 export default {
   brand: "Fisqua Operador",
@@ -43,6 +43,7 @@ export default {
       publish_pipeline: "Canal de publicación",
       multi_repository: "Multi-repositorio",
       authorities: "Autoridades",
+      imports: "Importaciones",
     },
     view_link: "Ver",
     empty_state: "Aún no hay inquilinos.",

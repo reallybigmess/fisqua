@@ -33,7 +33,7 @@
  * The role-picker form's POST target is
  * `/operator/tenants/:slug/login-as`.
  *
- * @version v0.4.0
+ * @version v0.6.0
  */
 
 import { Form, useLoaderData, useActionData } from "react-router";
@@ -124,6 +124,7 @@ export async function action({ request, params, context }: Route.ActionArgs) {
           publishPipelineEnabled: tenant.publishPipelineEnabled as unknown as boolean,
           multiRepositoryEnabled: tenant.multiRepositoryEnabled as unknown as boolean,
           authoritiesEnabled: tenant.authoritiesEnabled as unknown as boolean,
+          importsEnabled: tenant.importsEnabled as unknown as boolean,
         },
         {
           crowdsourcingEnabled: parsed.data.crowdsourcingEnabled,
@@ -131,6 +132,7 @@ export async function action({ request, params, context }: Route.ActionArgs) {
           publishPipelineEnabled: parsed.data.publishPipelineEnabled,
           multiRepositoryEnabled: parsed.data.multiRepositoryEnabled,
           authoritiesEnabled: parsed.data.authoritiesEnabled,
+          importsEnabled: parsed.data.importsEnabled,
         },
       );
       if (changes.length === 0) {
@@ -164,6 +166,7 @@ export async function action({ request, params, context }: Route.ActionArgs) {
               publishPipelineEnabled: parsed.data.publishPipelineEnabled,
               multiRepositoryEnabled: parsed.data.multiRepositoryEnabled,
               authoritiesEnabled: parsed.data.authoritiesEnabled,
+              importsEnabled: parsed.data.importsEnabled,
               updatedAt: now,
             })
             .where(eq(tenants.id, tenant.id));
@@ -385,6 +388,17 @@ export default function TenantDetailPage() {
                 />
                 <span>{t("tenants_list.capabilities.authorities")}</span>
               </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  name="importsEnabled"
+                  value="true"
+                  defaultChecked={
+                    tenant.importsEnabled as unknown as boolean
+                  }
+                />
+                <span>{t("tenants_list.capabilities.imports")}</span>
+              </label>
             </div>
             <button
               type="submit"
@@ -515,4 +529,4 @@ export default function TenantDetailPage() {
   );
 }
 
-// @version v0.4.0
+// @version v0.6.0

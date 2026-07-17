@@ -60,7 +60,7 @@
  * that must know a request is cross-tenant (a grant banner, the
  * steward-gate helpers, grant-write audit).
  *
- * @version v0.4.2
+ * @version v0.6.0
  */
 
 // --- TEMPLATE INFRASTRUCTURE --- do not modify when extending
@@ -88,7 +88,7 @@ export type User = {
  * including the boolean capability flags
  * (`crowdsourcingEnabled`, `vocabularyHubEnabled`,
  * `publishPipelineEnabled`, `multiRepositoryEnabled`,
- * `authoritiesEnabled`), the
+ * `authoritiesEnabled`, `importsEnabled`), the
  * `kind` discriminator (`"tenant"` | `"platform"`), and
  * descriptive-standard / status fields.
  */

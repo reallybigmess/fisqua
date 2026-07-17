@@ -25,7 +25,7 @@
  * round-trip should use the integration scaffolding in
  * `tests/middleware/auth.test.ts` instead.
  *
- * @version v0.4.2
+ * @version v0.6.0
  */
 import type { User, Tenant } from "../../app/context";
 import { DEFAULT_TEST_TENANT_ID } from "./db";
@@ -76,6 +76,9 @@ export function makeTenantContext(overrides: Partial<Tenant> = {}): Tenant {
     publishPipelineEnabled: overrides.publishPipelineEnabled ?? true,
     multiRepositoryEnabled: overrides.multiRepositoryEnabled ?? true,
     authoritiesEnabled: overrides.authoritiesEnabled ?? true,
+    // imports (migration 0061) defaults OFF platform-wide; tests that
+    // exercise the import surface flip it on explicitly.
+    importsEnabled: overrides.importsEnabled ?? false,
     quotaStorageBytes: overrides.quotaStorageBytes ?? null,
     disabledAt: overrides.disabledAt ?? null,
     federationId: overrides.federationId ?? NEOGRANADINA_FEDERATION_ID,

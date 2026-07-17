@@ -25,7 +25,7 @@
  * (notably `svix`, which dangles workerd isolates trying to resolve a
  * missing `mockttp` import).
  *
- * @version v0.5.0
+ * @version v0.6.0
  */
 
 import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
@@ -59,6 +59,7 @@ export default defineWorkersConfig({
     hookTimeout: 60000,
     poolOptions: {
       workers: {
+        singleWorker: true,
         wrangler: {
           configPath: "./wrangler.jsonc",
         },

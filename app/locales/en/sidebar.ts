@@ -6,7 +6,7 @@
  * `_auth` chrome (Home, My projects, Descriptions, Entities, Places,
  * Repositories, Publish, Promote, Collaborative cataloguing).
  *
- * @version v0.3.0
+ * @version v0.6.0
  */
 export default {
   home: "Home",
@@ -24,6 +24,7 @@ export default {
   manage_users: "Manage users",
   records_management: "Records management",
   authorities: "Authorities",
+  imports: "Imports",
   possible_duplicates: "Possible duplicates",
   my_settings: "My settings",
   system_users: "System users",

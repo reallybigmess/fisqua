@@ -69,9 +69,13 @@ export function createSessionStorage(sessionSecret: string) {
       path: "/",
       sameSite: "lax",
       secrets: [sessionSecret],
-      secure: true,
+      // `Secure` everywhere except the vite dev server, which serves
+      // plain http on *.localhost — browsers that don't treat
+      // *.localhost as a trustworthy origin (Safari, curl) drop a
+      // Secure cookie there, silently breaking local login.
+      secure: !import.meta.env.DEV,
     },
   });
 }
 
-// @version v0.4.0
+// @version v0.6.0

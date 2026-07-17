@@ -1,0 +1,14 @@
+-- Imports capability flag (imports module spec §1; build plan phase 1).
+--
+-- Adds the `imports_enabled` capability column to `tenants` — the sixth
+-- capability flag, gating the bulk-import surface: the admin routes,
+-- the sidebar section, and the upload/dry-run/commit flow.
+--
+-- Additive ADD COLUMN with DEFAULT 0. Unlike authorities_enabled
+-- (0058, DEFAULT 1), imports default OFF: the surface is new (no
+-- tenant has it today, so OFF is the behaviour-neutral default) and
+-- bulk upsert is an operator-granted power, enabled per tenant when an
+-- import is actually planned — the crowdsourcing_enabled precedent.
+--
+-- Version: v0.6.0
+ALTER TABLE tenants ADD COLUMN imports_enabled INTEGER NOT NULL DEFAULT 0;

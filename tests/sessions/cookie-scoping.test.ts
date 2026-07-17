@@ -17,9 +17,9 @@
  * synthetic hosts (RESEARCH §"Test infrastructure" caveat), so
  * this is the right place to assert the structural property.
  *
- * @version v0.4.0
+ * @version v0.6.0
  */
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { createSessionStorage } from "../../app/sessions.server";
 
 describe("session cookie scoping (C-02)", () => {
@@ -45,6 +45,37 @@ describe("session cookie scoping (C-02)", () => {
     expect(cookieHeader).toMatch(/Path=\//);
     expect(cookieHeader).toMatch(/HttpOnly/);
     expect(cookieHeader).toMatch(/SameSite=Lax/i);
-    expect(cookieHeader).toMatch(/Secure/);
+  });
+
+  // `Secure` is build-conditioned (`!import.meta.env.DEV`): the vite
+  // dev server serves plain http on *.localhost, where browsers that
+  // don't treat *.localhost as a trustworthy origin drop a Secure
+  // cookie and silently break local login. Both directions are pinned
+  // so neither the production guarantee nor the dev carve-out can
+  // regress silently.
+  describe("Secure attribute follows the build, not the runtime", () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("production build (DEV=false) sets Secure", async () => {
+      vi.stubEnv("DEV", false);
+      const { getSession, commitSession } = createSessionStorage(
+        "test-session-secret"
+      );
+      const session = await getSession();
+      session.set("userId", "00000000-0000-0000-0000-000000000001");
+      expect(await commitSession(session)).toMatch(/Secure/);
+    });
+
+    it("dev build (DEV=true) omits Secure", async () => {
+      vi.stubEnv("DEV", true);
+      const { getSession, commitSession } = createSessionStorage(
+        "test-session-secret"
+      );
+      const session = await getSession();
+      session.set("userId", "00000000-0000-0000-0000-000000000001");
+      expect(await commitSession(session)).not.toMatch(/Secure/);
+    });
   });
 });

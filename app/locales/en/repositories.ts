@@ -7,7 +7,7 @@
  * institutional anchors the description tree hangs off, so the labels
  * follow ISAAR(CPF)'s phrasing for archival institutions.
  *
- * @version v0.3.0
+ * @version v0.6.0
  */
 export default {
   title: "Repositories",
@@ -50,6 +50,24 @@ export default {
   "field.name": "Name",
   "field.shortName": "Short name",
   "field.countryCode": "Country code",
+  country_choose: "Choose a country",
+  country_code_help: "Filled from the country (ISO alpha-3); edit it if you need a different value.",
+  code_help:
+    "A short identifier unique to this workspace: it labels the repository in lists and record pickers, and travels with every exported record. Convention: country prefix plus the initials of the name's significant words, e.g. co-ahrb.",
+  code_suggested: "Suggested: {{code}}",
+  code_use_suggestion: "Use suggestion",
+  single_repo_note:
+    "This is a single-repository workspace: its repository is already set up, and every record files under it. Adding more repositories requires the multi-repository capability.",
+  short_name_help:
+    "A compact display name: record pickers and the published site label the repository with it, falling back to the code and then the full name.",
+  website_help: "Shown on the repository's page on the published site.",
+  notes_help: "Internal working notes for this workspace — never published or exported.",
+  rights_text_help:
+    "The rights statement for digitised records: it travels in their METS exports (the standard packaging file for digital objects) and appears on the published site as the image-reproduction text.",
+  enabled_help:
+    "A disabled repository is hidden from record pickers, import commits, and the published repository index; its existing records stay put.",
+  last_repository_note:
+    "The workspace's only repository cannot be deleted — records and imports file under it.",
   "field.country": "Country",
   "field.city": "City",
   "field.address": "Address",

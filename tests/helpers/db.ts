@@ -13,7 +13,7 @@
  * here so downstream test files share a single import surface for
  * tenant-aware fixtures.
  *
- * @version v0.4.3
+ * @version v0.6.0
  */
 import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
@@ -60,6 +60,8 @@ export async function applyMigrations() {
       // authorities capability (migration 0058). DEFAULT 1 —
       // behaviour-neutral; komuni/sbmal launch strings-only.
       "authorities_enabled INTEGER NOT NULL DEFAULT 1, " +
+      // imports capability (migration 0061). DEFAULT 0 — operator-granted.
+      "imports_enabled INTEGER NOT NULL DEFAULT 0, " +
       "quota_storage_bytes INTEGER, " +
       // Nullable soft-disable timestamp.
       "disabled_at INTEGER, " +
@@ -411,8 +413,42 @@ export async function applyMigrations() {
   await db.exec("CREATE UNIQUE INDEX IF NOT EXISTS drafts_record_idx ON drafts(tenant_id, record_id, record_type)");
   await db.exec("CREATE INDEX IF NOT EXISTS drafts_user_idx ON drafts(user_id)");
 
-  await db.exec("CREATE TABLE IF NOT EXISTS changelog (id TEXT PRIMARY KEY NOT NULL, record_id TEXT NOT NULL, record_type TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES users(id), note TEXT, diff TEXT NOT NULL, created_at INTEGER NOT NULL)");
+  // changelog carries the stewardship-journal columns (migration 0063:
+  // run_id + kind) and is append-only at the DB level — the harness
+  // installs the same RAISE(ABORT) triggers as production so journal
+  // immutability is testable.
+  await db.exec("CREATE TABLE IF NOT EXISTS changelog (id TEXT PRIMARY KEY NOT NULL, record_id TEXT NOT NULL, record_type TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES users(id), note TEXT, diff TEXT NOT NULL, run_id TEXT, kind TEXT NOT NULL DEFAULT 'update' CHECK (kind IN ('create','update','delete','link','unlink')), created_at INTEGER NOT NULL)");
   await db.exec("CREATE INDEX IF NOT EXISTS changelog_record_idx ON changelog(record_id, record_type, created_at)");
+  await db.exec("CREATE INDEX IF NOT EXISTS changelog_run_idx ON changelog(run_id)");
+  await db.exec(
+    "CREATE TRIGGER IF NOT EXISTS changelog_no_update BEFORE UPDATE ON changelog " +
+      "BEGIN SELECT RAISE(ABORT, 'changelog is append-only'); END",
+  );
+  await db.exec(
+    "CREATE TRIGGER IF NOT EXISTS changelog_no_delete BEFORE DELETE ON changelog " +
+      "BEGIN SELECT RAISE(ABORT, 'changelog is immutable'); END",
+  );
+
+  // stewardship_runs (migration 0062): the commit envelope for bulk
+  // operations (import/revert). Lifecycle columns mirror export_runs;
+  // revert linkage and profile pointers carry no FK by design.
+  await db.exec("CREATE TABLE IF NOT EXISTS stewardship_runs (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT, federation_id TEXT REFERENCES federations(id) ON DELETE RESTRICT, kind TEXT NOT NULL CHECK (kind IN ('import','revert')), message TEXT NOT NULL CHECK (length(trim(message)) > 0), justification TEXT, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT, status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','running','complete','error')), reverts_run_id TEXT, reverted_by_run_id TEXT, profile_id TEXT, profile_version INTEGER, source_artifact TEXT, report_artifact TEXT, record_counts TEXT, accepted_findings TEXT, workflow_instance_id TEXT, current_step TEXT, steps_completed INTEGER NOT NULL DEFAULT 0, total_steps INTEGER NOT NULL DEFAULT 0, current_step_started_at INTEGER, current_step_completed_at INTEGER, last_heartbeat_at INTEGER, error_message TEXT, started_at INTEGER, completed_at INTEGER, created_at INTEGER NOT NULL)");
+  await db.exec("CREATE INDEX IF NOT EXISTS stewardship_runs_tenant_idx ON stewardship_runs(tenant_id, created_at)");
+  await db.exec("CREATE INDEX IF NOT EXISTS stewardship_runs_status_idx ON stewardship_runs(status)");
+  await db.exec("CREATE INDEX IF NOT EXISTS stewardship_runs_reverts_idx ON stewardship_runs(reverts_run_id)");
+
+  // import_profiles (migration 0064): named, per-tenant, versioned
+  // mapping profiles; bindings is opaque Zod-validated JSON.
+  await db.exec("CREATE TABLE IF NOT EXISTS import_profiles (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT, name TEXT NOT NULL CHECK (length(trim(name)) > 0), version INTEGER NOT NULL DEFAULT 1, bindings TEXT NOT NULL, starter_key TEXT, shared_with_federation INTEGER NOT NULL DEFAULT 0 CHECK (shared_with_federation IN (0, 1)), created_by TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT, updated_by TEXT REFERENCES users(id) ON DELETE RESTRICT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)");
+  await db.exec("CREATE UNIQUE INDEX IF NOT EXISTS import_profiles_tenant_name_unq ON import_profiles(tenant_id, name)");
+  await db.exec("CREATE INDEX IF NOT EXISTS import_profiles_tenant_idx ON import_profiles(tenant_id, updated_at)");
+
+  // import_uploads (migration 0065): the metadata row behind every
+  // staged CSV upload; run_id FK is safe (runs are never deleted),
+  // profile_id is FK-free by design.
+  await db.exec("CREATE TABLE IF NOT EXISTS import_uploads (id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT, filename TEXT NOT NULL, artifact_key TEXT NOT NULL, byte_size INTEGER NOT NULL, row_count INTEGER, headers TEXT, profile_id TEXT, profile_version INTEGER, report_artifact TEXT, check_findings TEXT, check_decisions TEXT, status TEXT NOT NULL DEFAULT 'staged' CHECK (status IN ('staged','committed','discarded')), run_id TEXT REFERENCES stewardship_runs(id) ON DELETE RESTRICT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)");
+  await db.exec("CREATE INDEX IF NOT EXISTS import_uploads_tenant_idx ON import_uploads(tenant_id, created_at)");
+  await db.exec("CREATE INDEX IF NOT EXISTS import_uploads_status_idx ON import_uploads(status)");
 
   // export_runs carries four Cloudflare Workflows tracking columns
   // added in drizzle/0019_export_workflow.sql plus federation_id
