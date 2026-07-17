@@ -56,13 +56,14 @@
  *   npx tsx scripts/backfill/backfill.ts rehearse --db <sqlite> [--out .backfill]
  *   npx tsx scripts/backfill/backfill.ts stats [--out .backfill]
  *
- * `--db` is the local production-shaped D1 copy. `--source` defaults to
- * the zasqua-entities resolution output directory; `--data-dir` to its
- * sibling `data/` directory. `--dump-dir` is the integrator's Django
- * dump verification directory (no default — supplied per run). No
- * `--remote`, ever.
+ * `--db` is the local production-shaped D1 copy. `--source` is the entity-
+ * resolution output directory and `--data-dir` its sibling `data/`
+ * directory; both default to the `BACKFILL_SOURCE` and `BACKFILL_DATA_DIR`
+ * environment variables so no machine-specific path is baked into the
+ * source. `--dump-dir` is the integrator's Django dump verification
+ * directory (no default — supplied per run). No `--remote`, ever.
  *
- * @version v0.4.2
+ * @version v0.6.0
  */
 
 import * as fs from "node:fs";
@@ -109,10 +110,8 @@ import type {
   RunReport,
 } from "./types";
 
-const DEFAULT_SOURCE =
-  "/Users/juancobo/code/archiving/zasqua-entities/5-entity-resolution/output";
-const DEFAULT_DATA_DIR =
-  "/Users/juancobo/code/archiving/zasqua-entities/5-entity-resolution/data";
+const DEFAULT_SOURCE = process.env.BACKFILL_SOURCE ?? "";
+const DEFAULT_DATA_DIR = process.env.BACKFILL_DATA_DIR ?? "";
 const DEFAULT_OUT = ".backfill";
 
 interface Args {
