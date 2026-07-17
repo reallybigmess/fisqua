@@ -12,14 +12,63 @@
  * `authMiddleware`; the new repository row is attributed to
  * `tenant.id` rather than a single-tenant hard-code.
  *
- * @version v0.4.2
+ * A `returnTo` query parameter (the imports journey's "add a repository,
+ * then come back" notice) is preserved through the form in a hidden field
+ * — surviving validation-error re-renders — and, when it passes the
+ * open-redirect guard (`safeReturnTo`: internal paths only), a successful
+ * create redirects there instead of the new repository's edit page.
+ *
+ * @version v0.6.0
  */
 
-import { Form, useActionData, redirect, Link } from "react-router";
+import { Form, useActionData, redirect, Link, useSearchParams } from "react-router";
+import {
+  useRepositoryIdentity,
+  RepoNameInput,
+  RepoCodeInput,
+  RepoCountrySelect,
+  RepoCountryCodeInput,
+} from "../components/admin/repository-country-fields";
 import { useTranslation } from "react-i18next";
 import { ChevronRight } from "lucide-react";
 import { tenantContext, userContext } from "../context";
 import type { Route } from "./+types/_auth.admin.repositories.new";
+
+/**
+ * Create is capability-gated at the OPERATION (never mere visibility): a
+ * tenant may create iff it has `multiRepositoryEnabled` OR currently has
+ * ZERO repositories — the first-repository case every workspace needs.
+ * True in loader and action alike, so a direct URL cannot bypass the
+ * list page's teaching note.
+ */
+async function canCreateRepository(
+  db: import("drizzle-orm/d1").DrizzleD1Database<any>,
+  tenant: import("../context").Tenant,
+): Promise<boolean> {
+  if (tenant.multiRepositoryEnabled) return true;
+  const { sql, eq } = await import("drizzle-orm");
+  const { repositories } = await import("~/db/schema");
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(repositories)
+    .where(eq(repositories.tenantId, tenant.id))
+    .all();
+  return count === 0;
+}
+
+export async function loader({ context }: Route.LoaderArgs) {
+  const { requireAdmin } = await import("~/lib/permissions.server");
+  const { drizzle } = await import("drizzle-orm/d1");
+  const user = context.get(userContext);
+  requireAdmin(user);
+  const tenant = context.get(tenantContext);
+  const db = drizzle(context.cloudflare.env.DB);
+  if (!(await canCreateRepository(db, tenant))) {
+    // The list page carries the teaching note for this state.
+    throw redirect("/admin/repositories");
+  }
+  return null;
+}
 
 export async function action({ request, context }: Route.ActionArgs) {
   const { requireAdmin } = await import("~/lib/permissions.server");
@@ -35,6 +84,10 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   const env = context.cloudflare.env;
   const db = drizzle(env.DB);
+
+  if (!(await canCreateRepository(db, tenant))) {
+    return { ok: false as const, error: "single_repository" };
+  }
 
   const formData = await request.formData();
 
@@ -99,12 +152,24 @@ export async function action({ request, context }: Route.ActionArgs) {
     return { ok: false as const, error: "generic" };
   }
 
-  return redirect(`/admin/repositories/${id}`);
+  // A guarded returnTo (internal paths only) wins over the edit page — the
+  // imports journey's hand-back; anything else falls back silently.
+  const { safeReturnTo } = await import("~/lib/return-to");
+  const returnTo = safeReturnTo(formData.get("returnTo"));
+  return redirect(returnTo ?? `/admin/repositories/${id}`);
 }
 
 export default function NewRepositoryPage() {
   const actionData = useActionData<typeof action>();
-  const { t } = useTranslation("repositories");
+  const { t, i18n } = useTranslation("repositories");
+  // Country select + derived codes (house convention): picking a country
+  // fills the alpha-3 code, and name + country derive a suggested
+  // repository code; hand edits always win over the derivation.
+  const identity = useRepositoryIdentity({ locale: i18n.language ?? "en" });
+  // Preserved through validation-error re-renders: the POST re-renders the
+  // same URL, so the query parameter re-seeds the hidden field each time.
+  const [searchParams] = useSearchParams();
+  const returnTo = searchParams.get("returnTo");
 
   const errors =
     actionData && "errors" in actionData ? actionData.errors : undefined;
@@ -141,7 +206,9 @@ export default function NewRepositoryPage() {
         <div className="mt-4 rounded-md border border-indigo bg-indigo-tint px-4 py-3 text-sm text-stone-700">
           {globalError === "duplicate_code"
             ? t("error_duplicate_code")
-            : t("error_generic")}
+            : globalError === "single_repository"
+              ? t("single_repo_note")
+              : t("error_generic")}
         </div>
       )}
 
@@ -149,49 +216,26 @@ export default function NewRepositoryPage() {
       <div className="mt-6 rounded-lg border border-stone-200 bg-white p-6">
         <Form method="post">
           <input type="hidden" name="_action" value="create" />
-
-          {/* Identity area */}
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-stone-500">
-            {t("section_identity")}
-          </h2>
-
-          <div className="space-y-4">
-            <FieldInput
-              name="code"
-              label={t("field.code")}
-              required
-              error={errors?.code?.[0]}
-            />
-            <FieldInput
-              name="name"
-              label={t("field.name")}
-              required
-              error={errors?.name?.[0]}
-            />
-            <FieldInput
-              name="shortName"
-              label={t("field.shortName")}
-              error={errors?.shortName?.[0]}
-            />
-          </div>
+          {returnTo && <input type="hidden" name="returnTo" value={returnTo} />}
 
           {/* Contact area */}
-          <h2 className="mb-4 mt-6 text-sm font-semibold uppercase tracking-wider text-stone-500">
+          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-stone-500">
             {t("section_contact")}
           </h2>
 
           <div className="space-y-4">
-            <FieldInput
-              name="countryCode"
+            <RepoCountrySelect
+              identity={identity}
+              label={t("field.country")}
+              chooseLabel={t("country_choose")}
+              error={errors?.country?.[0]}
+            />
+            <RepoCountryCodeInput
+              identity={identity}
               label={t("field.countryCode")}
               required
-              defaultValue="COL"
               error={errors?.countryCode?.[0]}
-            />
-            <FieldInput
-              name="country"
-              label={t("field.country")}
-              error={errors?.country?.[0]}
+              help={t("country_code_help")}
             />
             <FieldInput
               name="city"
@@ -207,6 +251,40 @@ export default function NewRepositoryPage() {
               name="website"
               label={t("field.website")}
               error={errors?.website?.[0]}
+              help={t("website_help")}
+            />
+          </div>
+
+          {/* Identity area */}
+          <h2 className="mb-4 mt-6 text-sm font-semibold uppercase tracking-wider text-stone-500">
+            {t("section_identity")}
+          </h2>
+
+          <div className="space-y-4">
+            <RepoNameInput
+              identity={identity}
+              label={t("field.name")}
+              required
+              error={errors?.name?.[0]}
+            />
+            <RepoCodeInput
+              identity={identity}
+              label={t("field.code")}
+              required
+              error={errors?.code?.[0]}
+              help={t("code_help")}
+              suggestionLabel={
+                identity.suggestion
+                  ? t("code_suggested", { code: identity.suggestion })
+                  : null
+              }
+              useSuggestionLabel={t("code_use_suggestion")}
+            />
+            <FieldInput
+              name="shortName"
+              label={t("field.shortName")}
+              error={errors?.shortName?.[0]}
+              help={t("short_name_help")}
             />
           </div>
 
@@ -220,23 +298,31 @@ export default function NewRepositoryPage() {
               name="notes"
               label={t("field.notes")}
               error={errors?.notes?.[0]}
+              help={t("notes_help")}
             />
             <FieldTextarea
               name="rightsText"
               label={t("field.rightsText")}
               error={errors?.rightsText?.[0]}
+              help={t("rights_text_help")}
             />
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="enabled"
-                name="enabled"
-                defaultChecked
-                className="h-4 w-4 rounded border-stone-200 text-indigo focus:ring-indigo"
-              />
-              <label htmlFor="enabled" className="text-sm font-medium text-indigo">
-                {t("badge_enabled")}
-              </label>
+            <div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="enabled"
+                  name="enabled"
+                  defaultChecked
+                  aria-describedby="enabled-help"
+                  className="h-4 w-4 rounded border-stone-200 text-indigo focus:ring-indigo"
+                />
+                <label htmlFor="enabled" className="text-sm font-medium text-indigo">
+                  {t("badge_enabled")}
+                </label>
+              </div>
+              <p id="enabled-help" className="mt-1 text-xs text-stone-400">
+                {t("enabled_help")}
+              </p>
             </div>
           </div>
 
@@ -271,27 +357,36 @@ function FieldInput({
   required,
   defaultValue,
   error,
+  help,
 }: {
   name: string;
   label: string;
   required?: boolean;
   defaultValue?: string;
   error?: string;
+  help?: string;
 }) {
   const errorId = error ? `${name}-error` : undefined;
+  const helpId = help ? `${name}-help` : undefined;
+  const describedBy = [errorId, helpId].filter(Boolean).join(" ") || undefined;
   return (
     <div>
       <label htmlFor={name} className="mb-1 block text-xs font-medium text-indigo">
         {label}
         {required && <span className="text-madder"> *</span>}
       </label>
+      {help && (
+        <p id={helpId} className="mb-1 text-xs text-stone-400">
+          {help}
+        </p>
+      )}
       <input
         type="text"
         id={name}
         name={name}
         defaultValue={defaultValue}
         aria-required={required ? "true" : undefined}
-        aria-describedby={errorId}
+        aria-describedby={describedBy}
         className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
       />
       {error && (
@@ -307,22 +402,31 @@ function FieldTextarea({
   name,
   label,
   error,
+  help,
 }: {
   name: string;
   label: string;
   error?: string;
+  help?: string;
 }) {
   const errorId = error ? `${name}-error` : undefined;
+  const helpId = help ? `${name}-help` : undefined;
+  const describedBy = [errorId, helpId].filter(Boolean).join(" ") || undefined;
   return (
     <div>
       <label htmlFor={name} className="mb-1 block text-xs font-medium text-indigo">
         {label}
       </label>
+      {help && (
+        <p id={helpId} className="mb-1 text-xs text-stone-400">
+          {help}
+        </p>
+      )}
       <textarea
         id={name}
         name={name}
         rows={3}
-        aria-describedby={errorId}
+        aria-describedby={describedBy}
         className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-700 focus:border-indigo focus:outline-none focus:ring-1 focus:ring-indigo"
       />
       {error && (

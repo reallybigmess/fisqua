@@ -7,7 +7,7 @@
  * institutional anchors the description tree hangs off, so the
  * labels follow ISAAR(CPF)'s phrasing for archival institutions.
  *
- * @version v0.3.0
+ * @version v0.6.0
  */
 export default {
   title: "Repositorios",
@@ -53,6 +53,24 @@ export default {
   "field.name": "Nombre",
   "field.shortName": "Nombre corto",
   "field.countryCode": "Código de país",
+  country_choose: "Elegir un país",
+  country_code_help: "Se completa a partir del país (ISO alfa-3); edítalo si necesitas otro valor.",
+  code_help:
+    "Un identificador corto, único en este espacio de trabajo: etiqueta el repositorio en las listas y los selectores de registros, y acompaña cada registro exportado. Convención: prefijo del país más las iniciales de las palabras significativas del nombre, p. ej. co-ahrb.",
+  code_suggested: "Sugerencia: {{code}}",
+  code_use_suggestion: "Usar la sugerencia",
+  single_repo_note:
+    "Este espacio de trabajo usa un solo repositorio: ya está creado y todos los registros se archivan en él. Para trabajar con varios repositorios hace falta habilitar esa función en la plataforma.",
+  short_name_help:
+    "El nombre abreviado con que los selectores de registros y el sitio publicado etiquetan el repositorio; si falta, se usa el código y, en su defecto, el nombre completo.",
+  website_help: "Se muestra en la página del repositorio en el sitio publicado.",
+  notes_help: "Notas internas de este espacio de trabajo: nunca se publican ni se exportan.",
+  rights_text_help:
+    "La declaración de derechos de los registros digitalizados: se incluye en sus exportaciones METS (el formato estándar para empaquetar objetos digitales) y aparece en el sitio publicado como texto de reproducción de imágenes.",
+  enabled_help:
+    "Un repositorio deshabilitado desaparece de los selectores de registros, de las confirmaciones de importación y del índice publicado de repositorios; sus registros existentes se conservan.",
+  last_repository_note:
+    "El único repositorio del espacio de trabajo no se puede eliminar: en él se archivan los registros, incluidos los importados.",
   "field.country": "País",
   "field.city": "Ciudad",
   "field.address": "Dirección",
